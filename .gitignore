@@ -1,0 +1,28 @@
+# Node
+node_modules/
+*.tsbuildinfo
+npm-debug.log*
+
+# Environment & secrets — never commit provider keys
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Flutter (from Milestone 1)
+apps/mobile/.dart_tool/
+apps/mobile/build/
+apps/mobile/.flutter-plugins*
+
+# Next.js (from Milestone 1)
+apps/*/.next/
+apps/*/out/
+
+# Test / coverage output
+coverage/

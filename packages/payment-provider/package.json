@@ -1,0 +1,20 @@
+{
+  "name": "@vinkin/payment-provider",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Provider-neutral financial interface (Spec §43) + MockFinancialProvider (Milestone 0 spike)",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
