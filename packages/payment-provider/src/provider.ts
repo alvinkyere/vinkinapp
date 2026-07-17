@@ -12,6 +12,7 @@ import type {
   CustomerResult,
   IssueTemporaryCardInput,
   ParseWebhookInput,
+  ProviderCapabilities,
   ProviderCardTransaction,
   ProviderEvent,
   ProviderPaymentStatus,
@@ -39,6 +40,13 @@ import type {
  */
 export interface FinancialProvider {
   readonly providerName: string;
+
+  /**
+   * Honest declaration of what this provider supports. Application code must gate on these
+   * flags — a capability is never assumed because another provider has it. Verified per
+   * provider by the shared conformance suite in packages/payment-provider-contract-tests.
+   */
+  readonly capabilities: ProviderCapabilities;
 
   createCustomer(input: CreateCustomerInput): Promise<CustomerResult>;
   setupPaymentMethod(input: SetupPaymentMethodInput): Promise<SetupPaymentMethodResult>;

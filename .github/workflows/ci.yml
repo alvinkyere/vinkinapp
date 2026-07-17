@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  packages:
+    name: Package tests (zero-dependency, Node native TS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: payment-provider tests
+        working-directory: packages/payment-provider
+        run: npm test
+      - name: provider conformance suite (mock adapter)
+        working-directory: packages/payment-provider-contract-tests
+        run: npm test
+      - name: typecheck (installs TypeScript only)
+        run: |
+          npm install --no-save typescript@^5.8 @types/node@^24
+          ./node_modules/.bin/tsc --noEmit -p packages/payment-provider/tsconfig.json
+          ./node_modules/.bin/tsc --noEmit -p packages/payment-provider-contract-tests/tsconfig.json

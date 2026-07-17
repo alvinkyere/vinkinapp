@@ -58,6 +58,7 @@ describe('contribution lifecycle (§11)', () => {
       idempotencyKey: operationId.refund('refund-1'),
       providerPaymentId: auth.providerPaymentId,
       amount: usd(4_500),
+      reason: 'VINK_FAILED',
     });
     assert.equal(refund.status, 'REFUND_COMPLETED');
 
@@ -108,6 +109,7 @@ describe('contribution lifecycle (§11)', () => {
         idempotencyKey: operationId.refund('refund-too-big'),
         providerPaymentId: auth.providerPaymentId,
         amount: usd(5_001),
+        reason: 'VINK_FAILED',
       }),
       (error: ProviderError) => error.code === 'AMOUNT_EXCEEDS_AUTHORIZATION',
     );

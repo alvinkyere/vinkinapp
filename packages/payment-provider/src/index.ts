@@ -20,6 +20,7 @@ export type {
   IssueTemporaryCardInput,
   Money,
   ParseWebhookInput,
+  ProviderCapabilities,
   ProviderCardTransaction,
   ProviderEvent,
   ProviderEventType,

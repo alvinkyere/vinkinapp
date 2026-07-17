@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test *)",
+      "Read(//Users/alvinkyere870gmail.com/Downloads/**)"
+    ]
+  }
+}

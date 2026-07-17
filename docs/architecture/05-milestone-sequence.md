@@ -19,7 +19,7 @@ only the table/DDL timing.*
 
 | M | Scope anchor | Hard entry criteria | Exit criteria (beyond §9 DoD) |
 |---|---|---|---|
-| 0 | §39 M0, `docs/provider-integration/00` | business entity details for sandbox signups | feasibility doc §5 list; go/no-go + chosen stack |
+| 0 | §39 M0, `docs/provider-integration/00` | business entity details for sandbox signups | **the ten-condition gate in `06-milestone-0-gate.md`** — the sole authority on M0 closure |
 | 1 | monorepo, CI, docker, envs, logging, flags | M0 go | `pnpm turbo test` green in CI; docker-compose up = PG+Redis+api healthcheck; Flutter app boots to placeholder; deploy pipeline to staging |
 | 2 | auth, accounts, payment/recovery methods, KYC | provider chosen (KYC vendor rides on it) | §10.1 flow end-to-end on device incl. recovery-method setup; §3.1 states enforced |
 | 3 | Vink CRUD, categories→policies, splits, invitations, QR, session timing, realtime | M2 | four-person Vink visible live on two devices; split-version immutability tested (§15) |
@@ -52,9 +52,10 @@ Status of the two M0 workstreams:
 
 **Workstream B — product owner (only you can do these):**
 1. Create Stripe sandbox account (and Lithic sandbox — self-serve — for stack B comparison).
-2. Contact Stripe partnerships with the §2A program-design question (draft the email from
-   `00-provider-feasibility.md` §2A + §3; happy to draft it on request).
-3. Engage counsel with feasibility doc §3.
+2. Send the outreach package (`docs/feasibility/provider-overview.md`, `funds-flow.md`,
+   `provider-questionnaire.md`) to Stripe partnerships and Lithic; file written responses
+   under `docs/feasibility/responses/`.
+3. Engage counsel with `docs/feasibility/counsel-questionnaire.md`.
 4. `git init` + first commit (owner identity), install pnpm + Flutter SDK.
 
 M0 is **not exit-able** on engineering effort alone; its purpose is exactly the §4.14 "fail

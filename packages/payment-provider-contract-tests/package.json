@@ -1,0 +1,20 @@
+{
+  "name": "@vinkin/payment-provider-contract-tests",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared conformance suite every FinancialProvider adapter must pass (Mock, Stripe, Lithic, future)",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}

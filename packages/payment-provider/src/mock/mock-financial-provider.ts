@@ -16,6 +16,7 @@ import type {
   IssueTemporaryCardInput,
   Money,
   ParseWebhookInput,
+  ProviderCapabilities,
   ProviderCardTransaction,
   ProviderEvent,
   ProviderEventType,
@@ -90,8 +91,30 @@ export interface MerchantAuthorizationOutcome {
 export class MockFinancialProvider implements FinancialProvider {
   readonly providerName = 'mock';
 
+  /**
+   * Honest capability declaration (§21: never assume features are universal). The two
+   * `false` flags are deliberate so host code exercises the capability-gating paths:
+   * a second capture on the same payment is INVALID_STATE (multipleCapture: false), and
+   * nothing may rely on extended auth holds or provider-side merchant locks — merchant
+   * locking is VinkIn's own §17/§18 engine.
+   */
+  readonly capabilities: ProviderCapabilities = {
+    manualCapture: true,
+    partialCapture: true,
+    multipleCapture: false,
+    extendedAuthorization: false,
+    realTimeAuthorization: true,
+    merchantCategoryControls: true,
+    merchantSpecificControls: false,
+    virtualCardIssuing: true,
+    consumerCardholders: true,
+    offSessionRecovery: true,
+  };
+
   private readonly now: () => Date;
   private counter = 0;
+  private transientFailures = 0;
+  private lostResponses = 0;
 
   private readonly customers = new Map<string, CreateCustomerInput>();
   private readonly methods = new Map<string, { customerId: string; token: string }>();
@@ -130,9 +153,28 @@ export class MockFinancialProvider implements FinancialProvider {
       }
       return existing.result as T;
     }
+    if (this.transientFailures > 0) {
+      this.transientFailures -= 1;
+      throw new ProviderError('PROVIDER_UNAVAILABLE', 'simulated failure before execution');
+    }
     const result = execute();
     this.idempotency.set(key, { paramsHash, result });
+    if (this.lostResponses > 0) {
+      this.lostResponses -= 1;
+      // side effect happened, response lost in transit — the classic §12 retry scenario
+      throw new ProviderError('PROVIDER_UNAVAILABLE', 'simulated response loss after execution');
+    }
     return result;
+  }
+
+  /** Mock-only chaos: the next idempotent call fails BEFORE executing (clean transient). */
+  simulateTransientFailure(): void {
+    this.transientFailures += 1;
+  }
+
+  /** Mock-only chaos: the next idempotent call executes, then the response is lost (§12). */
+  simulateLostResponse(): void {
+    this.lostResponses += 1;
   }
 
   private emit(type: ProviderEventType, objectId: string, payload: Record<string, unknown>): void {
@@ -243,6 +285,19 @@ export class MockFinancialProvider implements FinancialProvider {
         amountMinor: payment.authorizedAmount?.amountMinor,
       });
     }
+  }
+
+  /** Mock-only: the authorization hold lapses before capture/cancel (§21 holds don't last). */
+  expireAuthorization(providerPaymentId: string): void {
+    const payment = this.getPayment(providerPaymentId);
+    if (payment.status !== 'AUTHORIZED') {
+      throw new ProviderError('INVALID_STATE', `payment ${providerPaymentId} is ${payment.status}`);
+    }
+    payment.status = 'EXPIRED';
+    payment.occurredAt = this.timestamp();
+    this.emit('payment.authorization.expired', providerPaymentId, {
+      amountMinor: payment.authorizedAmount?.amountMinor,
+    });
   }
 
   async captureContribution(input: CaptureContributionInput): Promise<CaptureResult> {
@@ -506,5 +561,14 @@ export class MockFinancialProvider implements FinancialProvider {
     const last = this.events[this.events.length - 1];
     if (!last) throw new ProviderError('INVALID_STATE', 'no event to duplicate');
     this.events.push({ ...last });
+  }
+
+  /** Mock-only: simulate out-of-order delivery by swapping the last two pending events (§28). */
+  swapLastTwoEvents(): void {
+    const length = this.events.length;
+    if (length < 2) throw new ProviderError('INVALID_STATE', 'need at least two pending events');
+    const last = this.events[length - 1]!;
+    this.events[length - 1] = this.events[length - 2]!;
+    this.events[length - 2] = last;
   }
 }

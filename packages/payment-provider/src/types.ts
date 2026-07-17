@@ -23,12 +23,34 @@ export function assertMoney(money: Money, label: string): void {
   }
 }
 
+/**
+ * What a provider can actually do. Adapters declare this honestly; the application must
+ * branch on these flags and may NEVER assume a capability merely because one provider
+ * supports it (§21 "do not assume those features are universally available").
+ * A false capability means the corresponding operation throws
+ * ProviderError('NOT_SUPPORTED') or the behavioral limit surfaces as INVALID_STATE —
+ * never a silent emulation (§9).
+ */
+export interface ProviderCapabilities {
+  manualCapture: boolean;
+  partialCapture: boolean;
+  multipleCapture: boolean;
+  extendedAuthorization: boolean;
+  realTimeAuthorization: boolean;
+  merchantCategoryControls: boolean;
+  merchantSpecificControls: boolean;
+  virtualCardIssuing: boolean;
+  consumerCardholders: boolean;
+  offSessionRecovery: boolean;
+}
+
 /** Provider-neutral payment (contribution) statuses — §11 attempt vocabulary, provider side. */
 export type ProviderPaymentStatusCode =
   | 'PROCESSING' // async confirmation pending (3DS / wallet handoff / provider delay)
   | 'AUTHORIZED' // funds held, capturable
   | 'CAPTURED' // funds captured (possibly partially; see capturedTotal)
   | 'CANCELED' // authorization released without capture
+  | 'EXPIRED' // authorization hold lapsed before capture/cancel (§21 warns holds don't last)
   | 'DECLINED' // definitive decline — a new attempt generation is required (§12)
   | 'REFUNDED'; // fully refunded after capture
 
@@ -166,6 +188,7 @@ export type ProviderEventType =
   | 'payment.authorized'
   | 'payment.captured'
   | 'payment.canceled'
+  | 'payment.authorization.expired'
   | 'payment.declined'
   | 'refund.completed'
   | 'card.authorization.request' // real-time approve/decline hook (§17)

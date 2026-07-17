@@ -10,7 +10,11 @@
       "Bash(cd \"/Users/alvinkyere870gmail.com/Downloads/Vinkin - v1\" && mkdir -p docs/architecture docs/payments docs/ledger docs/threat-model docs/provider-integration docs/incident-response docs/runbooks docs/spec packages/payment-provider/src/mock)",
       "Bash(node --test src/)",
       "Bash(node --test \"src/**/*.test.ts\")",
-      "Bash(npm test *)"
+      "Bash(npm test *)",
+      "Bash(sed -i '' 's/\"typescript\": \"\\\\^5.7.0\"/\"typescript\": \"^5.8.0\"/' packages/payment-provider/package.json packages/payment-provider-contract-tests/package.json)",
+      "Bash(sed -i '' 's/typescript@\\\\^5.7/typescript@^5.8/' .github/workflows/ci.yml)",
+      "Bash(npm install *)",
+      "Bash(./node_modules/.bin/tsc --version)"
     ],
     "additionalDirectories": [
       "/Users/alvinkyere870gmail.com/Downloads/Vinkin - v1/docs"
