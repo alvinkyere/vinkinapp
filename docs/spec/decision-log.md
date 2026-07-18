@@ -8,6 +8,30 @@ contract.
 
 ---
 
+## D14 — Validation-build guest token design (PV4 subset of G4)
+
+- **Decision:** guest join mints one opaque token (`vgt_` + 32 random bytes, base64url) per
+  join; only its SHA-256 hash is stored (`guest_identities.access_token_hash`, UNIQUE). One
+  guest identity binds to exactly one participant slot (partial UNIQUE index — G4's
+  "single-slot binding"). Expiry: 7 days from join (covers post-completion status screens).
+  The raw token appears exactly once, in the join response. Public surfaces
+  (`GET /join/:code`, guest join) are rate-limited per IP (in-memory fixed window;
+  Redis-backed when horizontal scale arrives).
+- **Date:** 2026-07-18
+- **Status:** PROPOSED (engineering default for the mock-money build; G4's production
+  questions — verification factor, SMS OTP amount threshold, production TTL — remain OPEN
+  and are re-decided before real money at M4)
+- **Reason:** Plan §21 mandates hashed guest tokens and rate-limited public joins; no real
+  money means no OTP requirement yet.
+- **Alternatives considered:** JWT guest tokens (rejected: revocation and single-slot
+  binding are simpler with a hashed opaque token); 15-minute TTL per G4's proposed default
+  (rejected for the validation build: guests must reopen their status screen across the
+  session's whole life).
+- **Affected modules:** `packages/application` (guest.ts), `apps/api` (guest-tokens,
+  sharing routes, migration 0003).
+- **Revisit trigger:** M4 entry (real-money guest checkout) or pilot feedback on token
+  lifetime.
+
 ## D13 — Command model: all business behavior is an explicit application command
 
 - **Decision:** no transport (HTTP handler, WebSocket, CLI, job) may mutate a domain

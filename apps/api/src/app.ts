@@ -12,11 +12,14 @@ import type { Sql } from './db/client.ts';
 import { registerHealthRoutes, type HealthChecks } from './modules/health/routes.ts';
 import { registerAuthRoutes } from './modules/auth/routes.ts';
 import { registerVinkRoutes } from './modules/vinks/routes.ts';
+import { registerSharingRoutes, type PublicRateLimits } from './modules/sharing/routes.ts';
 
 export interface AppDeps extends HealthChecks {
   env: Env;
   /** null only in unit tests — DB-backed routes are then not registered. */
   sql: Sql | null;
+  /** Test override for the public-surface rate limits. */
+  publicRateLimits?: PublicRateLimits;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -54,6 +57,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   if (deps.sql !== null) {
     registerAuthRoutes(app, deps.env, deps.sql);
     registerVinkRoutes(app, deps.env, deps.sql);
+    registerSharingRoutes(app, deps.env, deps.sql, deps.publicRateLimits);
   }
 
   return app;

@@ -7,6 +7,7 @@
 import type { Participant, Vink, VinkId } from '../../../domain/src/index.ts';
 import type {
   ActivityEntry,
+  GuestIdentityRecord,
   OutboxEventInput,
   UnitOfWork,
   VinkReader,
@@ -17,6 +18,7 @@ import type {
 export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
   readonly vinks = new Map<string, Vink>();
   readonly participants = new Map<string, Participant>();
+  readonly guests = new Map<string, GuestIdentityRecord>();
   readonly history: VinkStateHistoryRow[] = [];
   readonly outbox: OutboxEventInput[] = [];
 
@@ -30,6 +32,35 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
 
   async getVinkForUpdate(id: VinkId): Promise<Vink | null> {
     return this.vinks.get(id) ?? null;
+  }
+
+  async getVinkByPublicCodeForUpdate(publicCode: string): Promise<Vink | null> {
+    return this.getVinkByPublicCode(publicCode);
+  }
+
+  async getVinkByPublicCode(publicCode: string): Promise<Vink | null> {
+    for (const vink of this.vinks.values()) {
+      if (vink.publicCode === publicCode) return vink;
+    }
+    return null;
+  }
+
+  async insertGuestIdentity(guest: GuestIdentityRecord): Promise<void> {
+    this.guests.set(guest.id, guest);
+  }
+
+  async findGuestParticipant(
+    accessTokenHash: string,
+    now: Date,
+  ): Promise<{ participant: Participant; guest: GuestIdentityRecord } | null> {
+    for (const guest of this.guests.values()) {
+      if (guest.accessTokenHash !== accessTokenHash) continue;
+      if (new Date(guest.expiresAt).getTime() <= now.getTime()) return null;
+      for (const participant of this.participants.values()) {
+        if (participant.guestIdentityId === guest.id) return { participant, guest };
+      }
+    }
+    return null;
   }
 
   async getVink(id: VinkId): Promise<Vink | null> {

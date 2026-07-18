@@ -26,10 +26,13 @@ PV0 build governance:        COMPLETE  (work classification + provider-import CI
 PV1 platform foundation:     COMPLETE  (pnpm+turbo, apps/api, auth, compose, CI w/ PG+Redis)
 PV2 domain core:             COMPLETE  (packages/domain; D12 events; canonical states D11)
 PV3 organizer API:           COMPLETE pending CI re-run (2 first-CI defects root-caused,
-                                        fixed, 24/24 green vs real local PostgreSQL)
-Repo-wide:                   109 unit + 24 integration tests green; lint/format/guard green
-Next:                        PV4 (on hold until CI green) — guest join + sharing
-Owner actions:               git push (re-runs CI → closes PV3); install Docker Desktop
+                                        fixed, re-verified vs real local PostgreSQL)
+PV4 guest join + sharing:    COMPLETE  (share links, QR payload contract, public join,
+                                        hashed vgt_ guest tokens D14, rate limiting)
+Repo-wide:                   113 unit + 27 integration tests green; lint/format/guard green
+Next:                        PV5 — mock contribution flow (provider scenarios, resolver,
+                                        ledger postings)
+Owner actions:               git push (runs PV3+PV4 CI); install Docker Desktop
 ```
 
 ## Repository map

@@ -9,6 +9,8 @@ export type ApplicationErrorCode =
   | 'PARTICIPANT_NOT_FOUND'
   | 'FORBIDDEN' // actor is not the organizer of this vink
   | 'VINK_VERSION_CONFLICT' // optimistic concurrency (Plan §11) — HTTP 409
+  | 'VINK_NOT_JOINABLE' // guest join on a non-OPEN or past-deadline vink — HTTP 410
+  | 'GUEST_UNAUTHENTICATED' // invalid/expired guest token — HTTP 401
   | 'INVALID_COMMAND'; // command-level validation that is not a domain invariant
 
 export class ApplicationError extends Error {

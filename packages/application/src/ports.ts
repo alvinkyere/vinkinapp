@@ -5,7 +5,22 @@
  * ONE `UnitOfWork.run` call, which the adapter must make atomic (Plan §11/§12, D12).
  */
 
-import type { DomainEventName, Participant, Vink, VinkId } from '../../domain/src/index.ts';
+import type {
+  DomainEventName,
+  GuestIdentityId,
+  Participant,
+  Vink,
+  VinkId,
+} from '../../domain/src/index.ts';
+
+/** Guest identity record (identity boundary, Plan §6.1) — token stored hashed, never raw. */
+export interface GuestIdentityRecord {
+  id: GuestIdentityId;
+  displayName: string;
+  accessTokenHash: string;
+  expiresAt: string;
+  createdAt: string;
+}
 
 export interface VinkStateHistoryRow {
   vinkId: VinkId;
@@ -34,6 +49,9 @@ export interface VinkTx {
   insertVink(vink: Vink): Promise<void>;
   /** Row-locked read — the adapter must lock the vink row for the transaction's duration. */
   getVinkForUpdate(id: VinkId): Promise<Vink | null>;
+  /** Row-locked read by public code (guest join path). */
+  getVinkByPublicCodeForUpdate(publicCode: string): Promise<Vink | null>;
+  insertGuestIdentity(guest: GuestIdentityRecord): Promise<void>;
   /** Persist the full row; `vink.version` has already been incremented by the command. */
   updateVink(vink: Vink): Promise<void>;
   insertParticipant(participant: Participant): Promise<void>;
@@ -46,8 +64,14 @@ export interface VinkTx {
 /** Read-only operations (no locks). */
 export interface VinkReader {
   getVink(id: VinkId): Promise<Vink | null>;
+  getVinkByPublicCode(publicCode: string): Promise<Vink | null>;
   listParticipants(vinkId: VinkId): Promise<Participant[]>;
   listActivity(vinkId: VinkId): Promise<ActivityEntry[]>;
+  /** Resolves a guest access-token hash to its participant, or null (expired/unknown). */
+  findGuestParticipant(
+    accessTokenHash: string,
+    now: Date,
+  ): Promise<{ participant: Participant; guest: GuestIdentityRecord } | null>;
 }
 
 export interface UnitOfWork {
@@ -64,5 +88,12 @@ export interface CommandContext {
   /** Authenticated user executing the command. */
   actorUserId: string;
   /** Request/trace correlation id for history rows. */
+  correlationId: string;
+}
+
+/** Context for unauthenticated public commands (guest join) — no actor user exists. */
+export interface PublicCommandContext {
+  uow: UnitOfWork;
+  clock: Clock;
   correlationId: string;
 }

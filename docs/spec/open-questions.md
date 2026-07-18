@@ -17,7 +17,7 @@ built on a PROPOSED default if the answer could invalidate it.
 
 | ID | Question | Needed by | Proposed default | Status |
 |---|---|---|---|---|
-| G4 | Guest token security: TTL, binding, verification factor for §31 `verify` | M4 | signed opaque token, 15-min TTL, single-slot binding; SMS OTP above amount threshold | OPEN |
+| G4 | Guest token security: TTL, binding, verification factor for §31 `verify` | M4 | signed opaque token, 15-min TTL, single-slot binding; SMS OTP above amount threshold | OPEN — validation-build subset implemented as D14 (hashed opaque token, single-slot, 7-day TTL, no OTP); production questions unresolved |
 | G5 | Auth: in-house OTP vs. delegated identity | M2 | in-house phone OTP + short-lived JWT / rotating refresh | OPEN |
 | G6 | Realtime transport | M3 | SSE for guest web, WebSocket for Flutter, one outbox-fed stream | OPEN |
 | G7 | Split rounding rule | M3 | largest-remainder; organizer absorbs residual; property-tested | OPEN |

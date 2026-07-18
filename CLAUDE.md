@@ -39,18 +39,22 @@ command; transports never mutate aggregates). Authoritative architecture diagram
 repo-wide; lint/format/typecheck/guard green (`pnpm lint / format:check / typecheck / test`).
 
 **PV3 done pending CI confirmation** (`milestone-reports/PV3.md`): command layer (D13),
-migration 0002, eleven organizer endpoints. First CI run found two integration defects —
-auth reuse-revocation rolled back by throwing inside `sql.begin`; outbox payload stored as
-a jsonb string scalar breaking the activity `||` merge — both root-caused, fixed, and
-re-verified **24/24 against real local PostgreSQL** (throwaway brew postgresql@16 on
-:55432; see report). Also landed: per-suite schema isolation for integration tests,
-advisory-locked single-transaction migration runner, `seq` tiebreak for deterministic
-activity ordering, `jsonb_typeof` CHECK on outbox payloads, concurrent-open and
-atomic-rollback closure tests. Owner push re-runs CI for formal closure. **PV4 on hold**
-until then (owner instruction).
+migration 0002, eleven organizer endpoints. Two first-CI defects (auth reuse-revocation
+rolled back by throwing inside `sql.begin`; outbox payload stored as jsonb string scalar)
+root-caused and fixed; plus per-suite schema test isolation, advisory-locked migrations,
+deterministic activity ordering, concurrent-open + atomic-rollback closure tests.
 
-Machine notes: pnpm 11 + PostgreSQL 16 binaries now installed (no Docker yet — compose
-still needs Docker Desktop). Sandbox S1–S12 blocked on provider keys, unchanged.
+**PV4 done** (`milestone-reports/PV4.md`, owner-directed): guest join & sharing — share
+links + `vinkin.join.v1` QR payload contract, anonymous `GET /join/:code`, guest join with
+hashed `vgt_` tokens (D14 PROPOSED — validation subset of G4), guest session view,
+per-IP rate limiting on the public surface, migration 0003 (single-slot binding UNIQUE).
+**113 unit + 27 integration tests green** (integration vs real local PostgreSQL 16,
+throwaway instance on :55432 — see PV3 report for setup). Owner push runs PV3+PV4 CI.
+
+Next: **PV5 — mock contribution flow** (provider scenarios via the neutral interface,
+resolution/grace jobs, D5 funding resolver, ledger postings). Machine notes: pnpm 11 +
+PostgreSQL 16 binaries installed; still no Docker (compose + Redis-backed job tests need
+Docker Desktop). Sandbox S1–S12 blocked on provider keys, unchanged.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

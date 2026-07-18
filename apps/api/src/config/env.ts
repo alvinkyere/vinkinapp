@@ -26,6 +26,8 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32).default(DEV_JWT_SECRET),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   VINKIN_OTEL_ENABLED: z.enum(['0', '1']).default('0'),
+  /** Base for share links / QR payloads (guest web origin once PV10 exists). */
+  VINKIN_PUBLIC_BASE_URL: z.url().default('http://localhost:3000'),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -7,6 +7,7 @@
 import type postgres from 'postgres';
 import type {
   ActivityEntry,
+  GuestIdentityRecord,
   OutboxEventInput,
   UnitOfWork,
   VinkReader,
@@ -105,6 +106,18 @@ class PostgresVinkTx implements VinkTx {
     return rows.length === 0 ? null : rowToVink(rows[0] as Row);
   }
 
+  async getVinkByPublicCodeForUpdate(publicCode: string): Promise<Vink | null> {
+    const rows = await this.#sql`SELECT * FROM vinks WHERE public_code = ${publicCode} FOR UPDATE`;
+    return rows.length === 0 ? null : rowToVink(rows[0] as Row);
+  }
+
+  async insertGuestIdentity(guest: GuestIdentityRecord): Promise<void> {
+    await this
+      .#sql`INSERT INTO guest_identities (id, display_name, access_token_hash, expires_at, created_at)
+      VALUES (${guest.id}, ${guest.displayName}, ${guest.accessTokenHash}, ${guest.expiresAt},
+              ${guest.createdAt})`;
+  }
+
   async updateVink(vink: Vink): Promise<void> {
     await this.#sql`UPDATE vinks SET
       subtotal_amount_minor = ${vink.subtotalAmount.amountMinor},
@@ -181,6 +194,36 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
   async getVink(id: VinkId): Promise<Vink | null> {
     const rows = await this.#sql`SELECT * FROM vinks WHERE id = ${id}`;
     return rows.length === 0 ? null : rowToVink(rows[0] as Row);
+  }
+
+  async getVinkByPublicCode(publicCode: string): Promise<Vink | null> {
+    const rows = await this.#sql`SELECT * FROM vinks WHERE public_code = ${publicCode}`;
+    return rows.length === 0 ? null : rowToVink(rows[0] as Row);
+  }
+
+  async findGuestParticipant(
+    accessTokenHash: string,
+    now: Date,
+  ): Promise<{ participant: Participant; guest: GuestIdentityRecord } | null> {
+    const rows = await this.#sql`
+      SELECT p.*, g.id AS g_id, g.display_name AS g_display_name,
+             g.access_token_hash AS g_hash, g.expires_at AS g_expires_at,
+             g.created_at AS g_created_at
+      FROM guest_identities g
+      JOIN participants p ON p.guest_identity_id = g.id
+      WHERE g.access_token_hash = ${accessTokenHash} AND g.expires_at > ${now.toISOString()}`;
+    const row = rows[0] as Row | undefined;
+    if (row === undefined) return null;
+    return {
+      participant: rowToParticipant(row),
+      guest: {
+        id: row.g_id as GuestIdentityRecord['id'],
+        displayName: row.g_display_name as string,
+        accessTokenHash: row.g_hash as string,
+        expiresAt: toIso(row.g_expires_at),
+        createdAt: toIso(row.g_created_at),
+      },
+    };
   }
 
   async listParticipants(vinkId: VinkId): Promise<Participant[]> {
