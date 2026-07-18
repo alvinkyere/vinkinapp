@@ -44,17 +44,24 @@ rolled back by throwing inside `sql.begin`; outbox payload stored as jsonb strin
 root-caused and fixed; plus per-suite schema test isolation, advisory-locked migrations,
 deterministic activity ordering, concurrent-open + atomic-rollback closure tests.
 
-**PV4 done** (`milestone-reports/PV4.md`, owner-directed): guest join & sharing — share
-links + `vinkin.join.v1` QR payload contract, anonymous `GET /join/:code`, guest join with
-hashed `vgt_` tokens (D14 PROPOSED — validation subset of G4), guest session view,
-per-IP rate limiting on the public surface, migration 0003 (single-slot binding UNIQUE).
-**113 unit + 27 integration tests green** (integration vs real local PostgreSQL 16,
-throwaway instance on :55432 — see PV3 report for setup). Owner push runs PV3+PV4 CI.
+**PV4 done** (`milestone-reports/PV4.md`): guest join & sharing — QR payload contract,
+public join, hashed `vgt_` tokens (D14), rate limiting, migration 0003.
 
-Next: **PV5 — mock contribution flow** (provider scenarios via the neutral interface,
-resolution/grace jobs, D5 funding resolver, ledger postings). Machine notes: pnpm 11 +
-PostgreSQL 16 binaries installed; still no Docker (compose + Redis-backed job tests need
-Docker Desktop). Sandbox S1–S12 blocked on provider keys, unchanged.
+**PV5 done** (`milestone-reports/PV5.md`): mock contribution flow — `packages/ledger`
+(§18 postings, zero-dep), migration 0004 (contributions + ledger with **DB-enforced
+append-only + balanced-at-commit triggers**, one-live-contribution partial UNIQUE),
+contribution engine in `packages/application` (authorize with scenarios via mock method
+tokens, **D5 single resolver** for FUNDED/EXPIRED, deadline sweeps with PG-owned truth,
+E5 lost-response replay by idempotency key), user+guest authorize routes, allowlisted
+simulator endpoints, BullMQ sweep scheduler in the API process (mock is in-memory).
+Flagged: provider calls run inside the DB txn — mock-only pattern; real adapters need
+outbox-driven orchestration. **125 unit + 33 integration tests green** (real local PG 16
+on :55432). Owner push runs PV3+PV4+PV5 through CI.
+
+Next: **PV6 — mock card + purchase flow** (issuance from FUNDED, spending limit = funded,
+first-merchant lock, merchant auth/capture/settlement via mock simulator surface).
+Machine notes: pnpm 11 + PostgreSQL 16 binaries installed; still no Docker (compose +
+Redis-backed job paths need Docker Desktop). Sandbox S1–S12 blocked on provider keys.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

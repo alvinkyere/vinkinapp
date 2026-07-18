@@ -1,0 +1,20 @@
+{
+  "name": "@vinkin/ledger",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Pure double-entry posting rules (Plan §18; D2 ledger-core). Zero dependencies; persistence and triggers live in the API's migrations.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

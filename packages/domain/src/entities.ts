@@ -71,6 +71,8 @@ export interface Contribution {
   id: ContributionId;
   vinkId: VinkId;
   participantId: ParticipantId;
+  /** Plan §11: a retry after a definitive decline is a NEW contribution, next attempt. */
+  attemptNumber: number;
   requestedAmount: Money;
   authorizedAmount: Money | null;
   capturedAmount: Money | null;

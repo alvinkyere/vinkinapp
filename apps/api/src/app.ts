@@ -13,11 +13,15 @@ import { registerHealthRoutes, type HealthChecks } from './modules/health/routes
 import { registerAuthRoutes } from './modules/auth/routes.ts';
 import { registerVinkRoutes } from './modules/vinks/routes.ts';
 import { registerSharingRoutes, type PublicRateLimits } from './modules/sharing/routes.ts';
+import { registerContributionRoutes } from './modules/contributions/routes.ts';
+import type { FinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 
 export interface AppDeps extends HealthChecks {
   env: Env;
   /** null only in unit tests — DB-backed routes are then not registered. */
   sql: Sql | null;
+  /** Financial provider behind the neutral interface; contribution routes need it. */
+  provider?: FinancialProvider;
   /** Test override for the public-surface rate limits. */
   publicRateLimits?: PublicRateLimits;
 }
@@ -58,6 +62,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerAuthRoutes(app, deps.env, deps.sql);
     registerVinkRoutes(app, deps.env, deps.sql);
     registerSharingRoutes(app, deps.env, deps.sql, deps.publicRateLimits);
+    if (deps.provider !== undefined) {
+      registerContributionRoutes(app, deps.env, deps.sql, deps.provider);
+    }
   }
 
   return app;

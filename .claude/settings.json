@@ -41,7 +41,8 @@
       "Bash(/opt/homebrew/opt/postgresql@16/bin/psql -h localhost -p 55432 -U vinkin -d vinkin -tA -c 'SELECT aggregate_id FROM outbox_events LIMIT 1;')",
       "Bash(/opt/homebrew/opt/postgresql@16/bin/psql -h localhost -p 55432 -U vinkin -d vinkin -c 'SELECT '\\\\''event'\\\\'' AS kind, occurred_at AS at, jsonb_build_object\\('\\\\''eventType'\\\\'', event_type\\) || payload AS detail FROM outbox_events WHERE aggregate_type = '\\\\''vink'\\\\'' AND aggregate_id = '\\\\''__CMDSUB_OUTPUT__'\\\\'' LIMIT 3;')",
       "Bash(/opt/homebrew/opt/postgresql@16/bin/dropdb -h localhost -p 55432 -U vinkin vinkin)",
-      "Bash(/opt/homebrew/opt/postgresql@16/bin/createdb -h localhost -p 55432 -U vinkin vinkin)"
+      "Bash(/opt/homebrew/opt/postgresql@16/bin/createdb -h localhost -p 55432 -U vinkin vinkin)",
+      "Bash(./node_modules/.bin/eslint packages/application/src/contributions.ts --fix)"
     ]
   }
 }

@@ -27,12 +27,13 @@ PV1 platform foundation:     COMPLETE  (pnpm+turbo, apps/api, auth, compose, CI 
 PV2 domain core:             COMPLETE  (packages/domain; D12 events; canonical states D11)
 PV3 organizer API:           COMPLETE pending CI re-run (2 first-CI defects root-caused,
                                         fixed, re-verified vs real local PostgreSQL)
-PV4 guest join + sharing:    COMPLETE  (share links, QR payload contract, public join,
-                                        hashed vgt_ guest tokens D14, rate limiting)
-Repo-wide:                   113 unit + 27 integration tests green; lint/format/guard green
-Next:                        PV5 — mock contribution flow (provider scenarios, resolver,
-                                        ledger postings)
-Owner actions:               git push (runs PV3+PV4 CI); install Docker Desktop
+PV4 guest join + sharing:    COMPLETE  (QR payload contract, public join, vgt_ tokens D14)
+PV5 mock contribution flow:  COMPLETE  (D5 funding resolver, deadline sweeps, ledger with
+                                        DB-enforced balance/append-only, exit gate proven)
+Repo-wide:                   125 unit + 33 integration tests green; lint/format/guard green
+Next:                        PV6 — mock card + purchase flow (issuance, merchant lock,
+                                        settlement)
+Owner actions:               git push (runs PV3–PV5 CI); install Docker Desktop
 ```
 
 ## Repository map
@@ -76,8 +77,9 @@ apps/
 packages/
 ├── domain/                               # PV2 domain core: money, state machines (canonical
 │                                         #   vocabulary, D11; transitions emit events, D12)
-├── application/                          # PV3 command layer (D13): commands/queries over
-│                                         #   ports; single state-write path; in-memory store
+├── application/                          # PV3+ command layer (D13): vink/guest/contribution
+│                                         #   commands over ports; D5 funding resolver
+├── ledger/                               # PV5 double-entry posting rules (Plan §18)
 ├── payment-provider/                     # Spec §43 interface + ProviderCapabilities + Mock
 └── payment-provider-contract-tests/      # conformance suite every adapter must pass
 

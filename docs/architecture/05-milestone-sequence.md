@@ -19,7 +19,8 @@ M0–M10 sequence below is unchanged and resumes for provider integration when t
 | PV2 | domain core: entities, money, state machines, split + policy engines | **DONE**; identity migration landed with PV1; vink-domain migration landed with PV3 |
 | PV3 | application command layer (D13) + organizer vink API | **DONE pending CI confirmation** — first CI run surfaced two integration defects (auth reuse-revocation rollback; outbox jsonb string scalar), both root-caused, fixed and re-verified 24/24 against real local PostgreSQL (report §"Post-CI defect resolution"); owner push re-runs CI |
 | PV4 | guest join + sharing (share links, QR payload contract, public join, guest tokens, rate limiting) | **DONE** (report: `milestone-reports/PV4.md`) — E9 joinable half green vs real PG; D14 token design PROPOSED |
-| PV5–PV12 | see master plan §24 | PV5 next: mock contribution flow (provider scenarios, resolution jobs, funding resolver, ledger postings) |
+| PV5 | mock contribution flow: authorize/decline/timeout scenarios, D5 funding resolver, deadline sweeps, ledger postings with DB-enforced invariants | **DONE** (report: `milestone-reports/PV5.md`) — exit gate (no overfund/double-count under concurrency) proven vs real PG |
+| PV6–PV12 | see master plan §24 | PV6 next: mock card + purchase flow (issuance from FUNDED, first-merchant lock, settlement) |
 
 ## 1. Sequence and dependencies
 

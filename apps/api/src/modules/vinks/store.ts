@@ -7,7 +7,9 @@
 import type postgres from 'postgres';
 import type {
   ActivityEntry,
+  ContributionStatusHistoryRow,
   GuestIdentityRecord,
+  LedgerPostingInput,
   OutboxEventInput,
   UnitOfWork,
   VinkReader,
@@ -15,11 +17,13 @@ import type {
   VinkTx,
 } from '../../../../../packages/application/src/index.ts';
 import type {
+  Contribution,
   CurrencyCode,
   Participant,
   Vink,
   VinkId,
 } from '../../../../../packages/domain/src/index.ts';
+import { assertBalanced } from '../../../../../packages/ledger/src/index.ts';
 import type { Sql } from '../../db/client.ts';
 
 type Row = Record<string, unknown>;
@@ -74,6 +78,29 @@ function rowToParticipant(row: Row): Participant {
       currency,
     },
     joinedAt: toIso(row.joined_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+function rowToContribution(row: Row): Contribution {
+  const currency: CurrencyCode = 'USD';
+  const optional = (value: unknown, column: string) =>
+    value === null || value === undefined
+      ? null
+      : { amountMinor: asMinor(value, column), currency };
+  return {
+    id: row.id as Contribution['id'],
+    vinkId: row.vink_id as VinkId,
+    participantId: row.participant_id as Contribution['participantId'],
+    attemptNumber: asMinor(row.attempt_number, 'attempt_number'),
+    requestedAmount: { amountMinor: asMinor(row.requested_amount_minor, 'requested'), currency },
+    authorizedAmount: optional(row.authorized_amount_minor, 'authorized'),
+    capturedAmount: optional(row.captured_amount_minor, 'captured'),
+    refundedAmount: optional(row.refunded_amount_minor, 'refunded'),
+    status: row.status as Contribution['status'],
+    providerReference: (row.provider_reference ?? null) as string | null,
+    idempotencyKey: row.idempotency_key as string,
+    createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
 }
@@ -168,6 +195,59 @@ class PostgresVinkTx implements VinkTx {
       (vink_id, from_state, event, to_state, actor, correlation_id)
       VALUES (${row.vinkId}, ${row.fromState}, ${row.event}, ${row.toState}, ${row.actor},
               ${row.correlationId})`;
+  }
+
+  async insertContribution(contribution: Contribution): Promise<void> {
+    await this.#sql`INSERT INTO contributions (
+      id, vink_id, participant_id, attempt_number, requested_amount_minor,
+      authorized_amount_minor, captured_amount_minor, refunded_amount_minor,
+      status, provider_reference, idempotency_key, created_at, updated_at
+    ) VALUES (
+      ${contribution.id}, ${contribution.vinkId}, ${contribution.participantId},
+      ${contribution.attemptNumber}, ${contribution.requestedAmount.amountMinor},
+      ${contribution.authorizedAmount?.amountMinor ?? null},
+      ${contribution.capturedAmount?.amountMinor ?? null},
+      ${contribution.refundedAmount?.amountMinor ?? null},
+      ${contribution.status}, ${contribution.providerReference}, ${contribution.idempotencyKey},
+      ${contribution.createdAt}, ${contribution.updatedAt}
+    )`;
+  }
+
+  async listContributionsForUpdate(vinkId: VinkId): Promise<Contribution[]> {
+    const rows = await this.#sql`SELECT * FROM contributions
+      WHERE vink_id = ${vinkId} ORDER BY created_at, id FOR UPDATE`;
+    return rows.map((row) => rowToContribution(row as Row));
+  }
+
+  async updateContribution(contribution: Contribution): Promise<void> {
+    await this.#sql`UPDATE contributions SET
+      authorized_amount_minor = ${contribution.authorizedAmount?.amountMinor ?? null},
+      captured_amount_minor = ${contribution.capturedAmount?.amountMinor ?? null},
+      refunded_amount_minor = ${contribution.refundedAmount?.amountMinor ?? null},
+      status = ${contribution.status},
+      provider_reference = ${contribution.providerReference},
+      updated_at = ${contribution.updatedAt}
+    WHERE id = ${contribution.id}`;
+  }
+
+  async appendContributionHistory(row: ContributionStatusHistoryRow): Promise<void> {
+    await this.#sql`INSERT INTO contribution_status_history
+      (contribution_id, from_status, event, to_status, actor, correlation_id)
+      VALUES (${row.contributionId}, ${row.fromStatus}, ${row.event}, ${row.toStatus},
+              ${row.actor}, ${row.correlationId})`;
+  }
+
+  async insertLedgerPosting(posting: LedgerPostingInput): Promise<void> {
+    assertBalanced(posting.entries); // application-side check; the deferred trigger is final
+    const inserted = await this.#sql`INSERT INTO ledger_transactions (reference_type, reference_id)
+      VALUES (${posting.referenceType}, ${posting.referenceId}) RETURNING id`;
+    const transactionId = (inserted[0] as { id: string }).id;
+    for (const entry of posting.entries) {
+      await this.#sql`INSERT INTO ledger_entries
+        (transaction_id, account_id, direction, amount_minor, entry_type)
+        SELECT ${transactionId}, id, ${entry.direction}, ${entry.amountMinor}, ${entry.entryType}
+        FROM ledger_accounts WHERE code = ${entry.account}`;
+    }
   }
 
   async insertOutbox(event: OutboxEventInput): Promise<void> {

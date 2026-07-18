@@ -8,6 +8,8 @@ export * from './ports.ts';
 export * from './commands.ts';
 export * from './queries.ts';
 export * from './guest.ts';
+export * from './contributions.ts';
 export * from './support/transition.ts';
+export * from './support/contribution-transition.ts';
 export * from './support/public-code.ts';
 export { InMemoryVinkStore } from './testing/in-memory.ts';

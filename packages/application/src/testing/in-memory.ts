@@ -4,10 +4,13 @@
  * PostgreSQL adapter is exercised by the API integration suite.
  */
 
-import type { Participant, Vink, VinkId } from '../../../domain/src/index.ts';
+import type { Contribution, Participant, Vink, VinkId } from '../../../domain/src/index.ts';
+import { assertBalanced } from '../../../ledger/src/index.ts';
 import type {
   ActivityEntry,
+  ContributionStatusHistoryRow,
   GuestIdentityRecord,
+  LedgerPostingInput,
   OutboxEventInput,
   UnitOfWork,
   VinkReader,
@@ -19,6 +22,9 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
   readonly vinks = new Map<string, Vink>();
   readonly participants = new Map<string, Participant>();
   readonly guests = new Map<string, GuestIdentityRecord>();
+  readonly contributions = new Map<string, Contribution>();
+  readonly contributionHistory: ContributionStatusHistoryRow[] = [];
+  readonly ledgerPostings: LedgerPostingInput[] = [];
   readonly history: VinkStateHistoryRow[] = [];
   readonly outbox: OutboxEventInput[] = [];
 
@@ -89,6 +95,37 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
 
   async insertOutbox(event: OutboxEventInput): Promise<void> {
     this.outbox.push(event);
+  }
+
+  async insertContribution(contribution: Contribution): Promise<void> {
+    // Mimic the partial unique index: one live contribution per participant.
+    for (const existing of this.contributions.values()) {
+      if (
+        existing.participantId === contribution.participantId &&
+        existing.status !== 'DECLINED' &&
+        existing.status !== 'CANCELLED'
+      ) {
+        throw new Error('unique violation: one live contribution per participant');
+      }
+    }
+    this.contributions.set(contribution.id, contribution);
+  }
+
+  async listContributionsForUpdate(vinkId: VinkId): Promise<Contribution[]> {
+    return [...this.contributions.values()].filter((row) => row.vinkId === vinkId);
+  }
+
+  async updateContribution(contribution: Contribution): Promise<void> {
+    this.contributions.set(contribution.id, contribution);
+  }
+
+  async appendContributionHistory(row: ContributionStatusHistoryRow): Promise<void> {
+    this.contributionHistory.push(row);
+  }
+
+  async insertLedgerPosting(posting: LedgerPostingInput): Promise<void> {
+    assertBalanced(posting.entries); // mirrors the DB constraint trigger
+    this.ledgerPostings.push(posting);
   }
 
   async listActivity(vinkId: VinkId): Promise<ActivityEntry[]> {

@@ -22,7 +22,7 @@ import {
   type VinkId,
 } from '../../domain/src/index.ts';
 import { ApplicationError } from './errors.ts';
-import type { CommandContext } from './ports.ts';
+import type { CommandContext, VinkTx } from './ports.ts';
 import { applyVinkTransition } from './support/transition.ts';
 import { loadOwnedVink } from './support/guards.ts';
 import { newPublicCode } from './support/public-code.ts';
@@ -37,6 +37,25 @@ export interface VinkWithParticipants {
 
 function activeParticipants(participants: Participant[]): Participant[] {
   return participants.filter((participant) => participant.status !== 'REMOVED');
+}
+
+/**
+ * Allocation-shape changes are locked once any live contribution exists — an authorized
+ * amount must keep matching its allocation or the funding resolver could never conclude
+ * (§15 split-immutability spirit; participant-exit flows arrive with PV7 recovery work).
+ */
+async function assertNoLiveContributions(
+  tx: VinkTx,
+  vinkId: VinkId,
+  action: string,
+): Promise<void> {
+  const contributions = await tx.listContributionsForUpdate(vinkId);
+  if (contributions.some((row) => row.status !== 'DECLINED' && row.status !== 'CANCELLED')) {
+    throw new ApplicationError(
+      'INVALID_COMMAND',
+      `${action} is locked once contributions have started`,
+    );
+  }
 }
 
 export function unallocatedAmount(vink: Vink, participants: Participant[]): Money {
@@ -254,6 +273,7 @@ export async function removeParticipantCommand(
         `participants cannot be removed in ${vink.state}`,
       );
     }
+    await assertNoLiveContributions(tx, vink.id, 'participant removal');
     const participants = await tx.listParticipants(vink.id);
     const participant = participants.find((row) => row.id === input.participantId);
     if (participant === undefined || participant.status === 'REMOVED') {
@@ -311,6 +331,7 @@ export async function setSplitCommand(
     if (vink.state !== 'DRAFT' && vink.state !== 'OPEN') {
       throw new ApplicationError('INVALID_COMMAND', `the split cannot be changed in ${vink.state}`);
     }
+    await assertNoLiveContributions(tx, vink.id, 'the split');
     const participants = await tx.listParticipants(vink.id);
     // Stable join order makes the EQUAL remainder deterministic (Plan §15).
     const active = activeParticipants(participants).sort((a, b) =>
@@ -467,6 +488,7 @@ export async function coverRemainingCommand(
         `cover-remaining is not available in ${vink.state}`,
       );
     }
+    await assertNoLiveContributions(tx, vink.id, 'cover-remaining');
     const participants = await tx.listParticipants(vink.id);
     const active = activeParticipants(participants);
     const remaining = unallocatedAmount(vink, active);

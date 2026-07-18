@@ -6,12 +6,15 @@
  */
 
 import type {
+  Contribution,
+  ContributionId,
   DomainEventName,
   GuestIdentityId,
   Participant,
   Vink,
   VinkId,
 } from '../../domain/src/index.ts';
+import type { LedgerEntryInput } from '../../ledger/src/index.ts';
 
 /** Guest identity record (identity boundary, Plan §6.1) — token stored hashed, never raw. */
 export interface GuestIdentityRecord {
@@ -29,6 +32,21 @@ export interface VinkStateHistoryRow {
   toState: string;
   actor: string;
   correlationId: string;
+}
+
+export interface ContributionStatusHistoryRow {
+  contributionId: ContributionId;
+  fromStatus: string;
+  event: string;
+  toStatus: string;
+  actor: string;
+  correlationId: string;
+}
+
+export interface LedgerPostingInput {
+  referenceType: 'contribution' | 'vink' | 'settlement';
+  referenceId: string;
+  entries: LedgerEntryInput[];
 }
 
 export interface OutboxEventInput {
@@ -59,6 +77,14 @@ export interface VinkTx {
   updateParticipant(participant: Participant): Promise<void>;
   appendHistory(row: VinkStateHistoryRow): Promise<void>;
   insertOutbox(event: OutboxEventInput): Promise<void>;
+  /** Must reject (unique violation) when the participant already has a live contribution. */
+  insertContribution(contribution: Contribution): Promise<void>;
+  /** All contributions of the vink, row-locked for the transaction (Plan §11). */
+  listContributionsForUpdate(vinkId: VinkId): Promise<Contribution[]>;
+  updateContribution(contribution: Contribution): Promise<void>;
+  appendContributionHistory(row: ContributionStatusHistoryRow): Promise<void>;
+  /** Balanced double-entry posting — the adapter's DB constraints are the final guard. */
+  insertLedgerPosting(posting: LedgerPostingInput): Promise<void>;
 }
 
 /** Read-only operations (no locks). */
