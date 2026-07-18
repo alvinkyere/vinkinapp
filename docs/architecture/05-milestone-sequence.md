@@ -17,7 +17,7 @@ M0–M10 sequence below is unchanged and resumes for provider integration when t
 | PV0 | build governance, work classification, provider-import CI guard | **DONE** (report: `milestone-reports/PV0-PV2.md`) |
 | PV1 | monorepo wiring, API app, PG/Redis/BullMQ, docker-compose, auth, CI | **DONE** (owner-approved 2026-07-17; report: `milestone-reports/PV1.md`) — full local stack bring-up needs Docker Desktop installed |
 | PV2 | domain core: entities, money, state machines, split + policy engines | **DONE**; identity migration landed with PV1; vink-domain migration landed with PV3 |
-| PV3 | application command layer (D13) + organizer vink API | **DONE** (report: `milestone-reports/PV3.md`) — exit-gate integration suite runs in CI (locally blocked on Docker install) |
+| PV3 | application command layer (D13) + organizer vink API | **DONE pending CI confirmation** — first CI run surfaced two integration defects (auth reuse-revocation rollback; outbox jsonb string scalar), both root-caused, fixed and re-verified 24/24 against real local PostgreSQL (report §"Post-CI defect resolution"); owner push re-runs CI |
 | PV4–PV12 | see master plan §24 | PV4 next: guest join + sharing (public codes, QR payload, rate limiting) |
 
 ## 1. Sequence and dependencies

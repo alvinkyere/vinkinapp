@@ -25,7 +25,23 @@
       "Bash(pnpm typecheck *)",
       "Bash(pnpm test *)",
       "Bash(echo \"exit: $?\")",
-      "Bash(grep -cE \"ms$\")"
+      "Bash(grep -cE \"ms$\")",
+      "Bash(brew list *)",
+      "Read(//opt/homebrew/opt/**)",
+      "Bash(brew install *)",
+      "Bash(npm cache *)",
+      "Bash(rm -rf ~/.cache/uv ~/Library/Caches/pip)",
+      "Bash(brew cleanup *)",
+      "Read(//opt/homebrew/opt/postgresql@16/**)",
+      "Bash(/opt/homebrew/opt/postgresql@16/bin/initdb -D /private/tmp/claude-501/-Users-alvinkyere870gmail-com-code-vinkin/3b31df00-b142-41f6-ae25-eaeb9e0ac87e/scratchpad/pg/data -U vinkin --auth=trust -E UTF8)",
+      "Bash(/opt/homebrew/opt/postgresql@16/bin/pg_ctl -D /private/tmp/claude-501/-Users-alvinkyere870gmail-com-code-vinkin/3b31df00-b142-41f6-ae25-eaeb9e0ac87e/scratchpad/pg/data -l /private/tmp/claude-501/-Users-alvinkyere870gmail-com-code-vinkin/3b31df00-b142-41f6-ae25-eaeb9e0ac87e/scratchpad/pg/log -o '-p 55432 -c unix_socket_directories='\\\\'''\\\\''' start)",
+      "Bash(VINKIN_ENV=test VINKIN_INTEGRATION=1 DATABASE_URL=postgres://vinkin@localhost:55432/vinkin LOG_LEVEL=error node src/db/migrate.ts)",
+      "Bash(VINKIN_ENV=test VINKIN_INTEGRATION=1 DATABASE_URL=postgres://vinkin@localhost:55432/vinkin LOG_LEVEL=error node --test --test-reporter=spec \"src/**/*.test.ts\")",
+      "Bash(/opt/homebrew/opt/postgresql@16/bin/psql -h localhost -p 55432 -U vinkin -d vinkin -c \"SELECT pid, state, wait_event_type, wait_event, LEFT\\(query,80\\) AS query, now\\(\\)-xact_start AS xact_age FROM pg_stat_activity WHERE datname='vinkin' AND pid <> pg_backend_pid\\(\\) ORDER BY xact_start;\")",
+      "Bash(/opt/homebrew/opt/postgresql@16/bin/psql -h localhost -p 55432 -U vinkin -d vinkin -tA -c 'SELECT aggregate_id FROM outbox_events LIMIT 1;')",
+      "Bash(/opt/homebrew/opt/postgresql@16/bin/psql -h localhost -p 55432 -U vinkin -d vinkin -c 'SELECT '\\\\''event'\\\\'' AS kind, occurred_at AS at, jsonb_build_object\\('\\\\''eventType'\\\\'', event_type\\) || payload AS detail FROM outbox_events WHERE aggregate_type = '\\\\''vink'\\\\'' AND aggregate_id = '\\\\''__CMDSUB_OUTPUT__'\\\\'' LIMIT 3;')",
+      "Bash(/opt/homebrew/opt/postgresql@16/bin/dropdb -h localhost -p 55432 -U vinkin vinkin)",
+      "Bash(/opt/homebrew/opt/postgresql@16/bin/createdb -h localhost -p 55432 -U vinkin vinkin)"
     ]
   }
 }

@@ -158,9 +158,12 @@ class PostgresVinkTx implements VinkTx {
   }
 
   async insertOutbox(event: OutboxEventInput): Promise<void> {
+    // sql.json() stores a jsonb OBJECT. Passing JSON.stringify(...) here serialized as a
+    // jsonb STRING SCALAR, which turned the activity view's `||` merge into array
+    // concatenation (PV3 integration defect #2; see milestone report).
     await this.#sql`INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload)
       VALUES (${event.eventType}, ${event.aggregateType}, ${event.aggregateId},
-              ${JSON.stringify(event.payload)}::jsonb)`;
+              ${this.#sql.json(event.payload as postgres.JSONValue)})`;
   }
 }
 
@@ -187,16 +190,19 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
   }
 
   async listActivity(vinkId: VinkId): Promise<ActivityEntry[]> {
+    // Deterministic ordering: timestamp, then kind ('event' < 'transition' — the event that
+    // a transition emits sorts before its history row), then per-table insertion sequence.
+    // Timestamps alone cannot break ties: rows written in one transaction share now().
     const rows = await this.#sql`
-      SELECT 'transition' AS kind, created_at AS at,
+      SELECT 'transition' AS kind, created_at AS at, seq,
              jsonb_build_object('from', from_state, 'event', event, 'to', to_state,
                                 'actor', actor, 'correlationId', correlation_id) AS detail
       FROM vink_state_history WHERE vink_id = ${vinkId}
       UNION ALL
-      SELECT 'event' AS kind, occurred_at AS at,
+      SELECT 'event' AS kind, occurred_at AS at, seq,
              jsonb_build_object('eventType', event_type) || payload AS detail
       FROM outbox_events WHERE aggregate_type = 'vink' AND aggregate_id = ${vinkId}
-      ORDER BY at`;
+      ORDER BY at, kind, seq`;
     return rows.map((row) => ({
       kind: (row as Row).kind as ActivityEntry['kind'],
       at: toIso((row as Row).at),

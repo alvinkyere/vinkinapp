@@ -55,6 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_participants_vink ON participants(vink_id);
 
 CREATE TABLE IF NOT EXISTS vink_state_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq BIGSERIAL,  -- deterministic activity ordering within equal timestamps
   vink_id UUID NOT NULL REFERENCES vinks(id) ON DELETE CASCADE,
   from_state TEXT NOT NULL,
   event TEXT NOT NULL,
@@ -67,10 +68,11 @@ CREATE INDEX IF NOT EXISTS idx_vink_state_history_vink ON vink_state_history(vin
 
 CREATE TABLE IF NOT EXISTS outbox_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq BIGSERIAL,  -- deterministic activity/publish ordering within equal timestamps
   event_type TEXT NOT NULL,
   aggregate_type TEXT NOT NULL,
   aggregate_id UUID NOT NULL,
-  payload JSONB NOT NULL,
+  payload JSONB NOT NULL CHECK (jsonb_typeof(payload) = 'object'),
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   published_at TIMESTAMPTZ
 );

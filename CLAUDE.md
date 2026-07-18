@@ -38,16 +38,19 @@ command; transports never mutate aggregates). Authoritative architecture diagram
 `docs/architecture/07-system-context.md` — new features must fit it. 99/99 tests green
 repo-wide; lint/format/typecheck/guard green (`pnpm lint / format:check / typecheck / test`).
 
-**PV3 is done** (`milestone-reports/PV3.md`): `packages/application` command layer (D13 —
-ports + `applyVinkTransition` as the single state-write path), vink-domain migration 0002,
-eleven organizer endpoints as thin command bindings, server-computed `allowedActions`.
-109 locally-runnable tests green; the auth + vink **integration suites have never executed**
-(no Docker locally, CI not yet run) — first push runs them against real PG/Redis.
+**PV3 done pending CI confirmation** (`milestone-reports/PV3.md`): command layer (D13),
+migration 0002, eleven organizer endpoints. First CI run found two integration defects —
+auth reuse-revocation rolled back by throwing inside `sql.begin`; outbox payload stored as
+a jsonb string scalar breaking the activity `||` merge — both root-caused, fixed, and
+re-verified **24/24 against real local PostgreSQL** (throwaway brew postgresql@16 on
+:55432; see report). Also landed: per-suite schema isolation for integration tests,
+advisory-locked single-transaction migration runner, `seq` tiebreak for deterministic
+activity ordering, `jsonb_typeof` CHECK on outbox payloads, concurrent-open and
+atomic-rollback closure tests. Owner push re-runs CI for formal closure. **PV4 on hold**
+until then (owner instruction).
 
-**Next: PV4** — guest join + sharing (share links, QR payload, `GET /join/:publicCode`,
-guest tokens hashed, rate limiting; G4 token design goes live). Machine gap: **Docker
-Desktop not installed** (owner) — until then `pnpm dev`'s compose step and local integration
-tests can't run. Sandbox S1–S12 work remains blocked on provider keys, unchanged.
+Machine notes: pnpm 11 + PostgreSQL 16 binaries now installed (no Docker yet — compose
+still needs Docker Desktop). Sandbox S1–S12 blocked on provider keys, unchanged.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

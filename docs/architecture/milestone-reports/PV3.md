@@ -1,7 +1,64 @@
 # Milestone Report — PV3 (Organizer API + Application Command Layer)
 
-Date: 2026-07-17 · Track: product validation (D10) · Owner-approved continuation after PV1.
-§45 report format.
+Date: 2026-07-17 (revised 2026-07-18 after first-CI defect resolution) · Track: product
+validation (D10) · Owner-approved continuation after PV1. §45 report format.
+
+## Post-CI defect resolution (2026-07-18)
+
+The first CI run failed two integration journeys. Both were reproduced locally against a
+real PostgreSQL 16 (throwaway instance; see "Local verification setup" below), root-caused,
+fixed, and re-verified: **24/24 API tests green against real PostgreSQL**, including two new
+closure-evidence tests. Neither failure was a test-isolation or concurrency artifact — both
+reproduced identically on a clean, single-suite database.
+
+**Defect #1 — auth: reuse-detection revocation rolled back by its own error.**
+`refreshSession` detected reuse of a rotated token, issued the family-wide
+`UPDATE … SET revoked_at`, then threw `AuthError` **inside `sql.begin`** — postgres.js
+rolled the transaction back, undoing the revocation. The endpoint still returned 401 for
+the replayed token, but the rotated successor token stayed alive (test expected 401 for it,
+got 200). Exactly the owner's hypothesized pattern 6. *Fix:* the transaction now returns a
+discriminated outcome (`ROTATED | REUSE_DETECTED | INVALID`) instead of throwing; on
+`REUSE_DETECTED` the family revocation commits in its own statement after the transaction,
+before the 401 is raised. *Regression evidence:* the test now also asserts directly in the
+database that zero live sessions remain for the user after the reuse response. Logout
+contract confirmed as **idempotent 204** (owner's recommendation; already implemented).
+
+**Defect #2 — vinks: outbox payload stored as a jsonb string scalar.**
+`insertOutbox` passed `JSON.stringify(payload)` as a parameter to a `::jsonb` target;
+postgres.js serialized the JS string as a jsonb **string scalar** (`"{\"vinkId\":…}"`), not
+an object. The activity query's `jsonb_build_object('eventType', …) || payload` then became
+jsonb **array concatenation** (`[{eventType…}, "…"]`), so `detail.eventType` was undefined
+for every event row — the journey's event-list assertion failed. *Fix:* `sql.json(payload)`
+stores a real jsonb object; a new `CHECK (jsonb_typeof(payload) = 'object')` on
+`outbox_events` makes the bug class unrepresentable at the schema level.
+
+**Hardening landed with the fixes (owner's required list):**
+- *Deterministic activity ordering:* `seq BIGSERIAL` added to `vink_state_history` and
+  `outbox_events`; activity orders by `(at, kind, seq)` — timestamps alone cannot break
+  ties because rows written in one transaction share `now()`.
+- *Test isolation:* each integration suite now runs in its **own PostgreSQL schema**
+  (`createIsolatedTestDb`) with a full migration run, dropped `CASCADE` afterwards —
+  concurrent suites cannot interfere, cleanup needs no FK ordering (the previous
+  `DELETE FROM users` cleanup would have violated the `vinks.organizer_user_id` FK), and
+  per-test truncation is unnecessary.
+- *Migration runner:* single transaction guarded by `pg_advisory_xact_lock` — concurrent
+  runners serialize instead of racing on `CREATE TABLE`/`schema_migrations` inserts; the
+  "already exists, skipping" NOTICE noise is gone (idempotent-DDL notices silenced in the
+  client; zero NOTICE lines in the final run log).
+- *Closure evidence tests:* (a) five concurrent `POST …/open` requests yield exactly one
+  200 and four 409s, with exactly one `VinkOpened` outbox event and one history row —
+  row-lock serialization proven; (b) a unit of work that writes aggregate + history +
+  outbox and then throws leaves version unchanged and zero rows — D12 atomicity proven.
+
+**Status:** local real-infrastructure verification PASSING (24/24). Full-CI green requires
+the owner's push; no further code change is anticipated for it.
+
+**Local verification setup** (this machine, no Docker): PostgreSQL 16 via
+`brew install postgresql@16`; throwaway cluster in the session scratchpad on port 55432
+(`initdb -U vinkin --auth=trust` + `pg_ctl … -o "-p 55432 -c unix_socket_directories=''"`).
+Run: `VINKIN_ENV=test VINKIN_INTEGRATION=1 DATABASE_URL=postgres://vinkin@localhost:55432/vinkin
+node --test --test-force-exit "src/**/*.test.ts"` in `apps/api`. Stop with
+`pg_ctl -D <scratchpad>/pg/data stop`.
 
 ## What was implemented
 

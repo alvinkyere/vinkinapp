@@ -6,16 +6,15 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from './app.ts';
-import { loadEnv } from './config/env.ts';
-import { createDb, type Sql } from './db/client.ts';
-import { runMigrations } from './db/migrate.ts';
+import { createIsolatedTestDb, type IsolatedTestDb } from './testing/integration-db.ts';
+import { PostgresVinkStore } from './modules/vinks/store.ts';
+import type { VinkId } from '../../../packages/domain/src/index.ts';
 
 const RUN = process.env.VINKIN_INTEGRATION === '1';
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
 describe('vink lifecycle end-to-end (PostgreSQL)', { skip: !RUN }, () => {
-  const env = loadEnv({ ...process.env, VINKIN_ENV: 'test', LOG_LEVEL: 'error' });
-  let sql: Sql;
+  let db: IsolatedTestDb;
   let app: ReturnType<typeof buildApp>;
   const stamp = Date.now();
   const organizer = `pv3_org_${stamp}`;
@@ -38,13 +37,12 @@ describe('vink lifecycle end-to-end (PostgreSQL)', { skip: !RUN }, () => {
   }
 
   before(async () => {
-    sql = createDb(env);
-    await runMigrations(sql);
+    db = await createIsolatedTestDb('vinks');
     app = buildApp({
-      env,
-      sql,
+      env: db.env,
+      sql: db.sql,
       checkDb: async () => {
-        await sql`SELECT 1`;
+        await db.sql`SELECT 1`;
       },
       checkRedis: async () => {},
     });
@@ -55,8 +53,7 @@ describe('vink lifecycle end-to-end (PostgreSQL)', { skip: !RUN }, () => {
 
   after(async () => {
     await app.close();
-    await sql`DELETE FROM users WHERE username IN (${organizer}, ${memberA}, ${memberB})`;
-    await sql.end();
+    await db.drop();
   });
 
   it('create → add members → split → open → activity → cancel (full organizer journey)', async () => {
@@ -276,6 +273,104 @@ describe('vink lifecycle end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     });
     assert.equal(opened.statusCode, 200, JSON.stringify(opened.json()));
     assert.equal(opened.json().state, 'OPEN');
+  });
+
+  it('concurrent open requests produce exactly one success (row-lock serialization)', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 6_000,
+        tipMinor: 0,
+        submissionDeadline: FUTURE,
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const vinkId = created.json().vink.id as string;
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/participants`,
+      headers: authed(tokens.organizer!),
+      payload: { username: memberA },
+    });
+    await app.inject({
+      method: 'PUT',
+      url: `/api/v1/vinks/${vinkId}/split`,
+      headers: authed(tokens.organizer!),
+      payload: { method: 'EQUAL' },
+    });
+
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        app.inject({
+          method: 'POST',
+          url: `/api/v1/vinks/${vinkId}/open`,
+          headers: authed(tokens.organizer!),
+          payload: {},
+        }),
+      ),
+    );
+    const statuses = responses.map((response) => response.statusCode).sort();
+    assert.deepEqual(statuses, [200, 409, 409, 409, 409]);
+    // Exactly one VinkOpened event and one transition row exist.
+    const opened = await db.sql`
+      SELECT (SELECT count(*)::int FROM outbox_events
+              WHERE aggregate_id = ${vinkId} AND event_type = 'VinkOpened') AS events,
+             (SELECT count(*)::int FROM vink_state_history
+              WHERE vink_id = ${vinkId} AND event = 'VINK_OPENED') AS transitions`;
+    assert.deepEqual(opened[0], { events: 1, transitions: 1 });
+  });
+
+  it('a failing unit of work rolls back aggregate, history, and outbox together (D12 atomicity)', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+      payload: {
+        purchaseCategory: 'RETAIL',
+        subtotalMinor: 5_000,
+        tipMinor: 0,
+        submissionDeadline: FUTURE,
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const vinkId = created.json().vink.id as VinkId;
+    const versionBefore = created.json().vink.version as number;
+
+    const store = new PostgresVinkStore(db.sql);
+    await assert.rejects(
+      store.run(async (tx) => {
+        const vink = await tx.getVinkForUpdate(vinkId);
+        assert.ok(vink);
+        await tx.updateVink({ ...vink, version: vink.version + 1 });
+        await tx.appendHistory({
+          vinkId,
+          fromState: 'DRAFT',
+          event: 'VINK_OPENED',
+          toState: 'OPEN',
+          actor: 'rollback-test',
+          correlationId: 'rollback-test',
+        });
+        await tx.insertOutbox({
+          eventType: 'VinkOpened',
+          aggregateType: 'vink',
+          aggregateId: vinkId,
+          payload: { rollbackTest: true },
+        });
+        throw new Error('forced failure after all writes');
+      }),
+      /forced failure/,
+    );
+
+    const after = await db.sql`
+      SELECT (SELECT version::int FROM vinks WHERE id = ${vinkId}) AS version,
+             (SELECT count(*)::int FROM vink_state_history
+              WHERE vink_id = ${vinkId} AND actor = 'rollback-test') AS history,
+             (SELECT count(*)::int FROM outbox_events
+              WHERE aggregate_id = ${vinkId} AND payload ? 'rollbackTest') AS outbox`;
+    assert.deepEqual(after[0], { version: versionBefore, history: 0, outbox: 0 });
   });
 
   it('rejects unsupported categories (422) and unknown vinks (404)', async () => {

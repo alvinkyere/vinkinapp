@@ -88,28 +88,34 @@ export async function loginUser(
   return { user: toPublicUser(row), ...session };
 }
 
+type RefreshOutcome =
+  | { kind: 'ROTATED'; userId: string; sessionId: string; refreshToken: string }
+  | { kind: 'REUSE_DETECTED'; userId: string }
+  | { kind: 'INVALID' };
+
 /**
  * Rotation with reuse detection: presenting an already-revoked refresh token revokes every
  * session of that user (the token was either replayed or leaked).
+ *
+ * The transaction RETURNS an outcome instead of throwing — a throw inside `sql.begin` rolls
+ * the transaction back, which previously undid the reuse-response revocation and left the
+ * rotated successor token alive (PV3 integration defect #1; see milestone report). The
+ * family revocation commits in its own statement before the caller-visible 401 is raised.
  */
 export async function refreshSession(
   sql: Sql,
   refreshToken: string,
 ): Promise<{ userId: string; sessionId: string; refreshToken: string }> {
   const tokenHash = hashRefreshToken(refreshToken);
-  return sql.begin(async (tx) => {
+  const outcome = (await sql.begin(async (tx) => {
     const rows = await tx`
       SELECT id, user_id, revoked_at, expires_at FROM auth_sessions
       WHERE refresh_token_hash = ${tokenHash} FOR UPDATE`;
     const session = rows[0] as
       { id: string; user_id: string; revoked_at: Date | null; expires_at: Date } | undefined;
-    if (session === undefined) throw new AuthError('INVALID_REFRESH_TOKEN');
-    if (session.revoked_at !== null) {
-      await tx`UPDATE auth_sessions SET revoked_at = now()
-               WHERE user_id = ${session.user_id} AND revoked_at IS NULL`;
-      throw new AuthError('INVALID_REFRESH_TOKEN');
-    }
-    if (session.expires_at.getTime() <= Date.now()) throw new AuthError('INVALID_REFRESH_TOKEN');
+    if (session === undefined) return { kind: 'INVALID' };
+    if (session.revoked_at !== null) return { kind: 'REUSE_DETECTED', userId: session.user_id };
+    if (session.expires_at.getTime() <= Date.now()) return { kind: 'INVALID' };
 
     await tx`UPDATE auth_sessions SET revoked_at = now() WHERE id = ${session.id}`;
     const { token, tokenHash: newHash } = newRefreshToken();
@@ -118,11 +124,25 @@ export async function refreshSession(
       VALUES (${session.user_id}, ${newHash}, now() + make_interval(secs => ${REFRESH_TOKEN_TTL_SECONDS}), ${session.id})
       RETURNING id`;
     return {
+      kind: 'ROTATED',
       userId: session.user_id,
       sessionId: (inserted[0] as { id: string }).id,
       refreshToken: token,
     };
-  }) as Promise<{ userId: string; sessionId: string; refreshToken: string }>;
+  })) as RefreshOutcome;
+
+  if (outcome.kind === 'REUSE_DETECTED') {
+    // Committed independently of the 401 below — the entire session family dies.
+    await sql`UPDATE auth_sessions SET revoked_at = now()
+              WHERE user_id = ${outcome.userId} AND revoked_at IS NULL`;
+    throw new AuthError('INVALID_REFRESH_TOKEN');
+  }
+  if (outcome.kind === 'INVALID') throw new AuthError('INVALID_REFRESH_TOKEN');
+  return {
+    userId: outcome.userId,
+    sessionId: outcome.sessionId,
+    refreshToken: outcome.refreshToken,
+  };
 }
 
 export async function revokeSession(sql: Sql, refreshToken: string): Promise<void> {

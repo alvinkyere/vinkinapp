@@ -9,5 +9,7 @@ export function createDb(env: Env): Sql {
     // Fail fast instead of queueing forever when the database is down; the ready check
     // and callers surface the failure explicitly.
     connect_timeout: 5,
+    // Idempotent DDL (CREATE TABLE IF NOT EXISTS) emits expected NOTICEs; don't print them.
+    onnotice: () => {},
   });
 }

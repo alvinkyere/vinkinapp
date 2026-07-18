@@ -6,26 +6,22 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from './app.ts';
-import { loadEnv } from './config/env.ts';
-import { createDb, type Sql } from './db/client.ts';
-import { runMigrations } from './db/migrate.ts';
+import { createIsolatedTestDb, type IsolatedTestDb } from './testing/integration-db.ts';
 
 const RUN = process.env.VINKIN_INTEGRATION === '1';
 
 describe('auth end-to-end (PostgreSQL)', { skip: !RUN }, () => {
-  const env = loadEnv({ ...process.env, VINKIN_ENV: 'test', LOG_LEVEL: 'error' });
-  let sql: Sql;
+  let db: IsolatedTestDb;
   let app: ReturnType<typeof buildApp>;
   const username = `it_user_${Date.now()}`;
 
   before(async () => {
-    sql = createDb(env);
-    await runMigrations(sql);
+    db = await createIsolatedTestDb('auth');
     app = buildApp({
-      env,
-      sql,
+      env: db.env,
+      sql: db.sql,
       checkDb: async () => {
-        await sql`SELECT 1`;
+        await db.sql`SELECT 1`;
       },
       checkRedis: async () => {},
     });
@@ -33,8 +29,7 @@ describe('auth end-to-end (PostgreSQL)', { skip: !RUN }, () => {
 
   after(async () => {
     await app.close();
-    await sql`DELETE FROM users WHERE username = ${username}`;
-    await sql.end();
+    await db.drop();
   });
 
   it('register → me → refresh (rotation) → reuse detection → logout', async () => {
@@ -92,6 +87,14 @@ describe('auth end-to-end (PostgreSQL)', { skip: !RUN }, () => {
       payload: { refreshToken },
     });
     assert.equal(reuse.statusCode, 401);
+    // Regression (PV3 defect #1): the family revocation must SURVIVE the 401 — it used to
+    // be rolled back because the error was thrown inside the transaction. Verify in the DB
+    // that no live session remains for this user before even trying token B.
+    const liveSessions = await db.sql`
+      SELECT count(*)::int AS n FROM auth_sessions s
+      JOIN users u ON u.id = s.user_id
+      WHERE u.username = ${username} AND s.revoked_at IS NULL`;
+    assert.equal((liveSessions[0] as { n: number }).n, 0);
     const afterReuse = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/refresh',
