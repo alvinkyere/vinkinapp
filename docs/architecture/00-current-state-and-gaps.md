@@ -3,6 +3,12 @@
 _Date: 2026-07-16. Author: architecture pass against the VinkIn Master Engineering Roadmap
 (the "Spec"). Spec section references use §N._
 
+> **Superseded vocabulary note (2026-07-17, D11 as amended):** state names used in this
+> historical assessment (`READY`/`LIVE`, `EVALUATING`, `PROVIDER_RECONCILIATION`, …) were
+> retired when the owner made the product-validation plan's state names canonical. See the
+> mapping appendix in `03-state-machines.md`. This document is kept as a dated record and is
+> not rewritten.
+
 ## 1. Current state
 
 The repository is **empty**. There is no prior code, no git history, no configuration, no

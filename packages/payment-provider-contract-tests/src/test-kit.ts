@@ -1,7 +1,4 @@
-import type {
-  FinancialProvider,
-  ProviderEvent,
-} from '../../payment-provider/src/index.ts';
+import type { FinancialProvider, ProviderEvent } from '../../payment-provider/src/index.ts';
 
 /**
  * What an adapter must hand the conformance suite. `provider` and

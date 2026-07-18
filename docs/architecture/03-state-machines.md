@@ -1,134 +1,154 @@
-# 03 — State-Machine Definitions
+# 03 — State-Machine Definitions (canonical vocabulary, D11 as amended)
 
-Transition tables for every stateful aggregate. Conventions:
+**The state names below are the canonical, system-wide vocabulary** — the same names as
+`packages/domain` (which is the source of truth; this document adapts to the code, never the
+reverse). The pre-PV vocabulary that earlier revisions of this document used (`READY`/`LIVE`,
+`EVALUATING`/`PROVIDER_RECONCILIATION`, `SPEND_PREPARATION`/`SPEND_READY`/`CARD_ACTIVE`,
+`SETTLEMENT_MONITORING`, …) is **retired**; a mapping appendix is kept at the bottom for
+reading older documents. Ratified by the owner 2026-07-17 (D11 amendment).
+
+Conventions (binding, unchanged):
 
 - **Guard** must hold inside the same PostgreSQL transaction that performs the transition,
-  with the aggregate row locked `FOR UPDATE` (§17, §27).
-- **Effects** = ledger postings + outbox events, same transaction (§27, §29).
-- Every transition writes a `*_status_history` row (actor, reason, correlation id).
+  with the aggregate row locked `FOR UPDATE` (Spec §17/§27; Plan §11).
+- **D12:** every transition atomically emits the domain event named in its table row — the
+  state write and the outbox insert commit in one transaction (Plan §12). No silent
+  transitions; the code makes them unrepresentable (`transitionVink` returns `{to, emits}`).
+- **D13:** transitions execute only inside application commands (validate → load aggregate →
+  transition → emit → return). No transport touches state directly.
+- Every transition writes a `*_state_history` row (actor, reason, correlation id).
 - Illegal transitions are errors, never no-ops — a rejected transition is evidence of a race
-  or a bug and must be visible (§37).
+  or a bug and must be visible (Spec §37).
 
-## 1. Vink session (§13, §14)
+## 1. Vink session (Plan §8; `packages/domain/src/vink-state-machine.ts`)
 
-Persisted on `vinks.status`. Timer boundaries are DB timestamps; workers act on
-`now() >= boundary`, never on client input (§10.3).
+Persisted on `vinks.state`. Timer boundaries are DB timestamps; workers act on
+`now() >= boundary`, never on client input (Plan §10).
 
-| From | Event / trigger | Guard | To | Effects |
-|---|---|---|---|---|
-| DRAFT | organizer completes config | validation passes | READY | — |
-| READY | organizer taps Start | organizer still eligible; risk pass (§36) | LIVE | write §10.3 timestamps; VinkStarted; invitations active |
-| LIVE | now ≥ submissions_close_at − 15s | — | SUBMISSIONS_CLOSED | reject **new** attempts (in-flight continue); VinkSubmissionsClosed |
-| SUBMISSIONS_CLOSED | resolver runs at close | **no unresolved attempts** | EVALUATING | — (fast path; same resolver code as grace path) |
-| SUBMISSIONS_CLOSED | resolver runs at close | unresolved attempts exist | PROCESSING_GRACE | VinkProcessingGraceStarted |
-| PROCESSING_GRACE | now ≥ processing_grace_expires_at | — | PROVIDER_RECONCILIATION | resolver fetches unresolved provider objects **directly** (§14) — decides by provider object state/timestamps, not webhook arrival |
-| EVALUATING / PROVIDER_RECONCILIATION | funding decision | secured funding == required funding (ledger projection, not client) | FUNDED | VinkFunded |
-| EVALUATING / PROVIDER_RECONCILIATION | funding decision | funding short at deadline | EXPIRED | VinkExpired; cancel unresolved attempts |
-| FUNDED | card pipeline (§16 checklist) | eligibility+risk+liquidity recheck pass | SPEND_PREPARATION → SPEND_READY → CARD_ACTIVE | issue/activate card; controls; TemporaryCardIssued |
-| CARD_ACTIVE | first merchant auth webhook | §17 decision approves | PURCHASE_AUTHORIZATION_PENDING → MERCHANT_LOCKED | ledger reserve; hide card; MerchantAuthorizationApproved, MerchantLocked |
-| MERCHANT_LOCKED | capture/settlement events | — | SETTLEMENT_MONITORING | MerchantCaptureReceived |
-| SETTLEMENT_MONITORING | clearing window ends | settled ≤ funded (+approved slippage per §20) | COMPLETED | close provider card; VinkCompleted |
-| SETTLEMENT_MONITORING | settled > funded | — | ADJUSTMENT_PENDING | SettlementAdjustmentCreated (§22) |
-| ADJUSTMENT_PENDING | recovery flow (§23) | — | RECOVERY_PENDING → COMPLETED | RecoverySucceeded/Failed |
-| EXPIRED | disperse worker | all releases/refunds resolved | RELEASE_OR_REFUND → DISPERSED | cancel auths first, refund captures only (§25); VinkDispersed |
-| DRAFT/READY/LIVE | organizer cancels | no unresolved-unsafe member states | CANCELED | release/refund as needed |
-| any | risk/support intervention | authority check | MANUAL_REVIEW / SUSPENDED / DISPUTED / FAILED | audit log |
-
-**The single-resolver rule (§14):** exactly one code path ("session resolver") may move a Vink
-out of {SUBMISSIONS_CLOSED, PROCESSING_GRACE, EVALUATING, PROVIDER_RECONCILIATION}. Both the
-expiry worker and the webhook processor invoke it; it takes `SELECT … FOR UPDATE` on the vink
-row, re-reads the funding projection, and makes the FUNDED/EXPIRED decision exactly once.
-A webhook that lands after the decision affects only attempt-level cleanup (late capture →
-refund path), never the decision.
-
-## 2. ContributionSlot (§11)
-
-Membership states (INVITED/JOINED and guest link tracking) live on `vink_members`; slots are
-purely financial and start at PAYMENT_NOT_STARTED (gap note §2.3.2 in doc 00).
-
-| From | Trigger | Guard | To |
+| From | Event | To | Emits |
 |---|---|---|---|
-| PAYMENT_NOT_STARTED | attempt created | vink LIVE (or ≥T−15s in-flight rule); amount matches current split version | AUTHENTICATING |
-| AUTHENTICATING | wallet/3DS handoff begins | — | PROCESSING |
-| PROCESSING | provider result/webhook: authorized | provider object confirms; §12 idempotent | AUTHORIZED |
-| PROCESSING | definitive decline | — | FAILED (new attempt allowed while LIVE → back to PROCESSING with gen+1) |
-| AUTHORIZED | vink FUNDED → capture command | capture ≤ authorized max; §12 capture key | CAPTURE_PENDING → CAPTURED |
-| AUTHORIZED | vink EXPIRED/CANCELED | — | RELEASE_PENDING → RELEASED |
-| CAPTURED | vink fails post-capture / dispersal | — | REFUND_PENDING → REFUNDED |
-| CAPTURED | provider dispute webhook | — | DISPUTED |
-| PAYMENT_NOT_STARTED / FAILED | member removed (§15 safe list) | not in unsafe states | CANCELED |
+| DRAFT | VINK_OPENED | OPEN | VinkOpened |
+| OPEN | ORGANIZER_CANCELLED | CANCELLED | VinkCancelled |
+| OPEN | SUBMISSION_DEADLINE_REACHED | SUBMISSIONS_CLOSED | SubmissionsClosed |
+| OPEN | ALL_CONTRIBUTIONS_AUTHORIZED | SUBMISSIONS_CLOSED | SubmissionsClosed |
+| SUBMISSIONS_CLOSED | PROCESSING_GRACE_STARTED | PROCESSING_GRACE | ProcessingGraceStarted |
+| PROCESSING_GRACE | FUNDING_CONFIRMED | FUNDED | VinkFunded |
+| PROCESSING_GRACE | FUNDING_FAILED | EXPIRED | VinkExpired |
+| FUNDED | CARD_PROVISIONING_STARTED | CARD_PROVISIONING | TemporaryCardRequested |
+| CARD_PROVISIONING | CARD_ISSUED | CARD_READY | TemporaryCardIssued |
+| CARD_PROVISIONING | CARD_PROVISIONING_FAILED | FUNDING_REVERSAL | TemporaryCardFailed |
+| FUNDING_REVERSAL | FUNDING_REVERSAL_COMPLETED | EXPIRED | VinkExpired |
+| CARD_READY | MERCHANT_AUTHORIZATION_APPROVED | PURCHASE_AUTHORIZED | MerchantAuthorizationApproved |
+| PURCHASE_AUTHORIZED | PURCHASE_CAPTURED | SETTLING | PurchaseCaptured |
+| PURCHASE_AUTHORIZED | AUTHORIZATION_REVERSED | CARD_READY | MerchantAuthorizationReversed |
+| SETTLING | SETTLEMENT_MATCHED | COMPLETED | VinkCompleted |
+| SETTLING | SETTLEMENT_OVERAGE_DETECTED | RECOVERY_REQUIRED | SettlementVarianceDetected |
+| RECOVERY_REQUIRED | RECOVERY_STARTED | RECOVERY_PENDING | RecoveryObligationCreated |
+| RECOVERY_PENDING | RECOVERY_RESOLVED | COMPLETED | VinkCompleted |
+| RECOVERY_PENDING | RECOVERY_DEFAULTED | RESTRICTED | OrganizerRestricted |
 
-Ledger postings: AUTHORIZED posts nothing (no money moved) — tracked as exposure only;
-CAPTURED posts §26 "contribution capture" + allocation; RELEASED posts nothing; REFUNDED posts
-reversal pair. Slot invariant: `captured_total ≤ maximum_amount_minor` (Principle §4.7).
+Terminal: **COMPLETED, CANCELLED, EXPIRED, RESTRICTED** (no outgoing transitions; a session
+that expired cannot reopen — journey E6).
 
-## 3. TemporaryCard
+**The single-resolver rule (D5, unchanged):** exactly one code path (the session resolver)
+may fire FUNDING_CONFIRMED / FUNDING_FAILED. Expiry worker and provider-event processor both
+invoke it; it takes `SELECT … FOR UPDATE` on the vink row, re-reads the funding projection,
+and decides FUNDED/EXPIRED exactly once. Anything arriving after the decision affects only
+contribution-level cleanup, never the decision.
+
+## 2. Contribution (Plan §9; `packages/domain/src/contribution-state-machine.ts`)
+
+| From | Event | To | Emits |
+|---|---|---|---|
+| CREATED | AUTHORIZATION_STARTED | AUTHORIZATION_PENDING | ContributionAuthorizationStarted |
+| AUTHORIZATION_PENDING | AUTHORIZATION_APPROVED | AUTHORIZED | ContributionAuthorized |
+| AUTHORIZATION_PENDING | AUTHORIZATION_DECLINED | DECLINED | ContributionDeclined |
+| AUTHORIZATION_PENDING | PROVIDER_RESULT_UNKNOWN / AUTHORIZATION_TIMED_OUT | RESOLUTION_PENDING | ContributionResolutionRequired |
+| AUTHORIZED | SESSION_FUNDED | CAPTURE_PENDING | ContributionCaptureStarted |
+| AUTHORIZED | PARTICIPANT_EXITED / SESSION_EXPIRED | CANCELLATION_PENDING | ContributionCancellationStarted |
+| CAPTURE_PENDING | CAPTURE_SUCCEEDED | CAPTURED | ContributionCaptured |
+| CAPTURE_PENDING | CAPTURE_RESULT_UNKNOWN | RESOLUTION_PENDING | ContributionResolutionRequired |
+| CANCELLATION_PENDING | CANCELLATION_SUCCEEDED | CANCELLED | ContributionCancelled |
+| CANCELLATION_PENDING | CANCELLATION_RESULT_UNKNOWN | RESOLUTION_PENDING | ContributionResolutionRequired |
+| RESOLUTION_PENDING | RESOLVED_AUTHORIZED / _DECLINED / _CAPTURED / _CANCELLED | AUTHORIZED / DECLINED / CAPTURED / CANCELLED | ContributionAuthorized / ContributionDeclined / ContributionCaptured / ContributionCancelled |
+| CAPTURED | PURCHASE_SETTLED | SETTLED | ContributionSettled |
+| CAPTURED | REFUND_REQUIRED | REFUND_PENDING | RefundRequested |
+| REFUND_PENDING | REFUND_SUCCEEDED | REFUNDED | RefundCompleted |
+| REFUND_PENDING | REFUND_FAILED | REFUND_FAILED | RefundFailed |
+| REFUND_FAILED | REFUND_RETRIED | REFUND_PENDING | RefundRequested |
+
+Terminal: **DECLINED, CANCELLED, SETTLED, REFUNDED**. DECLINED is terminal per contribution —
+a retry is a NEW contribution with the next attempt number in its idempotency key (Plan §11).
+`RESOLUTION_PENDING` exits only via the resolve-pending-contribution job (Plan §10), which
+decides from the provider's true recorded outcome — never from event arrival order (Spec §28).
+
+Ledger postings: AUTHORIZED posts nothing (no money moved — exposure only); CAPTURED posts
+the Plan §18 capture pair; CANCELLED posts nothing; REFUNDED posts the reversal pair.
+Invariant: `captured ≤ maximum_approved_amount` (Spec §4.7; `assertWithinApprovedMaximum`).
+
+## 3. TemporaryCard (Plan §7; `entities.ts` `TemporaryCardStatus`)
 
 ```text
-REQUESTED → ISSUED → CONTROLS_APPLIED → DISPLAYABLE → MERCHANT_LOCKED
-   → SETTLEMENT_HOLD (remains authorizable for same-merchant captures/reversals/refunds, §18)
-   → CLOSED
-plus: FROZEN (organizer/support, from DISPLAYABLE or MERCHANT_LOCKED, reversible)
-      CANCELED (vink failed before first auth)
+REQUESTED → ACTIVE → CLOSED
+     └────→ FAILED   (issuance failure → vink takes CARD_PROVISIONING_FAILED)
 ```
 
-Guards: DISPLAYABLE requires §16 checklist and a provider-hosted display session with biometric
-re-auth (§35); MERCHANT_LOCKED set in the same transaction as the first approved
-`authorization_decision` (§17/§18); CLOSED only after `settlement_monitoring` window
-(config, default 7 days after last capture activity) — never immediately after first auth (§18).
+Merchant locking lives on the vink (`merchant_lock_status`) and the card
+(`merchant_lock_key`), set in the same transaction as the first approved merchant
+authorization (Plan §11 row-lock list). Guards: a card is issued only from a FUNDED vink
+inside the card-issuance transaction; `spending_limit = funded amount` under EXACT_FINAL
+(Plan §16); CLOSED only after the settlement window closes (close-settlement-window job,
+Plan §10) — never immediately after the first authorization. Display carries
+`display_last_four` only; no PAN/CVV column exists (schema proposal §5).
 
-## 4. Authorization decision (per §17, evaluated inside one DB txn)
+## 4. Merchant authorization decision (evaluated inside one DB transaction)
 
-Not a persistent state machine — a decision procedure recorded as an immutable row:
+A decision procedure recorded as an immutable `purchase_authorizations` row, not a persistent
+machine:
 
 ```text
-lock card FOR UPDATE → load active auths FOR UPDATE
-→ classify: duplicate-retry | reversal-retry | incremental | partial | related | unrelated (§17)
-→ checks, in order: card state ∈ {DISPLAYABLE, MERCHANT_LOCKED(same merchant)}
-                    MCC policy-family compatible (§19)
-                    cumulative_authorized + amount ≤ policy limit (incl. slippage/tip max §20/§21)
-                    velocity/risk (§36)
-→ APPROVE: insert decision, post ledger reserve, update cumulative, maybe set MERCHANT_LOCKED
-→ DECLINE: insert decision with reason code, notify organizer (§19) — never block awaiting human
+lock card FOR UPDATE → load prior authorizations FOR UPDATE
+→ dedupe on provider_authorization_id (duplicate request → same recorded decision, E4)
+→ checks, in order: vink.state = CARD_READY (first auth) or PURCHASE_AUTHORIZED re-presentment rules
+                    merchant lock: unlocked, or same merchant_lock_key
+                    amount ≤ spending_limit and policy variance rules (Plan §16)
+→ APPROVE: insert row, vink → PURCHASE_AUTHORIZED (MerchantAuthorizationApproved), set lock
+→ DECLINE: insert row with reason (MerchantAuthorizationDeclined) — never block on a human
 ```
 
-## 5. FinancialAccount (§3.1)
+## 5. Production-track machines (unchanged; outside the PV vocabulary's scope)
 
-| From | Trigger | To |
-|---|---|---|
-| PENDING_VERIFICATION | contact verified + terms | ACTIVE (CONTRIBUTION_ONLY capability) |
-| ACTIVE | KYC passed + recovery method valid | ORGANIZER_ELIGIBLE |
-| ORGANIZER_ELIGIBLE | settlement adjustment created | ADJUSTMENT_PENDING |
-| ADJUSTMENT_PENDING | recovery success | ORGANIZER_ELIGIBLE |
-| ADJUSTMENT_PENDING | recovery retries exhausted | RECOVERY_REQUIRED → RESTRICTED |
-| RESTRICTED | obligations settled | ORGANIZER_ELIGIBLE (via risk review) |
-| any | risk/compliance action | SUSPENDED / CLOSED |
+FinancialAccount (§3.1), RecoveryObligation retry ladder (§23), and ReimbursementRequest
+(§24) keep their Spec-derived definitions from the previous revision of this document; they
+concern M2/M8+ aggregates the PV build does not yet model. When the PV track reaches them
+(PV7), their vocabularies are normalized the same way and this section is replaced.
+Interim summaries:
 
-RESTRICTED retains §3.1 allowed actions (join/contribute/refunds); blocks create/control/start.
+- **FinancialAccount:** PENDING_VERIFICATION → ACTIVE → ORGANIZER_ELIGIBLE ↔
+  ADJUSTMENT_PENDING → RECOVERY_REQUIRED → RESTRICTED; RESTRICTED retains §3.1 allowed
+  actions (join/contribute/refunds) and blocks create/control/start.
+- **RecoveryObligation:** CREATED → PENDING (funds applied, charging, retries with backoff)
+  → RESOLVED | DEFAULTED (restrict account, support case) — domain enum
+  `RecoveryObligationStatus`; the §23 retry ladder details land in PV7.
+- **ReimbursementRequest:** states verbatim from §24 (M8+; not in the PV build).
 
-## 6. RecoveryObligation (§23)
+## 6. Idempotent transition rule (applies to all machines, unchanged)
 
-```text
-CREATED → FUNDS_APPLIED (vink residual funds first) → CHARGING → SETTLED
-                                        │                  │
-                                        ▼                  ▼ (retry policy: e.g. 3 attempts, backoff 1d/3d/7d)
-                                   NOTIFIED           RETRY_SCHEDULED → CHARGING
-                                                           │ exhausted
-                                                           ▼
-                                                   DEFAULTED → (restrict account, support case, reserve absorbs)
-```
+Worker/event handlers must be written as `UPDATE … SET state = :to WHERE id = :id AND
+state = :from` (or the equivalent optimistic check under the row lock). Zero rows updated ⇒
+the transition already happened or a race was lost ⇒ log + re-read + decide; never
+blind-write. Provider events are marked processed in the same transaction (Spec §28).
 
-## 7. ReimbursementRequest (§24)
+## Appendix — retired vocabulary mapping (for reading pre-2026-07-17 documents)
 
-States verbatim from §24. Key guards: `ACCEPTED → PAYMENT_PROCESSING` uses the payer's own
-idempotent operation id; `REALLOCATION_PROPOSED` creates a new allocation version and
-supersedes the old request (`SUPERSEDED`); any increased member amount requires that member's
-explicit `ACCEPTED` on the new version; exactly one reminder allowed; terminal states:
-PAID, DECLINED+CLOSED_UNPAID, EXPIRED, CANCELED.
-
-## 8. Idempotent transition rule (applies to all machines)
-
-Webhook/worker handlers must be written as: `UPDATE … SET status = :to WHERE id = :id AND
-status = :from` (or equivalent optimistic check under the row lock). Zero rows updated ⇒ the
-transition already happened or a race was lost ⇒ log + re-read + decide; never blind-write.
-Provider events are marked processed in the same transaction (§28).
+| Retired (old doc 03) | Canonical (D11) |
+|---|---|
+| READY, LIVE | OPEN (post-open lifecycle collapses into OPEN until submissions close) |
+| SUBMISSIONS_CLOSED → EVALUATING / PROVIDER_RECONCILIATION | SUBMISSIONS_CLOSED → PROCESSING_GRACE (single resolver decides out of PROCESSING_GRACE) |
+| SPEND_PREPARATION, SPEND_READY | CARD_PROVISIONING |
+| CARD_ACTIVE, DISPLAYABLE | CARD_READY |
+| PURCHASE_AUTHORIZATION_PENDING, MERCHANT_LOCKED | PURCHASE_AUTHORIZED (+ `merchant_lock_status`) |
+| SETTLEMENT_MONITORING | SETTLING |
+| ADJUSTMENT_PENDING (vink-level) | RECOVERY_REQUIRED |
+| RELEASE_OR_REFUND, DISPERSED | EXPIRED (+ contribution-level CANCELLATION/REFUND machines) |
+| CANCELED (spelling) | CANCELLED |

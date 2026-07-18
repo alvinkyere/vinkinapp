@@ -133,7 +133,9 @@ describe('idempotency (§12)', () => {
   it('replaying the same operation id returns the same payment and emits no duplicate event', async () => {
     const ids = await setup();
     const first = await ids.provider.authorizeContribution(authorizeInput(ids, 'slot-1', 1, 5_000));
-    const replay = await ids.provider.authorizeContribution(authorizeInput(ids, 'slot-1', 1, 5_000));
+    const replay = await ids.provider.authorizeContribution(
+      authorizeInput(ids, 'slot-1', 1, 5_000),
+    );
     assert.equal(replay.providerPaymentId, first.providerPaymentId);
     assert.equal(
       ids.provider.drainEvents().filter((event) => event.type === 'payment.authorized').length,
@@ -152,7 +154,9 @@ describe('idempotency (§12)', () => {
 
   it('a definitive decline requires a NEW attempt generation, which succeeds independently', async () => {
     const ids = await setup('tok_decline');
-    const declined = await ids.provider.authorizeContribution(authorizeInput(ids, 'slot-1', 1, 5_000));
+    const declined = await ids.provider.authorizeContribution(
+      authorizeInput(ids, 'slot-1', 1, 5_000),
+    );
     assert.equal(declined.status, 'DECLINED');
 
     // new generation (gen 2) with a good method — models §11 retry after definitive decline

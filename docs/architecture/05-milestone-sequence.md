@@ -4,6 +4,22 @@
 milestone now in progress (M0). §9's definition of done applies to every milestone: domain
 model + migration + API + UI + all four UI states + tests + logging + docs.
 
+## 0. Product-validation (PV) track — owner-directed 2026-07-17 (D10)
+
+While the M0 gate is open, the active engineering sequence is **PV0–PV12** from
+`docs/product-validation/master-plan.md` §24: a complete production-shaped build against
+`MockFinancialProvider` only, governed by `docs/product-validation/00-governance.md`. The
+M0–M10 sequence below is unchanged and resumes for provider integration when the gate closes
+(the PV build then needs only an adapter — master plan §28). Status:
+
+| PV | Scope | Status |
+|---|---|---|
+| PV0 | build governance, work classification, provider-import CI guard | **DONE** (report: `milestone-reports/PV0-PV2.md`) |
+| PV1 | monorepo wiring, API app, PG/Redis/BullMQ, docker-compose, auth, CI | **DONE** (owner-approved 2026-07-17; report: `milestone-reports/PV1.md`) — full local stack bring-up needs Docker Desktop installed |
+| PV2 | domain core: entities, money, state machines, split + policy engines | **DONE**; identity migration landed with PV1; vink-domain migration landed with PV3 |
+| PV3 | application command layer (D13) + organizer vink API | **DONE** (report: `milestone-reports/PV3.md`) — exit-gate integration suite runs in CI (locally blocked on Docker install) |
+| PV4–PV12 | see master plan §24 | PV4 next: guest join + sharing (public codes, QR payload, rate limiting) |
+
 ## 1. Sequence and dependencies
 
 ```text

@@ -1,0 +1,6 @@
+# Formatting is code-only; docs (especially the verbatim Spec and master plan) are never reformatted.
+*.md
+node_modules/
+.turbo/
+coverage/
+pnpm-lock.yaml

@@ -441,7 +441,9 @@ export class MockFinancialProvider implements FinancialProvider {
    * decision engine sits ON TOP of this in the real system — the mock lets those tests
    * simulate the provider half.
    */
-  simulateMerchantAuthorization(request: MerchantAuthorizationRequest): MerchantAuthorizationOutcome {
+  simulateMerchantAuthorization(
+    request: MerchantAuthorizationRequest,
+  ): MerchantAuthorizationOutcome {
     assertMoney(request.amount, 'simulateMerchantAuthorization.amount');
     const card = this.requireCard(request.providerCardId);
 

@@ -1,10 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import {
-  ProviderError,
-  operationId,
-  type Money,
-} from '../../payment-provider/src/index.ts';
+import { ProviderError, operationId, type Money } from '../../payment-provider/src/index.ts';
 import type { MakeKit, ProviderTestKit } from './test-kit.ts';
 
 /**
@@ -376,7 +372,11 @@ export function runFinancialProviderContractTests(name: string, makeKit: MakeKit
 
     it('enforces the cumulative card spending limit (§17 exposure math)', async (t) => {
       const kit = await makeKit();
-      if (!kit.provider.capabilities.virtualCardIssuing || !kit.issueCard || !kit.merchantAuthorize) {
+      if (
+        !kit.provider.capabilities.virtualCardIssuing ||
+        !kit.issueCard ||
+        !kit.merchantAuthorize
+      ) {
         return t.skip('no issuing simulation available');
       }
       const cardId = await kit.issueCard(10_000);
@@ -388,7 +388,8 @@ export function runFinancialProviderContractTests(name: string, makeKit: MakeKit
 
     it('declines a duplicate merchant authorization once the limit is consumed (§17)', async (t) => {
       const kit = await makeKit();
-      if (!kit.issueCard || !kit.merchantAuthorize) return t.skip('no issuing simulation available');
+      if (!kit.issueCard || !kit.merchantAuthorize)
+        return t.skip('no issuing simulation available');
       const cardId = await kit.issueCard(12_843);
       const first = await kit.merchantAuthorize(cardId, 12_843, '5411');
       assert.equal(first.approved, true);
@@ -416,7 +417,8 @@ export function runFinancialProviderContractTests(name: string, makeKit: MakeKit
 
     it('freeze and close both stop new authorizations (§16/§18)', async (t) => {
       const kit = await makeKit();
-      if (!kit.issueCard || !kit.merchantAuthorize) return t.skip('no issuing simulation available');
+      if (!kit.issueCard || !kit.merchantAuthorize)
+        return t.skip('no issuing simulation available');
 
       const frozenCard = await kit.issueCard(10_000);
       await kit.provider.freezeCard(frozenCard);

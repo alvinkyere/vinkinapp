@@ -2,7 +2,30 @@
   "permissions": {
     "allow": [
       "Bash(npm test *)",
-      "Read(//Users/alvinkyere870gmail.com/Downloads/**)"
+      "Read(//Users/alvinkyere870gmail.com/Downloads/**)",
+      "Bash(node tooling/scripts/check-provider-imports.mjs)",
+      "Bash(npm install *)",
+      "Bash(./node_modules/.bin/tsc --noEmit -p packages/domain/tsconfig.json)",
+      "Bash(./node_modules/.bin/tsc --noEmit -p packages/payment-provider/tsconfig.json)",
+      "Bash(./node_modules/.bin/tsc --noEmit -p packages/payment-provider-contract-tests/tsconfig.json)",
+      "Bash(docker info *)",
+      "Bash(corepack --version)",
+      "Bash(pnpm --version)",
+      "Bash(rm -rf node_modules package-lock.json)",
+      "Bash(pnpm add *)",
+      "Bash(pnpm --filter @vinkin/api add fastify zod jose postgres bullmq ioredis \"@opentelemetry/api\" \"@opentelemetry/sdk-node\" \"@opentelemetry/exporter-trace-otlp-http\")",
+      "Bash(pnpm --filter @vinkin/api add -D typescript \"@types/node\")",
+      "Bash(pnpm install *)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(echo \"tsc exit: $?\")",
+      "Bash(pnpm format *)",
+      "Bash(pnpm lint *)",
+      "Bash(pnpm format:check)",
+      "Bash(pnpm guard *)",
+      "Bash(pnpm typecheck *)",
+      "Bash(pnpm test *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(grep -cE \"ms$\")"
     ]
   }
 }

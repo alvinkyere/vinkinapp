@@ -1,0 +1,20 @@
+{
+  "name": "@vinkin/application",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Application command layer (D13): every business action is an explicit command — validate → load → transition → emit event (D12) → return. Zero dependencies; persistence is a port.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

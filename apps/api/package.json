@@ -1,0 +1,34 @@
+{
+  "name": "@vinkin/api",
+  "version": "0.0.1",
+  "private": true,
+  "description": "VinkIn API — transport layer (PV1). Health, auth, logging; no business logic (D13).",
+  "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "dev": "node --watch src/server.ts",
+    "start": "node src/server.ts",
+    "migrate": "node src/db/migrate.ts",
+    "seed": "node src/seed.ts",
+    "worker": "node src/jobs/worker.ts",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
+    "@opentelemetry/sdk-node": "^0.220.0",
+    "bullmq": "^5.80.5",
+    "fastify": "^5.10.0",
+    "ioredis": "^5.11.1",
+    "jose": "^6.2.3",
+    "postgres": "^3.4.9",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5.9.3"
+  }
+}

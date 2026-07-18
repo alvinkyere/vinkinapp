@@ -29,4 +29,7 @@ built on a PROPOSED default if the answer could invalidate it.
 
 ## Resolved
 
-_(none yet — move rows here with `CLOSED → Dn` when the decision log gains the entry)_
+| ID | Question | Resolution |
+|---|---|---|
+| G13 | Unspecified PV §8/§9 state-machine edges (FUNDING_REVERSAL exit; CANCELLATION_PENDING outcomes; RESOLUTION_PENDING exits; DRAFT cancellation) | CLOSED → D11 amendment (owner 2026-07-17): ratified exactly as implemented in `packages/domain`; DRAFT cancellation stays unmodeled |
+| G14 | Reconcile PV vs doc 03 state vocabulary | CLOSED → D11 amendment: PV names canonical everywhere; alternate vocabulary retired; doc 03 rewritten |

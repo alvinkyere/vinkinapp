@@ -1,0 +1,253 @@
+/**
+ * Organizer vink transport (PV3). Routes are thin bindings over application commands
+ * (D13): parse → authenticate → invoke command/query → map typed errors. No business
+ * logic here.
+ */
+
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import {
+  ApplicationError,
+  addParticipantCommand,
+  cancelVinkCommand,
+  configureVinkCommand,
+  coverRemainingCommand,
+  createVinkCommand,
+  getVinkActivity,
+  getVinkSnapshot,
+  openVinkCommand,
+  removeParticipantCommand,
+  setSplitCommand,
+  type CommandContext,
+} from '../../../../../packages/application/src/index.ts';
+import {
+  DomainError,
+  IllegalTransitionError,
+  type ParticipantId,
+  type UserId,
+  type VinkId,
+} from '../../../../../packages/domain/src/index.ts';
+import type { Env } from '../../config/env.ts';
+import type { Sql } from '../../db/client.ts';
+import { requireUser } from '../../auth/http.ts';
+import { PostgresVinkStore } from './store.ts';
+
+const PURCHASE_CATEGORIES = [
+  'GROCERY',
+  'RETAIL',
+  'ELECTRONICS',
+  'RESTAURANT',
+  'HOTEL',
+  'FUEL',
+  'CAR_RENTAL',
+] as const;
+
+const createSchema = z.object({
+  purchaseCategory: z.enum(PURCHASE_CATEGORIES),
+  subtotalMinor: z.number().int().nonnegative(),
+  tipMinor: z.number().int().nonnegative().default(0),
+  submissionDeadline: z.iso.datetime(),
+  organizerDisplayName: z.string().min(1).max(80),
+});
+
+const configureSchema = z.object({
+  expectedVersion: z.number().int().positive().optional(),
+  subtotalMinor: z.number().int().nonnegative().optional(),
+  tipMinor: z.number().int().nonnegative().optional(),
+  submissionDeadline: z.iso.datetime().optional(),
+});
+
+const lifecycleSchema = z.object({
+  expectedVersion: z.number().int().positive().optional(),
+});
+
+const addParticipantSchema = z.object({
+  expectedVersion: z.number().int().positive().optional(),
+  username: z.string().min(1),
+  displayName: z.string().min(1).max(80).optional(),
+});
+
+const splitSchema = z.discriminatedUnion('method', [
+  z.object({
+    method: z.literal('EQUAL'),
+    expectedVersion: z.number().int().positive().optional(),
+  }),
+  z.object({
+    method: z.literal('CUSTOM_AMOUNT'),
+    expectedVersion: z.number().int().positive().optional(),
+    amounts: z
+      .array(z.object({ participantId: z.uuid(), amountMinor: z.number().int().nonnegative() }))
+      .min(1),
+  }),
+  z.object({
+    method: z.literal('PERCENTAGE'),
+    expectedVersion: z.number().int().positive().optional(),
+    shares: z
+      .array(z.object({ participantId: z.uuid(), basisPoints: z.number().int().nonnegative() }))
+      .min(1),
+  }),
+]);
+
+function errorStatus(error: unknown): { status: number; body: Record<string, unknown> } | null {
+  if (error instanceof ApplicationError) {
+    const status =
+      error.code === 'VINK_NOT_FOUND' || error.code === 'PARTICIPANT_NOT_FOUND'
+        ? 404
+        : error.code === 'FORBIDDEN'
+          ? 403
+          : error.code === 'VINK_VERSION_CONFLICT'
+            ? 409
+            : 422;
+    return { status, body: { error: error.code, message: error.message } };
+  }
+  if (error instanceof IllegalTransitionError) {
+    return {
+      status: 409,
+      body: { error: error.code, message: error.message, from: error.from, event: error.event },
+    };
+  }
+  if (error instanceof DomainError) {
+    return { status: 422, body: { error: error.code, message: error.message } };
+  }
+  return null;
+}
+
+export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): void {
+  const store = new PostgresVinkStore(sql);
+
+  function contextFor(request: FastifyRequest, actorUserId: string): CommandContext {
+    return {
+      uow: store,
+      clock: { now: () => new Date() },
+      actorUserId,
+      correlationId: String(request.id),
+    };
+  }
+
+  async function handle(
+    reply: FastifyReply,
+    status: number,
+    action: () => Promise<unknown>,
+  ): Promise<unknown> {
+    try {
+      return reply.code(status).send(await action());
+    } catch (error) {
+      const mapped = errorStatus(error);
+      if (mapped === null) throw error;
+      return reply.code(mapped.status).send(mapped.body);
+    }
+  }
+
+  app.post('/api/v1/vinks', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    const body = createSchema.parse(request.body);
+    return handle(reply, 201, () => createVinkCommand(contextFor(request, claims.userId), body));
+  });
+
+  app.get('/api/v1/vinks/:vinkId', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    const { vinkId } = request.params as { vinkId: string };
+    return handle(reply, 200, () => getVinkSnapshot(store, vinkId as VinkId, claims.userId));
+  });
+
+  app.patch('/api/v1/vinks/:vinkId', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    const { vinkId } = request.params as { vinkId: string };
+    const body = configureSchema.parse(request.body);
+    return handle(reply, 200, () =>
+      configureVinkCommand(contextFor(request, claims.userId), {
+        ...body,
+        vinkId: vinkId as VinkId,
+      }),
+    );
+  });
+
+  for (const [path, command] of [
+    ['open', openVinkCommand],
+    ['cancel', cancelVinkCommand],
+    ['cover-remaining', coverRemainingCommand],
+  ] as const) {
+    app.post(`/api/v1/vinks/:vinkId/${path}`, async (request, reply) => {
+      const claims = await requireUser(request, reply, env);
+      if (claims === null) return;
+      const { vinkId } = request.params as { vinkId: string };
+      const body = lifecycleSchema.parse(request.body ?? {});
+      return handle(reply, 200, () =>
+        command(contextFor(request, claims.userId), { ...body, vinkId: vinkId as VinkId }),
+      );
+    });
+  }
+
+  app.post('/api/v1/vinks/:vinkId/participants', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    const { vinkId } = request.params as { vinkId: string };
+    const body = addParticipantSchema.parse(request.body);
+    const users = await sql`SELECT id, display_name FROM users
+      WHERE username = ${body.username} AND status = 'ACTIVE'`;
+    const user = users[0] as { id: string; display_name: string } | undefined;
+    if (user === undefined) {
+      return reply.code(404).send({ error: 'USER_NOT_FOUND', message: `no user ${body.username}` });
+    }
+    return handle(reply, 201, () =>
+      addParticipantCommand(contextFor(request, claims.userId), {
+        vinkId: vinkId as VinkId,
+        userId: user.id as UserId,
+        displayName: body.displayName ?? user.display_name,
+        ...(body.expectedVersion !== undefined && { expectedVersion: body.expectedVersion }),
+      }),
+    );
+  });
+
+  app.delete('/api/v1/vinks/:vinkId/participants/:participantId', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    const params = request.params as { vinkId: string; participantId: string };
+    return handle(reply, 200, () =>
+      removeParticipantCommand(contextFor(request, claims.userId), {
+        vinkId: params.vinkId as VinkId,
+        participantId: params.participantId as ParticipantId,
+      }),
+    );
+  });
+
+  app.put('/api/v1/vinks/:vinkId/split', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    const { vinkId } = request.params as { vinkId: string };
+    const body = splitSchema.parse(request.body);
+    return handle(reply, 200, () =>
+      setSplitCommand(contextFor(request, claims.userId), {
+        ...(body.method === 'EQUAL'
+          ? { method: body.method }
+          : body.method === 'CUSTOM_AMOUNT'
+            ? {
+                method: body.method,
+                amounts: body.amounts.map((entry) => ({
+                  participantId: entry.participantId as ParticipantId,
+                  amountMinor: entry.amountMinor,
+                })),
+              }
+            : {
+                method: body.method,
+                shares: body.shares.map((entry) => ({
+                  participantId: entry.participantId as ParticipantId,
+                  basisPoints: entry.basisPoints,
+                })),
+              }),
+        vinkId: vinkId as VinkId,
+        ...(body.expectedVersion !== undefined && { expectedVersion: body.expectedVersion }),
+      }),
+    );
+  });
+
+  app.get('/api/v1/vinks/:vinkId/activity', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    const { vinkId } = request.params as { vinkId: string };
+    return handle(reply, 200, () => getVinkActivity(store, vinkId as VinkId, claims.userId));
+  });
+}

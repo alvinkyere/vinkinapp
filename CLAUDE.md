@@ -19,20 +19,35 @@ questions in `docs/spec/open-questions.md` (G1–G12).
 
 ## Where the project is right now
 
-**Milestone 0 — Provider Feasibility.** Closure is governed solely by the ten-condition gate
-in `docs/architecture/06-milestone-0-gate.md`, which also lists what work is **permitted**
-(provider-neutral: CI, ADRs, threat model, fixtures, mock scenarios, contract tests) vs.
-**forbidden** (anything whose shape depends on unconfirmed funds flow: capture flows,
-Stripe-specific schemas, card UI, production ledger migrations) while the gate is open.
+**Two tracks.** The M0 gate (`docs/architecture/06-milestone-0-gate.md`) remains the sole
+authority on provider integration and stays open (blocked on owner outreach + sandbox
+accounts). Meanwhile the owner directed (2026-07-17, D10) the **product-validation track**:
+PV0–PV12 per `docs/product-validation/master-plan.md`, a full production-shaped build against
+`MockFinancialProvider` only, governed by `docs/product-validation/00-governance.md`
+(green/yellow/red work classification, feature flags, environments).
 
-Done: ten §45 planning artifacts (`docs/`), the Spec committed verbatim, feasibility outreach
-package ready to send (`docs/feasibility/`), provider abstraction + `MockFinancialProvider` +
-shared conformance suite — 34/34 tests green, strict typecheck clean, CI workflow in place.
+Done: M0 planning artifacts + provider abstraction + conformance suite; **PV0** (governance +
+provider-import CI guard), **PV2 domain core** (`packages/domain`), and **PV1 platform**
+(pnpm workspace + Turborepo, `apps/api` — Fastify, health, auth with rotating refresh tokens,
+Pino, env-gated OTel, BullMQ heartbeat worker, SQL migration runner + identity migration,
+seed, docker-compose, CI with real PG/Redis service containers). Owner ratified D10 and G13,
+amended D11 (**PV state names are canonical everywhere** — doc 03 rewritten, appendix maps
+retired names), and added **D12** (every transition atomically emits its named domain event —
+transition tables return `{to, emits}`) and **D13** (all business behavior is an application
+command; transports never mutate aggregates). Authoritative architecture diagram:
+`docs/architecture/07-system-context.md` — new features must fit it. 99/99 tests green
+repo-wide; lint/format/typecheck/guard green (`pnpm lint / format:check / typecheck / test`).
 
-Blocked on the owner: send outreach package (provider + counsel), open sandbox accounts,
-run `git init` (see README "Owner setup"). When sandbox keys arrive, the next engineering
-work is the S1–S12 scripts (`docs/feasibility/sandbox-test-plan.md`) in
-`packages/payment-provider/spike/`, driven through the neutral interface.
+**PV3 is done** (`milestone-reports/PV3.md`): `packages/application` command layer (D13 —
+ports + `applyVinkTransition` as the single state-write path), vink-domain migration 0002,
+eleven organizer endpoints as thin command bindings, server-computed `allowedActions`.
+109 locally-runnable tests green; the auth + vink **integration suites have never executed**
+(no Docker locally, CI not yet run) — first push runs them against real PG/Redis.
+
+**Next: PV4** — guest join + sharing (share links, QR payload, `GET /join/:publicCode`,
+guest tokens hashed, rate limiting; G4 token design goes live). Machine gap: **Docker
+Desktop not installed** (owner) — until then `pnpm dev`'s compose step and local integration
+tests can't run. Sandbox S1–S12 work remains blocked on provider keys, unchanged.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 
@@ -51,6 +66,10 @@ work is the S1–S12 scripts (`docs/feasibility/sandbox-test-plan.md`) in
   one provider has it** (§21, D7).
 - Webhooks: verify signature, store raw, dedupe on `(provider, provider_event_id)`, decide by
   provider `occurred_at` — never arrival time (§28).
+- **State names**: the PV plan's vocabulary is canonical everywhere (D11); never reintroduce
+  retired names (doc 03 appendix has the mapping). Every transition emits its named domain
+  event atomically (D12); all business behavior goes through application commands — no
+  transport mutates an aggregate (D13).
 - Spec/product changes are flagged to the owner, never made silently (§9). New
   interpretations get a decision-log entry (PROPOSED until ratified).
 
@@ -63,6 +82,6 @@ work is the S1–S12 scripts (`docs/feasibility/sandbox-test-plan.md`) in
 - Tests: `npm test` in each package (Node ≥ 23.6, zero deps — native TS type-stripping; code
   is erasable-syntax-only, so no TS enums/namespaces/parameter properties). Typecheck needs
   `npm install --no-save typescript@^5.8 @types/node@^24` at repo root (commands in README).
-- Machine notes: Node 25, no pnpm/Flutter yet; current path contains a space — quote paths
-  until the move to `~/code/vinkin` happens.
+- Machine notes: Node 25, no pnpm/Flutter yet. The repo now lives at `~/code/vinkin`
+  (D9 executed — space-in-path caveat gone).
 - Be explicit about what is unverified; prefer running the real tests over describing them.

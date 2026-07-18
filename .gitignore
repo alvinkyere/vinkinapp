@@ -2,6 +2,7 @@
 node_modules/
 *.tsbuildinfo
 npm-debug.log*
+.turbo/
 
 # Environment & secrets — never commit provider keys
 .env

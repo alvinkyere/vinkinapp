@@ -6,6 +6,17 @@ on:
   pull_request:
 
 jobs:
+  provider-import-guard:
+    name: Provider-import guard (PV0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: scan for prohibited provider SDK imports
+        run: node tooling/scripts/check-provider-imports.mjs
+
   packages:
     name: Package tests (zero-dependency, Node native TS)
     runs-on: ubuntu-latest
@@ -20,8 +31,53 @@ jobs:
       - name: provider conformance suite (mock adapter)
         working-directory: packages/payment-provider-contract-tests
         run: npm test
-      - name: typecheck (installs TypeScript only)
+      - name: domain tests
+        working-directory: packages/domain
+        run: npm test
+  workspace:
+    name: Workspace (pnpm) — lint, format, typecheck, API tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vinkin
+          POSTGRES_PASSWORD: vinkin
+          POSTGRES_DB: vinkin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vinkin -d vinkin"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - name: API tests (unit + integration against services)
+        working-directory: apps/api
+        env:
+          VINKIN_ENV: test
+          VINKIN_INTEGRATION: '1'
+          DATABASE_URL: postgres://vinkin:vinkin@localhost:5432/vinkin
+          REDIS_URL: redis://localhost:6379
         run: |
-          npm install --no-save typescript@^5.8 @types/node@^24
-          ./node_modules/.bin/tsc --noEmit -p packages/payment-provider/tsconfig.json
-          ./node_modules/.bin/tsc --noEmit -p packages/payment-provider-contract-tests/tsconfig.json
+          node src/db/migrate.ts
+          npm test
