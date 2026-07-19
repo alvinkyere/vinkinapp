@@ -109,3 +109,8 @@ export async function getVinkActivity(
   await loadOwnedVinkForRead(reader, vinkId, actorUserId);
   return reader.listActivity(vinkId);
 }
+
+/** The signed-in organizer's own vinks, newest first (Plan §20 "Vink history"). */
+export async function listMyVinks(reader: VinkReader, actorUserId: string): Promise<Vink[]> {
+  return reader.listVinksByOrganizer(actorUserId);
+}

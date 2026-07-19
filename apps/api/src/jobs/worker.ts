@@ -8,12 +8,12 @@
 
 import { Queue, Worker } from 'bullmq';
 import { loadEnv } from '../config/env.ts';
-import { createRedis } from '../redis/client.ts';
+import { createBullMqRedis } from '../redis/client.ts';
 
 const HEARTBEAT_QUEUE = 'heartbeat';
 
 const env = loadEnv();
-const connection = createRedis(env);
+const connection = createBullMqRedis(env);
 
 const queue = new Queue(HEARTBEAT_QUEUE, { connection });
 await queue.upsertJobScheduler('heartbeat-every-30s', { every: 30_000 });
@@ -23,7 +23,7 @@ const worker = new Worker(
   async (job) => {
     console.log(JSON.stringify({ msg: 'heartbeat', jobId: job.id, at: new Date().toISOString() }));
   },
-  { connection: createRedis(env) },
+  { connection: createBullMqRedis(env) },
 );
 
 async function shutdown(): Promise<void> {

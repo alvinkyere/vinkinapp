@@ -60,25 +60,46 @@ capture→settlement (MATCHED→COMPLETED / OVERAGE→RECOVERY_REQUIRED).
 recovery ladder to DEFAULTED→RESTRICTED, failed-session refunds (E8). Caught+fixed a
 PV3-shaped rollback defect in card provisioning.
 
-**PV8 done** (`milestone-reports/PV8.md`): real-time experience — in-process pub/sub hub,
-exhaustive `DomainEventName → client message type` mapping (Plan §14), an outbox publisher
-(**the first real consumer of `outbox_events.published_at`**, written since PV3), and
-`GET /api/v1/vinks/:vinkId/live` WebSocket channel with snapshot-on-every-connection
-(satisfies the reconnection rule with no separate code path to get wrong). **Caught and
-fixed another integration-only defect**: `buildApp` registered `@fastify/websocket` without
-awaiting it, so routes added synchronously right after were never wrapped by the plugin's
-`onRoute` hook — every WS handler silently received `(request, reply)` instead of
-`(socket, request)`. A standalone repro script (not the test framework) surfaced the real
-stack trace; fix was making `buildApp` async and awaiting the plugin registration before
-any route registers (9 call sites + type declarations updated). **146 unit + 49
-integration tests green** (real local PG 16 + real listening HTTP server — WS upgrades
-can't go through `.inject()`). Owner push runs PV3–PV8 through CI.
+**PV8 done** (`milestone-reports/PV8.md`): real-time experience — WebSocket channel with
+snapshot-on-every-connection, outbox publisher (first consumer of `published_at`). Caught +
+fixed an async-plugin-registration race (`buildApp` now async, awaits `@fastify/websocket`
+before routes register).
 
-Next: **PV9 — organizer mobile application (Flutter)**, the first client of everything
-built PV1–PV8. Also the point to revisit D10's two standing flags (provider-calls-in-
-transaction, single-process realtime fanout) before client work multiplies what depends on
-them. Machine notes: pnpm 11 + PostgreSQL 16 binaries installed; still no Docker; Flutter
-SDK needed for PV9. Sandbox S1–S12 blocked on keys.
+**PV8.5 done** (`milestone-reports/PV8.5.md`, owner-directed formal hardening milestone —
+settled both D10-flagged infrastructure gaps before Flutter depends on their behavior):
+- **D16 (implemented):** `RealtimeHub` is now an interface; `RedisRealtimeHub` (two ioredis
+  connections, ref-counted local subscriptions) replaces the single-process hub in
+  `server.ts`. Outbox publisher hardened with `FOR UPDATE SKIP LOCKED` (safe concurrent
+  polling across instances) and publish-before-commit ordering. **Cross-instance delivery
+  and no-duplicate-publish are proven against real local Redis + Postgres**, not asserted
+  by inspection — two independent hub instances / two concurrent pollers, genuinely racing.
+- **D15 (ratified, not rewritten):** provider calls staying inside the DB transaction is a
+  formal, owner-visible scoping decision — the correct two-phase redesign depends on which
+  real provider gets chosen (M0 gate still open), so redesigning now risks guessing a
+  discarded shape. Comments in `contributions/purchases/recovery/refunds.ts` point to D15
+  instead of a vague flag. Revisit trigger: M0 gate closure.
+- **146 unit + 55 integration tests green** (real local PG 16 + real local Redis, both
+  brew-installed, no Docker). Owner push runs PV3–PV8.5 through CI (already has both PG and
+  Redis service containers).
+
+**PV9 done** (`milestone-reports/PV9.md`): organizer mobile application — a Flutter app
+(`apps/mobile/`) covering the full E1 journey (register → create Vink → add participants →
+split → open → live funding/card/completion over the PV8/PV8.5 WebSocket channel, no
+polling). Verified on a real booted iOS Simulator against the real local server via
+`integration_test`/XCTest touch injection — not a mock. Added `GET /api/v1/vinks`
+(list-my-vinks, Plan §20). Caught + fixed two real defects the first live-process run
+surfaced: BullMQ's `Queue`/`Worker` require `maxRetriesPerRequest: null`, which
+`createRedis()`'s health-check-tuned `maxRetriesPerRequest: 1` violated — silently killing
+the sweep scheduler and the PV1 heartbeat worker since PV1 (new `createBullMqRedis()`
+factory fixes both); and the Lobby screen never re-fetched participants/card data on a live
+state-change event, so a provisioned card stayed invisible (now re-fetches the full snapshot
+per event). **147 unit + 55 integration tests green**, `flutter analyze`/`flutter test`
+clean. Known gap: no organizer self-approve-contribution UI yet (organizer split defaults to
+$0, flagged for PV10).
+
+Next: **PV10 — participant/guest mobile experience**. Machine notes: pnpm 11 + PostgreSQL 16
++ Redis + Flutter SDK all installed (via brew/dart; still no Docker). Sandbox S1–S12 blocked
+on keys.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 
@@ -113,6 +134,6 @@ SDK needed for PV9. Sandbox S1–S12 blocked on keys.
 - Tests: `npm test` in each package (Node ≥ 23.6, zero deps — native TS type-stripping; code
   is erasable-syntax-only, so no TS enums/namespaces/parameter properties). Typecheck needs
   `npm install --no-save typescript@^5.8 @types/node@^24` at repo root (commands in README).
-- Machine notes: Node 25, no pnpm/Flutter yet. The repo now lives at `~/code/vinkin`
-  (D9 executed — space-in-path caveat gone).
+- Machine notes: Node 25, pnpm 11, Flutter SDK all installed. The repo now lives at
+  `~/code/vinkin` (D9 executed — space-in-path caveat gone).
 - Be explicit about what is unverified; prefer running the real tests over describing them.

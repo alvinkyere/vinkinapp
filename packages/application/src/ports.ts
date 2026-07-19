@@ -110,6 +110,8 @@ export interface VinkReader {
   getCardByVink(vinkId: VinkId): Promise<TemporaryCard | null>;
   listRecoveryObligations(vinkId: VinkId): Promise<RecoveryObligation[]>;
   listActivity(vinkId: VinkId): Promise<ActivityEntry[]>;
+  /** Newest first — the organizer's own vink history (Plan §20 "Vink history"). */
+  listVinksByOrganizer(organizerUserId: string): Promise<Vink[]>;
   /** Resolves a guest access-token hash to its participant, or null (expired/unknown). */
   findGuestParticipant(
     accessTokenHash: string,

@@ -8,7 +8,8 @@
  *
  * Every transition is one row-locked unit of work with its outbox event (D12); the vink row
  * is locked first (Plan §11). The FUNDED→COMPLETED path posts to the ledger; the DB's
- * balanced/append-only triggers are the final guard.
+ * balanced/append-only triggers are the final guard. Provider calls (issuance/closure)
+ * happen inside that unit of work — ratified for the mock build as D15.
  */
 
 import {

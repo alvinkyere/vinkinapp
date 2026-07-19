@@ -15,6 +15,7 @@ import {
   createVinkCommand,
   getVinkActivity,
   getVinkSnapshot,
+  listMyVinks,
   openVinkCommand,
   removeParticipantCommand,
   setSplitCommand,
@@ -143,6 +144,12 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
     if (claims === null) return;
     const body = createSchema.parse(request.body);
     return handle(reply, 201, () => createVinkCommand(contextFor(request, claims.userId), body));
+  });
+
+  app.get('/api/v1/vinks', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    return handle(reply, 200, async () => ({ vinks: await listMyVinks(store, claims.userId) }));
   });
 
   app.get('/api/v1/vinks/:vinkId', async (request, reply) => {

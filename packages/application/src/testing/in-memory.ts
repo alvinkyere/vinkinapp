@@ -86,6 +86,12 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
     return this.vinks.get(id) ?? null;
   }
 
+  async listVinksByOrganizer(organizerUserId: string): Promise<Vink[]> {
+    return [...this.vinks.values()]
+      .filter((vink) => vink.organizerUserId === organizerUserId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   async updateVink(vink: Vink): Promise<void> {
     this.vinks.set(vink.id, vink);
   }

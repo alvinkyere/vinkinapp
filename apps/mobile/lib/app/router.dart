@@ -1,0 +1,58 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../core/auth/auth_controller.dart';
+import '../features/create_vink/create_vink_screen.dart';
+import '../features/home/home_screen.dart';
+import '../features/onboarding/login_screen.dart';
+import '../features/onboarding/register_screen.dart';
+import '../features/onboarding/welcome_screen.dart';
+import '../features/profile/profile_screen.dart';
+import '../features/vink_lobby/vink_lobby_screen.dart';
+
+/// The Flutter client never re-derives backend state-machine logic (Plan §19) — it also
+/// never re-derives AUTH logic: this redirect is the one place session state decides what
+/// screen is reachable.
+GoRouter buildRouter(Ref ref) {
+  return GoRouter(
+    initialLocation: '/welcome',
+    refreshListenable: _AuthListenable(ref),
+    redirect: (context, state) {
+      final authState = ref.read(authControllerProvider);
+      final onboardingRoute = {'/welcome', '/login', '/register'}.contains(state.matchedLocation);
+      if (authState is AuthUnknown) return null; // still restoring the session — hold position
+      if (authState is AuthSignedOut && !onboardingRoute) return '/welcome';
+      if (authState is AuthSignedIn && onboardingRoute) return '/home';
+      return null;
+    },
+    routes: [
+      GoRoute(path: '/welcome', builder: (context, state) => const WelcomeScreen()),
+      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(path: '/register', builder: (context, state) => const RegisterScreen()),
+      GoRoute(path: '/home', builder: (context, state) => const HomeScreen()),
+      GoRoute(path: '/create-vink', builder: (context, state) => const CreateVinkScreen()),
+      GoRoute(
+        path: '/vinks/:vinkId',
+        builder: (context, state) => VinkLobbyScreen(vinkId: state.pathParameters['vinkId']!),
+      ),
+      GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen()),
+    ],
+  );
+}
+
+/// Bridges Riverpod's provider stream to GoRouter's `Listenable` refresh hook, so a login/
+/// logout immediately re-evaluates `redirect` without the user navigating manually.
+class _AuthListenable extends ChangeNotifier {
+  _AuthListenable(this._ref) {
+    _subscription = _ref.listen(authControllerProvider, (_, _) => notifyListeners());
+  }
+
+  final Ref _ref;
+  late final ProviderSubscription<AuthState> _subscription;
+
+  @override
+  void dispose() {
+    _subscription.close();
+    super.dispose();
+  }
+}

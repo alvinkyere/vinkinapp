@@ -19,7 +19,7 @@ import {
   removeParticipantCommand,
   setSplitCommand,
 } from './commands.ts';
-import { getVinkActivity, getVinkSnapshot } from './queries.ts';
+import { getVinkActivity, getVinkSnapshot, listMyVinks } from './queries.ts';
 
 const ORGANIZER = 'organizer-user' as UserId;
 const FUTURE = new Date('2026-08-01T12:00:00Z').toISOString();
@@ -287,5 +287,30 @@ describe('queries', () => {
     ]);
     assert.equal(activity.filter((entry) => entry.kind === 'transition').length, 1);
     await assert.rejects(getVinkActivity(store, vink.id, 'stranger'), isAppError('FORBIDDEN'));
+  });
+
+  it("listMyVinks returns only the organizer's own vinks, newest first", async () => {
+    const store = new InMemoryVinkStore();
+    const { vink: first } = await createDraft(store, 1_000);
+    const { vink: second } = await createDraft(store, 2_000);
+    await createVinkCommand(
+      {
+        uow: store,
+        clock: { now: () => new Date('2026-07-17T10:00:00Z') },
+        actorUserId: 'other-organizer',
+        correlationId: 'test',
+      },
+      {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 500,
+        tipMinor: 0,
+        submissionDeadline: FUTURE,
+        organizerDisplayName: 'Other',
+      },
+    );
+
+    const mine = await listMyVinks(store, ORGANIZER);
+    assert.deepEqual(mine.map((vink) => vink.id).sort(), [first.id, second.id].sort());
+    assert.ok(mine.every((vink) => vink.organizerUserId === ORGANIZER));
   });
 });

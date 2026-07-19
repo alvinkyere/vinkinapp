@@ -5,7 +5,8 @@
  *
  * A provider refund failure is not swallowed: the contribution reaches REFUND_FAILED — an
  * explicit, observable state the retry-refund job (and the ops console) act on (E8).
- * D12/D13 throughout; the vink stays EXPIRED (contribution-level cleanup, doc 03).
+ * D12/D13 throughout; the vink stays EXPIRED (contribution-level cleanup, doc 03). Provider
+ * calls happen inside the unit of work — ratified for the mock build as D15.
  */
 
 import {

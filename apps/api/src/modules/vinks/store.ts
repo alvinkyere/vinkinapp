@@ -437,6 +437,12 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
     return rows.length === 0 ? null : rowToVink(rows[0] as Row);
   }
 
+  async listVinksByOrganizer(organizerUserId: string): Promise<Vink[]> {
+    const rows = await this.#sql`SELECT * FROM vinks
+      WHERE organizer_user_id = ${organizerUserId} ORDER BY created_at DESC`;
+    return rows.map((row) => rowToVink(row as Row));
+  }
+
   async getVinkByPublicCode(publicCode: string): Promise<Vink | null> {
     const rows = await this.#sql`SELECT * FROM vinks WHERE public_code = ${publicCode}`;
     return rows.length === 0 ? null : rowToVink(rows[0] as Row);

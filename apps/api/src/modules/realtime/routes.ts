@@ -65,9 +65,11 @@ export function registerRealtimeRoutes(
     }
 
     socket.send(JSON.stringify({ type: 'snapshot', vinkId, snapshot }));
-    const unsubscribe = hub.subscribe(vinkId, (message) => {
+    const unsubscribe = await hub.subscribe(vinkId, (message) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
     });
-    socket.on('close', unsubscribe);
+    socket.on('close', () => {
+      void unsubscribe();
+    });
   });
 }

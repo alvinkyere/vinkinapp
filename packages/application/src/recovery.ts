@@ -6,7 +6,8 @@
  * The charge reuses the neutral authorize+capture primitive against the organizer's own
  * payment method (the mock's `offSessionRecovery` capability). D5/D12/D13 throughout: vink
  * row locked first, one unit of work, domain-decided transitions + outbox events, the DB's
- * balanced/append-only ledger triggers as the final guard.
+ * balanced/append-only ledger triggers as the final guard. Provider calls happen inside
+ * that unit of work — ratified for the mock build as D15.
  */
 
 import {

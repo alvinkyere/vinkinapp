@@ -5,7 +5,7 @@ import { buildApp } from './app.ts';
 import { startOtel } from './observability/otel.ts';
 import { startSweepScheduler } from './jobs/sweeps.ts';
 import { startOutboxPublisher } from './realtime/outbox-publisher.ts';
-import { RealtimeHub } from './realtime/hub.ts';
+import { RedisRealtimeHub } from './realtime/redis-hub.ts';
 import { MockFinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 
 const env = loadEnv();
@@ -14,8 +14,12 @@ const sql = createDb(env);
 const redis = createRedis(env);
 // The only provider until the M0 gate admits a real adapter (master plan §28).
 const provider = new MockFinancialProvider();
-// Shared with the outbox publisher below so committed events reach live WebSocket clients.
-const hub = new RealtimeHub();
+// Redis-backed (D16): shared with the outbox publisher below, and correct across multiple
+// API instances. A dedicated connection for SUBSCRIBE — ioredis locks a connection into
+// subscriber-only mode the moment .subscribe() is first called.
+const realtimePub = createRedis(env);
+const realtimeSub = createRedis(env);
+const hub = new RedisRealtimeHub(realtimePub, realtimeSub);
 
 const app = await buildApp({
   env,
@@ -50,6 +54,8 @@ async function shutdown(signal: string): Promise<void> {
   if (stopSweeps !== null) await stopSweeps();
   await sql.end({ timeout: 5 });
   redis.disconnect();
+  realtimePub.disconnect();
+  realtimeSub.disconnect();
   await stopOtel();
   process.exit(0);
 }

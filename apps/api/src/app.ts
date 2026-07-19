@@ -18,7 +18,7 @@ import { registerContributionRoutes } from './modules/contributions/routes.ts';
 import { registerPurchaseRoutes } from './modules/purchases/routes.ts';
 import { registerRecoveryRoutes } from './modules/recovery/routes.ts';
 import { registerRealtimeRoutes } from './modules/realtime/routes.ts';
-import { RealtimeHub } from './realtime/hub.ts';
+import { InProcessRealtimeHub, type RealtimeHub } from './realtime/hub.ts';
 import type { FinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 
 export interface AppDeps extends HealthChecks {
@@ -84,7 +84,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       registerPurchaseRoutes(app, deps.env, deps.sql, deps.provider);
       registerRecoveryRoutes(app, deps.env, deps.sql, deps.provider);
     }
-    registerRealtimeRoutes(app, deps.env, deps.sql, deps.hub ?? new RealtimeHub());
+    registerRealtimeRoutes(app, deps.env, deps.sql, deps.hub ?? new InProcessRealtimeHub());
   }
 
   return app;

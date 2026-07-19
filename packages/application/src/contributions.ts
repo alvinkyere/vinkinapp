@@ -8,9 +8,10 @@
  * FUNDING_CONFIRMED / FUNDING_FAILED. Both the fast path (last authorization arrives) and
  * the deadline jobs enter through it, always under the same vink row lock.
  *
- * Validation-build note (flagged): provider calls happen inside the unit of work. The mock
- * is in-process and cannot fail independently of the transaction; a REAL adapter moves to
- * outbox-driven provider calls before this pattern ships with real money.
+ * D15 (ratified): provider calls happen inside the unit of work. The mock is in-process and
+ * cannot fail independently of the transaction, so this is safe today; the two-phase
+ * pattern a REAL adapter needs depends on that provider's own idempotency/webhook
+ * semantics and is designed at the M0 gate's close, not guessed at now.
  */
 
 import {

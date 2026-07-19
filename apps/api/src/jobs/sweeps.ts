@@ -19,7 +19,7 @@ import type { ContributionId, VinkId } from '../../../../packages/domain/src/ind
 import type { FinancialProvider } from '../../../../packages/payment-provider/src/index.ts';
 import type { Env } from '../config/env.ts';
 import type { Sql } from '../db/client.ts';
-import { createRedis } from '../redis/client.ts';
+import { createBullMqRedis } from '../redis/client.ts';
 import { PostgresVinkStore } from '../modules/vinks/store.ts';
 
 const SWEEP_QUEUE = 'vink-sweeps';
@@ -101,7 +101,7 @@ export async function startSweepScheduler(
   sql: Sql,
   provider: FinancialProvider,
 ): Promise<() => Promise<void>> {
-  const connection = createRedis(env);
+  const connection = createBullMqRedis(env);
   const queue = new Queue(SWEEP_QUEUE, { connection });
   await queue.upsertJobScheduler('vink-sweeps-repeat', { every: SWEEP_INTERVAL_MS });
   const worker = new Worker(
@@ -109,7 +109,7 @@ export async function startSweepScheduler(
     async () => {
       await runSweeps(sql, provider);
     },
-    { connection: createRedis(env) },
+    { connection: createBullMqRedis(env) },
   );
   return async () => {
     await worker.close();

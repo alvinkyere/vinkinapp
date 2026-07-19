@@ -8,6 +8,63 @@ contract.
 
 ---
 
+## D16 — Production-shaped realtime fanout: Redis-backed hub, in-process retained for tests
+
+- **Decision:** `apps/api/src/realtime/hub.ts` exposes a `RealtimeHub` interface with two
+  implementations: `RedisRealtimeHub` (ioredis pub/sub — one publish connection, one
+  dedicated subscriber connection, reference-counted local channel subscriptions) used by
+  `server.ts`, and `InProcessRealtimeHub` (the original PV8 implementation) kept for unit
+  tests that don't need infrastructure. The outbox publisher (`outbox-publisher.ts`) was
+  hardened alongside this: `SELECT … FOR UPDATE SKIP LOCKED` lets multiple API instances
+  poll concurrently without double-claiming rows, and the provider-neutral pattern from
+  D12/§12 applies — publish-then-commit, so a crash between them causes at most a harmless
+  duplicate delivery (at-least-once, idempotent consumers), never a lost one.
+- **Date:** 2026-07-18
+- **Status:** ACCEPTED (owner-directed: "settle both now" — formal PV8.5 milestone)
+- **Reason:** the PV8 hub was explicitly flagged single-process-only; multiple API
+  instances (any real deployment beyond a single validation-pilot box) need a shared
+  fanout or WebSocket clients on different instances silently miss events.
+- **Alternatives considered:** PostgreSQL LISTEN/NOTIFY (rejected: payload size limits and
+  no reference-counted subscription primitive; revisit if Redis becomes undesirable);
+  keeping single-process and documenting it as a pilot-only limitation (rejected — the
+  owner asked to settle it, and Redis is already a required dependency via BullMQ).
+- **Affected modules:** `apps/api/src/realtime/*`, `server.ts`.
+- **Revisit trigger:** none expected; LISTEN/NOTIFY reconsidered only if Redis is dropped
+  as an infra dependency entirely.
+
+## D15 — Provider-calls-inside-transaction pattern ratified as intentional for the mock build
+
+- **Decision:** `contributions.ts`, `purchases.ts`, and `recovery.ts` call
+  `FinancialProvider` methods **inside** the PostgreSQL row-locked transaction that also
+  writes domain state. This was flagged (not silently carried) in each module's header
+  since PV5. It is now formally **ratified as correct for the validation build** rather
+  than rewritten into a two-phase (reserve → external call outside any transaction →
+  record result) pattern, for a reason rooted in project scope, not convenience: the
+  *shape* of a correct two-phase design depends on the real provider's own idempotency and
+  webhook semantics (Stripe's differ meaningfully from Lithic's), which are unconfirmed
+  while the M0 gate is open. The gate's own rule — "anything whose shape would change if
+  condition 1 or 2 came back 'no' is forbidden until those conditions are met"
+  (`docs/architecture/06-milestone-0-gate.md`) — applies here: building speculative
+  two-phase provider orchestration now risks guessing a design the real adapter discards.
+  The mock provider is in-process and synchronous, so no external-call risk (timeout,
+  partial failure independent of the DB transaction) actually exists today to harden
+  against.
+- **Date:** 2026-07-18
+- **Status:** ACCEPTED (owner-directed scoping decision, made explicit rather than silently
+  deferred — Spec §9)
+- **Reason:** see above; distinguishes "flagged and consciously deferred with a named
+  trigger" from tech debt silently carried forward.
+- **Alternatives considered:** speculative two-phase rewrite now (rejected: guesses a
+  provider-specific design before a provider is chosen, contradicts the M0 gate's own
+  boundary, and risks the ~110 tests across PV5–PV7 for unproven value); do nothing /
+  leave the flag unresolved (rejected: the owner asked to settle it — this makes the
+  scoping decision explicit and owner-visible instead).
+- **Affected modules:** `packages/application/src/{contributions,purchases,recovery}.ts`
+  (comments updated to point here instead of a vague "D10 revisit").
+- **Revisit trigger:** M0 gate closure and the first real-adapter design review
+  (master plan §28) — the two-phase pattern is designed then, against the actual chosen
+  provider's semantics, not before.
+
 ## D14 — Validation-build guest token design (PV4 subset of G4)
 
 - **Decision:** guest join mints one opaque token (`vgt_` + 32 random bytes, base64url) per

@@ -1,16 +1,20 @@
 /**
  * Real-time channel end-to-end — the PV8 exit gate ("multiple clients observe the same
- * authoritative Vink state without manual refresh"). Requires a real listening HTTP server
- * (WebSocket upgrades cannot go through Fastify's `.inject()`) and real PostgreSQL;
+ * authoritative Vink state without manual refresh"), exercised through the SAME
+ * `RedisRealtimeHub` configuration `server.ts` actually runs (D16/PV8.5) — not a
+ * test-only in-process substitute. Requires a real listening HTTP server (WebSocket
+ * upgrades cannot go through Fastify's `.inject()`), real PostgreSQL, and real Redis;
  * VINKIN_INTEGRATION=1.
  */
 
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
+import type { Redis } from 'ioredis';
 import { buildApp } from './app.ts';
 import { createIsolatedTestDb, type IsolatedTestDb } from './testing/integration-db.ts';
-import { RealtimeHub } from './realtime/hub.ts';
+import { createRedis } from './redis/client.ts';
+import { RedisRealtimeHub } from './realtime/redis-hub.ts';
 import { startOutboxPublisher } from './realtime/outbox-publisher.ts';
 import { MockFinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 
@@ -58,7 +62,8 @@ async function waitFor(
 describe('real-time channel end-to-end (PostgreSQL + WebSocket)', { skip: !RUN }, () => {
   let db: IsolatedTestDb;
   let app: Awaited<ReturnType<typeof buildApp>>;
-  let hub: RealtimeHub;
+  let realtimePub: Redis;
+  let realtimeSub: Redis;
   let stopPublisher: () => void;
   let baseUrl: string;
   const stamp = Date.now();
@@ -71,7 +76,9 @@ describe('real-time channel end-to-end (PostgreSQL + WebSocket)', { skip: !RUN }
 
   before(async () => {
     db = await createIsolatedTestDb('realtime');
-    hub = new RealtimeHub();
+    realtimePub = createRedis(db.env);
+    realtimeSub = createRedis(db.env);
+    const hub = new RedisRealtimeHub(realtimePub, realtimeSub);
     const provider = new MockFinancialProvider();
     app = await buildApp({
       env: db.env,
@@ -81,7 +88,9 @@ describe('real-time channel end-to-end (PostgreSQL + WebSocket)', { skip: !RUN }
       checkDb: async () => {
         await db.sql`SELECT 1`;
       },
-      checkRedis: async () => {},
+      checkRedis: async () => {
+        await realtimePub.ping();
+      },
     });
     stopPublisher = startOutboxPublisher(db.sql, hub, PUBLISH_INTERVAL_MS);
     await app.listen({ port: 0, host: '127.0.0.1' });
@@ -101,6 +110,8 @@ describe('real-time channel end-to-end (PostgreSQL + WebSocket)', { skip: !RUN }
   after(async () => {
     stopPublisher();
     await app.close();
+    realtimePub.disconnect();
+    realtimeSub.disconnect();
     await db.drop();
   });
 

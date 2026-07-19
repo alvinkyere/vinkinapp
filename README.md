@@ -36,9 +36,18 @@ PV7 recovery + refunds:      COMPLETE  (organizer off-session recovery ladder, f
                                         session refunds E8; caught+fixed a rollback defect)
 PV8 real-time experience:    COMPLETE  (WebSocket channels, outbox publisher, snapshot-on-
                                         connect; caught+fixed a plugin-registration defect)
-Repo-wide:                   146 unit + 49 integration tests green; lint/format/guard green
-Next:                        PV9 — organizer mobile application (Flutter)
-Owner actions:               git push (runs PV3–PV8 CI); install Docker Desktop + Flutter SDK
+PV8.5 infra hardening:       COMPLETE  (owner-directed: Redis-backed realtime fanout D16
+                                        implemented+proven; provider-in-tx pattern D15
+                                        formally ratified, not rewritten — see report)
+PV9 organizer mobile app:    COMPLETE  (Flutter app, apps/mobile/; full E1 journey verified
+                                        on a real iOS Simulator against the real local
+                                        server; caught+fixed a BullMQ Redis-config defect
+                                        that had silently disabled the sweep scheduler since
+                                        PV1, and a Lobby live-update defect — see report)
+Repo-wide:                   147 unit + 55 integration tests green; lint/format/guard green;
+                              flutter analyze + flutter test clean
+Next:                        PV10 — participant/guest mobile experience
+Owner actions:               git push (runs PV3–PV9 CI); install Docker Desktop
 ```
 
 ## Repository map
@@ -77,7 +86,8 @@ docs/
     └── 00-risk-register.md               # R1–R20, re-scored each milestone
 
 apps/
-└── api/                                  # PV1 Fastify API: health, auth, migrations, jobs
+├── api/                                  # PV1 Fastify API: health, auth, migrations, jobs
+└── mobile/                               # PV9 organizer Flutter app (apps/mobile/)
 
 packages/
 ├── domain/                               # PV2 domain core: money, state machines (canonical
@@ -134,8 +144,7 @@ git push
 # 2. Install Docker Desktop (unblocks `pnpm dev` + local integration tests)
 #    https://docs.docker.com/desktop/setup/install/mac-install/
 
-# 3. Later: Flutter SDK (needed from PV9)
-#    https://docs.flutter.dev/get-started/install/macos
+# 3. Flutter SDK — installed (PV9); apps/mobile/ builds and runs on the iOS Simulator.
 ```
 
 ## Next actions (owner)
