@@ -14,6 +14,8 @@ import { registerAuthRoutes } from './modules/auth/routes.ts';
 import { registerVinkRoutes } from './modules/vinks/routes.ts';
 import { registerSharingRoutes, type PublicRateLimits } from './modules/sharing/routes.ts';
 import { registerContributionRoutes } from './modules/contributions/routes.ts';
+import { registerPurchaseRoutes } from './modules/purchases/routes.ts';
+import { registerRecoveryRoutes } from './modules/recovery/routes.ts';
 import type { FinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 
 export interface AppDeps extends HealthChecks {
@@ -64,6 +66,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerSharingRoutes(app, deps.env, deps.sql, deps.publicRateLimits);
     if (deps.provider !== undefined) {
       registerContributionRoutes(app, deps.env, deps.sql, deps.provider);
+      registerPurchaseRoutes(app, deps.env, deps.sql, deps.provider);
+      registerRecoveryRoutes(app, deps.env, deps.sql, deps.provider);
     }
   }
 

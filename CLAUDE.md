@@ -48,20 +48,31 @@ deterministic activity ordering, concurrent-open + atomic-rollback closure tests
 public join, hashed `vgt_` tokens (D14), rate limiting, migration 0003.
 
 **PV5 done** (`milestone-reports/PV5.md`): mock contribution flow — `packages/ledger`
-(§18 postings, zero-dep), migration 0004 (contributions + ledger with **DB-enforced
-append-only + balanced-at-commit triggers**, one-live-contribution partial UNIQUE),
-contribution engine in `packages/application` (authorize with scenarios via mock method
-tokens, **D5 single resolver** for FUNDED/EXPIRED, deadline sweeps with PG-owned truth,
-E5 lost-response replay by idempotency key), user+guest authorize routes, allowlisted
-simulator endpoints, BullMQ sweep scheduler in the API process (mock is in-memory).
-Flagged: provider calls run inside the DB txn — mock-only pattern; real adapters need
-outbox-driven orchestration. **125 unit + 33 integration tests green** (real local PG 16
-on :55432). Owner push runs PV3+PV4+PV5 through CI.
+(§18 postings), migration 0004 (contributions + ledger with **DB-enforced append-only +
+balanced-at-commit triggers**), contribution engine with the **D5 single resolver**,
+deadline sweeps (PG-owned truth), E5 lost-response replay.
 
-Next: **PV6 — mock card + purchase flow** (issuance from FUNDED, spending limit = funded,
-first-merchant lock, merchant auth/capture/settlement via mock simulator surface).
-Machine notes: pnpm 11 + PostgreSQL 16 binaries installed; still no Docker (compose +
-Redis-backed job paths need Docker Desktop). Sandbox S1–S12 blocked on provider keys.
+**PV6 done** (`milestone-reports/PV6.md`): mock card + purchase flow — issuance from
+FUNDED, **VinkIn's own §17 merchant decision** with first-merchant lock, reversal,
+capture→settlement (MATCHED→COMPLETED / OVERAGE→RECOVERY_REQUIRED).
+
+**PV7 done** (`milestone-reports/PV7.md`): recovery + refunds — migration 0006
+(recovery_obligations), recovery engine (organizer off-session charge via the mock's
+offSessionRecovery capability, retry ladder to DEFAULTED→RESTRICTED, participants never
+recharged), refund engine (failed-session refund on EXPIRED, E8 REFUND_FAILED as an
+explicit state, retry-refund job body). **Caught and fixed a PV3-shaped defect**: card
+provisioning's failure branch wrote its FUNDING_REVERSAL transitions and then threw inside
+the transaction, so PostgreSQL rolled the reversal back — 35 in-memory unit tests missed it
+(no rollback semantics there), the real-PG integration suite caught it immediately. Fixed
+by committing an outcome before raising the caller-visible error (same pattern as PV3's
+auth fix — noted as a standing thing to check in future commands). **173 unit + 40
+integration tests green** (real local PG 16 on :55432). Owner push runs PV3–PV7 through CI.
+
+Next: **PV8 — real-time experience** (WebSocket `vink:{vinkId}` channels, snapshot
+reconciliation on reconnect, outbox-driven live updates — first real consumer of
+`outbox_events.published_at`). Also the natural point to revisit the "provider calls inside
+the DB transaction" flag (D10) now that a real outbox publisher exists. Machine notes: pnpm
+11 + PostgreSQL 16 binaries installed; still no Docker. Sandbox S1–S12 blocked on keys.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

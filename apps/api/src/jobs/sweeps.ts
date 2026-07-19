@@ -10,6 +10,7 @@
 import { Queue, Worker } from 'bullmq';
 import {
   closeSubmissionsCommand,
+  provisionCardCommand,
   resolveContributionCommand,
   resolveGraceCommand,
   type ContributionCommandContext,
@@ -28,6 +29,7 @@ export interface SweepResult {
   closed: number;
   graceResolved: number;
   contributionsResolved: number;
+  cardsProvisioned: number;
 }
 
 export async function runSweeps(
@@ -42,7 +44,12 @@ export async function runSweeps(
     correlationId: `sweep:${now.toISOString()}`,
     provider,
   };
-  const result: SweepResult = { closed: 0, graceResolved: 0, contributionsResolved: 0 };
+  const result: SweepResult = {
+    closed: 0,
+    graceResolved: 0,
+    contributionsResolved: 0,
+    cardsProvisioned: 0,
+  };
 
   const due = await sql`SELECT id FROM vinks
     WHERE state = 'OPEN' AND submission_deadline <= ${now.toISOString()}`;
@@ -57,6 +64,20 @@ export async function runSweeps(
   for (const row of graceDue) {
     await resolveGraceCommand(ctx, { vinkId: (row as { id: string }).id as VinkId, now });
     result.graceResolved += 1;
+  }
+
+  // FUNDED vinks with no card yet enter the card pipeline (§16). Provisioning failure moves
+  // the vink to reversal itself; the sweep just kicks it off.
+  const toProvision = await sql`SELECT v.id FROM vinks v
+    WHERE v.state = 'FUNDED'
+      AND NOT EXISTS (SELECT 1 FROM temporary_cards c WHERE c.vink_id = v.id)`;
+  for (const row of toProvision) {
+    try {
+      await provisionCardCommand(ctx, { vinkId: (row as { id: string }).id as VinkId });
+      result.cardsProvisioned += 1;
+    } catch {
+      // Provisioning failure is recorded by the command (→ FUNDING_REVERSAL); keep sweeping.
+    }
   }
 
   const stuck = await sql`SELECT id, vink_id FROM contributions

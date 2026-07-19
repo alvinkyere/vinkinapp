@@ -11,11 +11,28 @@ import { unallocatedAmount } from './commands.ts';
 export type AllowedAction =
   'OPEN_VINK' | 'CANCEL_VINK' | 'ADD_PARTICIPANT' | 'EDIT_ALLOCATION' | 'COVER_REMAINING';
 
+export interface CardView {
+  status: string;
+  displayLastFour: string;
+  spendingLimitMinor: number;
+  merchantLocked: boolean;
+}
+
+export interface RecoveryView {
+  status: string;
+  amountMinor: number;
+  attemptCount: number;
+}
+
 export interface VinkSnapshot {
   vink: Vink;
   participants: Participant[];
   unallocatedAmountMinor: number;
   allowedActions: AllowedAction[];
+  /** Present once the card is provisioned; clearly a simulation (Plan PV9 "labeled"). */
+  card: CardView | null;
+  /** Present once a recovery obligation exists (settlement overage → organizer owes). */
+  recovery: RecoveryView | null;
 }
 
 export function computeAllowedActions(vink: Vink, participants: Participant[]): AllowedAction[] {
@@ -56,11 +73,31 @@ export async function getVinkSnapshot(
   const vink = await loadOwnedVinkForRead(reader, vinkId, actorUserId);
   const participants = await reader.listParticipants(vinkId);
   const active = participants.filter((participant) => participant.status !== 'REMOVED');
+  const card = await reader.getCardByVink(vinkId);
+  const obligations = await reader.listRecoveryObligations(vinkId);
+  const obligation = obligations.at(-1) ?? null;
   return {
     vink,
     participants,
     unallocatedAmountMinor: unallocatedAmount(vink, active).amountMinor,
     allowedActions: computeAllowedActions(vink, participants),
+    card:
+      card === null
+        ? null
+        : {
+            status: card.status,
+            displayLastFour: card.displayLastFour,
+            spendingLimitMinor: card.spendingLimit.amountMinor,
+            merchantLocked: card.merchantLockKey !== null,
+          },
+    recovery:
+      obligation === null
+        ? null
+        : {
+            status: obligation.status,
+            amountMinor: obligation.amount.amountMinor,
+            attemptCount: obligation.attemptCount,
+          },
   };
 }
 

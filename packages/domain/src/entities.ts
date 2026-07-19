@@ -102,7 +102,7 @@ export interface PurchaseAuthorization {
   id: PurchaseAuthorizationId;
   vinkId: VinkId;
   temporaryCardId: TemporaryCardId;
-  providerAuthorizationId: string;
+  providerAuthorizationId: string | null;
   merchantName: string;
   merchantIdentifier: string;
   mcc: string;
@@ -131,6 +131,8 @@ export interface RecoveryObligation {
   amount: Money;
   reason: 'SETTLEMENT_OVERAGE' | 'MANUAL_ADJUSTMENT';
   status: RecoveryObligationStatus;
+  /** Charge attempts made so far; the retry ladder defaults after a configured max (§23). */
+  attemptCount: number;
   dueAt: string;
   resolvedAt: string | null;
   createdAt: string;

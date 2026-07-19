@@ -4,7 +4,16 @@
  * PostgreSQL adapter is exercised by the API integration suite.
  */
 
-import type { Contribution, Participant, Vink, VinkId } from '../../../domain/src/index.ts';
+import type {
+  Contribution,
+  Participant,
+  PurchaseAuthorization,
+  RecoveryObligation,
+  Settlement,
+  TemporaryCard,
+  Vink,
+  VinkId,
+} from '../../../domain/src/index.ts';
 import { assertBalanced } from '../../../ledger/src/index.ts';
 import type {
   ActivityEntry,
@@ -25,6 +34,10 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
   readonly contributions = new Map<string, Contribution>();
   readonly contributionHistory: ContributionStatusHistoryRow[] = [];
   readonly ledgerPostings: LedgerPostingInput[] = [];
+  readonly cards = new Map<string, TemporaryCard>();
+  readonly purchaseAuthorizations = new Map<string, PurchaseAuthorization>();
+  readonly settlements = new Map<string, Settlement>();
+  readonly recoveryObligations = new Map<string, RecoveryObligation>();
   readonly history: VinkStateHistoryRow[] = [];
   readonly outbox: OutboxEventInput[] = [];
 
@@ -126,6 +139,64 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
   async insertLedgerPosting(posting: LedgerPostingInput): Promise<void> {
     assertBalanced(posting.entries); // mirrors the DB constraint trigger
     this.ledgerPostings.push(posting);
+  }
+
+  async insertCard(card: TemporaryCard): Promise<void> {
+    for (const existing of this.cards.values()) {
+      if (existing.vinkId === card.vinkId) throw new Error('unique violation: one card per vink');
+    }
+    this.cards.set(card.id, card);
+  }
+
+  async getCardByVinkForUpdate(vinkId: VinkId): Promise<TemporaryCard | null> {
+    return this.getCardByVink(vinkId);
+  }
+
+  async getCardByVink(vinkId: VinkId): Promise<TemporaryCard | null> {
+    for (const card of this.cards.values()) {
+      if (card.vinkId === vinkId && card.status !== 'FAILED') return card;
+    }
+    return null;
+  }
+
+  async updateCard(card: TemporaryCard): Promise<void> {
+    this.cards.set(card.id, card);
+  }
+
+  async insertPurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void> {
+    this.purchaseAuthorizations.set(authorization.id, authorization);
+  }
+
+  async listPurchaseAuthorizationsForUpdate(vinkId: VinkId): Promise<PurchaseAuthorization[]> {
+    return [...this.purchaseAuthorizations.values()].filter((row) => row.vinkId === vinkId);
+  }
+
+  async updatePurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void> {
+    this.purchaseAuthorizations.set(authorization.id, authorization);
+  }
+
+  async insertSettlement(settlement: Settlement): Promise<void> {
+    this.settlements.set(settlement.id, settlement);
+  }
+
+  async listSettlementsForUpdate(vinkId: VinkId): Promise<Settlement[]> {
+    return [...this.settlements.values()].filter((row) => row.vinkId === vinkId);
+  }
+
+  async insertRecoveryObligation(obligation: RecoveryObligation): Promise<void> {
+    this.recoveryObligations.set(obligation.id, obligation);
+  }
+
+  async listRecoveryObligationsForUpdate(vinkId: VinkId): Promise<RecoveryObligation[]> {
+    return [...this.recoveryObligations.values()].filter((row) => row.vinkId === vinkId);
+  }
+
+  async updateRecoveryObligation(obligation: RecoveryObligation): Promise<void> {
+    this.recoveryObligations.set(obligation.id, obligation);
+  }
+
+  async listRecoveryObligations(vinkId: VinkId): Promise<RecoveryObligation[]> {
+    return [...this.recoveryObligations.values()].filter((row) => row.vinkId === vinkId);
   }
 
   async listActivity(vinkId: VinkId): Promise<ActivityEntry[]> {

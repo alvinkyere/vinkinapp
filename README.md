@@ -30,10 +30,13 @@ PV3 organizer API:           COMPLETE pending CI re-run (2 first-CI defects root
 PV4 guest join + sharing:    COMPLETE  (QR payload contract, public join, vgt_ tokens D14)
 PV5 mock contribution flow:  COMPLETE  (D5 funding resolver, deadline sweeps, ledger with
                                         DB-enforced balance/append-only, exit gate proven)
-Repo-wide:                   125 unit + 33 integration tests green; lint/format/guard green
-Next:                        PV6 — mock card + purchase flow (issuance, merchant lock,
-                                        settlement)
-Owner actions:               git push (runs PV3–PV5 CI); install Docker Desktop
+PV6 mock card + purchase:    COMPLETE  (issuance from FUNDED, first-merchant lock, §17
+                                        decision, capture/settlement, exactly-one purchase)
+PV7 recovery + refunds:      COMPLETE  (organizer off-session recovery ladder, failed-
+                                        session refunds E8; caught+fixed a rollback defect)
+Repo-wide:                   173 unit + 40 integration tests green; lint/format/guard green
+Next:                        PV8 — real-time experience (WebSocket, outbox-driven updates)
+Owner actions:               git push (runs PV3–PV7 CI); install Docker Desktop
 ```
 
 ## Repository map

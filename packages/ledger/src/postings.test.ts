@@ -3,9 +3,15 @@ import assert from 'node:assert/strict';
 import { DomainError, money } from '../../domain/src/index.ts';
 import {
   assertBalanced,
+  authorizationReservePosting,
   contributionCapturePosting,
   contributionRefundPosting,
+  recoveryChargePosting,
+  recoveryReceivablePosting,
+  recoveryWriteoffPosting,
+  reserveReleasePosting,
   sessionFundingPosting,
+  settlementExpensePosting,
 } from './postings.ts';
 import { LEDGER_ACCOUNT_CODES } from './accounts.ts';
 
@@ -43,11 +49,65 @@ describe('ledger postings (Plan §18)', () => {
     );
   });
 
+  it('purchase postings follow Plan §18: reserve, release, settlement expense', () => {
+    assert.deepEqual(
+      authorizationReservePosting(money(12_000)).entries.map((e) => [e.account, e.direction]),
+      [
+        ['purchase_authorization_reserve', 'DEBIT'],
+        ['session_funding_balance', 'CREDIT'],
+      ],
+    );
+    assert.deepEqual(
+      reserveReleasePosting(money(12_000)).entries.map((e) => [e.account, e.direction]),
+      [
+        ['session_funding_balance', 'DEBIT'],
+        ['purchase_authorization_reserve', 'CREDIT'],
+      ],
+    );
+    assert.deepEqual(
+      settlementExpensePosting(money(12_000)).entries.map((e) => [e.account, e.direction]),
+      [
+        ['vink_purchase_expense', 'DEBIT'],
+        ['purchase_authorization_reserve', 'CREDIT'],
+      ],
+    );
+  });
+
+  it('recovery postings follow Plan §18: receivable, charge, writeoff', () => {
+    assert.deepEqual(
+      recoveryReceivablePosting(money(1_500)).entries.map((e) => [e.account, e.direction]),
+      [
+        ['organizer_recovery_receivable', 'DEBIT'],
+        ['platform_cash', 'CREDIT'],
+      ],
+    );
+    assert.deepEqual(
+      recoveryChargePosting(money(1_500)).entries.map((e) => [e.account, e.direction]),
+      [
+        ['processor_clearing', 'DEBIT'],
+        ['organizer_recovery_receivable', 'CREDIT'],
+      ],
+    );
+    assert.deepEqual(
+      recoveryWriteoffPosting(money(1_500)).entries.map((e) => [e.account, e.direction]),
+      [
+        ['vink_purchase_expense', 'DEBIT'],
+        ['organizer_recovery_receivable', 'CREDIT'],
+      ],
+    );
+  });
+
   it('every builder produces balanced postings using known accounts', () => {
     for (const { entries } of [
       contributionCapturePosting(money(1)),
       sessionFundingPosting(money(123_45)),
       contributionRefundPosting(money(999)),
+      authorizationReservePosting(money(5)),
+      reserveReleasePosting(money(5)),
+      settlementExpensePosting(money(5)),
+      recoveryReceivablePosting(money(15)),
+      recoveryChargePosting(money(15)),
+      recoveryWriteoffPosting(money(15)),
     ]) {
       const { debits, credits } = totals(entries);
       assert.equal(debits, credits);

@@ -20,6 +20,10 @@ import type {
   Contribution,
   CurrencyCode,
   Participant,
+  PurchaseAuthorization,
+  RecoveryObligation,
+  Settlement,
+  TemporaryCard,
   Vink,
   VinkId,
 } from '../../../../../packages/domain/src/index.ts';
@@ -102,6 +106,74 @@ function rowToContribution(row: Row): Contribution {
     idempotencyKey: row.idempotency_key as string,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
+  };
+}
+
+function rowToCard(row: Row): TemporaryCard {
+  const currency: CurrencyCode = 'USD';
+  return {
+    id: row.id as TemporaryCard['id'],
+    vinkId: row.vink_id as VinkId,
+    providerCardId: row.provider_card_id as string,
+    displayLastFour: row.display_last_four as string,
+    status: row.status as TemporaryCard['status'],
+    spendingLimit: { amountMinor: asMinor(row.spending_limit_minor, 'spending_limit'), currency },
+    merchantLockKey: (row.merchant_lock_key ?? null) as string | null,
+    expiresAt: toIso(row.expires_at),
+    issuedAt: toIso(row.issued_at),
+    closedAt: row.closed_at === null || row.closed_at === undefined ? null : toIso(row.closed_at),
+  };
+}
+
+function rowToPurchaseAuthorization(row: Row): PurchaseAuthorization {
+  const currency: CurrencyCode = 'USD';
+  return {
+    id: row.id as PurchaseAuthorization['id'],
+    vinkId: row.vink_id as VinkId,
+    temporaryCardId: row.temporary_card_id as PurchaseAuthorization['temporaryCardId'],
+    providerAuthorizationId: (row.provider_authorization_id ?? null) as string | null,
+    merchantName: row.merchant_name as string,
+    merchantIdentifier: row.merchant_identifier as string,
+    mcc: row.mcc as string,
+    requestedAmount: { amountMinor: asMinor(row.requested_amount_minor, 'requested'), currency },
+    approvedAmount:
+      row.approved_amount_minor === null || row.approved_amount_minor === undefined
+        ? null
+        : { amountMinor: asMinor(row.approved_amount_minor, 'approved'), currency },
+    status: row.status as PurchaseAuthorization['status'],
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+function rowToSettlement(row: Row): Settlement {
+  const currency: CurrencyCode = 'USD';
+  return {
+    id: row.id as Settlement['id'],
+    vinkId: row.vink_id as VinkId,
+    authorizationId: row.authorization_id as Settlement['authorizationId'],
+    settledAmount: { amountMinor: asMinor(row.settled_amount_minor, 'settled'), currency },
+    varianceAmount: { amountMinor: asMinor(row.variance_amount_minor, 'variance'), currency },
+    status: row.status as Settlement['status'],
+    settledAt: toIso(row.settled_at),
+    createdAt: toIso(row.created_at),
+  };
+}
+
+function rowToRecovery(row: Row): RecoveryObligation {
+  const currency: CurrencyCode = 'USD';
+  return {
+    id: row.id as RecoveryObligation['id'],
+    vinkId: row.vink_id as VinkId,
+    organizerUserId: row.organizer_user_id as RecoveryObligation['organizerUserId'],
+    amount: { amountMinor: asMinor(row.amount_minor, 'amount'), currency },
+    reason: row.reason as RecoveryObligation['reason'],
+    status: row.status as RecoveryObligation['status'],
+    attemptCount: asMinor(row.attempt_count, 'attempt_count'),
+    dueAt: toIso(row.due_at),
+    resolvedAt:
+      row.resolved_at === null || row.resolved_at === undefined ? null : toIso(row.resolved_at),
+    createdAt: toIso(row.created_at),
   };
 }
 
@@ -258,6 +330,95 @@ class PostgresVinkTx implements VinkTx {
       VALUES (${event.eventType}, ${event.aggregateType}, ${event.aggregateId},
               ${this.#sql.json(event.payload as postgres.JSONValue)})`;
   }
+
+  async insertCard(card: TemporaryCard): Promise<void> {
+    await this.#sql`INSERT INTO temporary_cards (
+      id, vink_id, provider_card_id, display_last_four, status, spending_limit_minor,
+      merchant_lock_key, expires_at, issued_at, closed_at
+    ) VALUES (
+      ${card.id}, ${card.vinkId}, ${card.providerCardId}, ${card.displayLastFour}, ${card.status},
+      ${card.spendingLimit.amountMinor}, ${card.merchantLockKey}, ${card.expiresAt},
+      ${card.issuedAt}, ${card.closedAt}
+    )`;
+  }
+
+  async getCardByVinkForUpdate(vinkId: VinkId): Promise<TemporaryCard | null> {
+    const rows = await this.#sql`SELECT * FROM temporary_cards
+      WHERE vink_id = ${vinkId} AND status <> 'FAILED' FOR UPDATE`;
+    return rows.length === 0 ? null : rowToCard(rows[0] as Row);
+  }
+
+  async updateCard(card: TemporaryCard): Promise<void> {
+    await this.#sql`UPDATE temporary_cards SET
+      status = ${card.status}, merchant_lock_key = ${card.merchantLockKey},
+      closed_at = ${card.closedAt} WHERE id = ${card.id}`;
+  }
+
+  async insertPurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void> {
+    await this.#sql`INSERT INTO purchase_authorizations (
+      id, vink_id, temporary_card_id, provider_authorization_id, merchant_name,
+      merchant_identifier, mcc, requested_amount_minor, approved_amount_minor, status,
+      created_at, updated_at
+    ) VALUES (
+      ${authorization.id}, ${authorization.vinkId}, ${authorization.temporaryCardId},
+      ${authorization.providerAuthorizationId}, ${authorization.merchantName},
+      ${authorization.merchantIdentifier}, ${authorization.mcc},
+      ${authorization.requestedAmount.amountMinor}, ${authorization.approvedAmount?.amountMinor ?? null},
+      ${authorization.status}, ${authorization.createdAt}, ${authorization.updatedAt}
+    )`;
+  }
+
+  async listPurchaseAuthorizationsForUpdate(vinkId: VinkId): Promise<PurchaseAuthorization[]> {
+    const rows = await this.#sql`SELECT * FROM purchase_authorizations
+      WHERE vink_id = ${vinkId} ORDER BY created_at, id FOR UPDATE`;
+    return rows.map((row) => rowToPurchaseAuthorization(row as Row));
+  }
+
+  async updatePurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void> {
+    await this.#sql`UPDATE purchase_authorizations SET
+      status = ${authorization.status},
+      approved_amount_minor = ${authorization.approvedAmount?.amountMinor ?? null},
+      updated_at = ${authorization.updatedAt} WHERE id = ${authorization.id}`;
+  }
+
+  async insertSettlement(settlement: Settlement): Promise<void> {
+    await this.#sql`INSERT INTO settlements (
+      id, vink_id, authorization_id, settled_amount_minor, variance_amount_minor, status, settled_at
+    ) VALUES (
+      ${settlement.id}, ${settlement.vinkId}, ${settlement.authorizationId},
+      ${settlement.settledAmount.amountMinor}, ${settlement.varianceAmount.amountMinor},
+      ${settlement.status}, ${settlement.settledAt}
+    )`;
+  }
+
+  async listSettlementsForUpdate(vinkId: VinkId): Promise<Settlement[]> {
+    const rows = await this.#sql`SELECT * FROM settlements
+      WHERE vink_id = ${vinkId} ORDER BY created_at, id FOR UPDATE`;
+    return rows.map((row) => rowToSettlement(row as Row));
+  }
+
+  async insertRecoveryObligation(obligation: RecoveryObligation): Promise<void> {
+    await this.#sql`INSERT INTO recovery_obligations (
+      id, vink_id, organizer_user_id, amount_minor, reason, status, attempt_count, due_at,
+      resolved_at, created_at
+    ) VALUES (
+      ${obligation.id}, ${obligation.vinkId}, ${obligation.organizerUserId},
+      ${obligation.amount.amountMinor}, ${obligation.reason}, ${obligation.status},
+      ${obligation.attemptCount}, ${obligation.dueAt}, ${obligation.resolvedAt}, ${obligation.createdAt}
+    )`;
+  }
+
+  async listRecoveryObligationsForUpdate(vinkId: VinkId): Promise<RecoveryObligation[]> {
+    const rows = await this.#sql`SELECT * FROM recovery_obligations
+      WHERE vink_id = ${vinkId} ORDER BY created_at, id FOR UPDATE`;
+    return rows.map((row) => rowToRecovery(row as Row));
+  }
+
+  async updateRecoveryObligation(obligation: RecoveryObligation): Promise<void> {
+    await this.#sql`UPDATE recovery_obligations SET
+      status = ${obligation.status}, attempt_count = ${obligation.attemptCount},
+      resolved_at = ${obligation.resolvedAt} WHERE id = ${obligation.id}`;
+  }
 }
 
 export class PostgresVinkStore implements UnitOfWork, VinkReader {
@@ -310,6 +471,18 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
     const rows = await this.#sql`SELECT * FROM participants
       WHERE vink_id = ${vinkId} ORDER BY joined_at, id`;
     return rows.map((row) => rowToParticipant(row as Row));
+  }
+
+  async getCardByVink(vinkId: VinkId): Promise<TemporaryCard | null> {
+    const rows = await this.#sql`SELECT * FROM temporary_cards
+      WHERE vink_id = ${vinkId} AND status <> 'FAILED'`;
+    return rows.length === 0 ? null : rowToCard(rows[0] as Row);
+  }
+
+  async listRecoveryObligations(vinkId: VinkId): Promise<RecoveryObligation[]> {
+    const rows = await this.#sql`SELECT * FROM recovery_obligations
+      WHERE vink_id = ${vinkId} ORDER BY created_at, id`;
+    return rows.map((row) => rowToRecovery(row as Row));
   }
 
   async listActivity(vinkId: VinkId): Promise<ActivityEntry[]> {

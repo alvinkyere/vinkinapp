@@ -80,6 +80,118 @@ export function sessionFundingPosting(amount: Money): LedgerPosting {
   ]);
 }
 
+/** Plan §18 "merchant authorization reserve": DR reserve / CR session_funding_balance. */
+export function authorizationReservePosting(amount: Money): LedgerPosting {
+  return posting([
+    {
+      account: 'purchase_authorization_reserve',
+      direction: 'DEBIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'authorization_reserve',
+    },
+    {
+      account: 'session_funding_balance',
+      direction: 'CREDIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'authorization_reserve',
+    },
+  ]);
+}
+
+/** Reversal of an authorization reserve (auth reversed, or unused reserve at settlement). */
+export function reserveReleasePosting(amount: Money): LedgerPosting {
+  return posting([
+    {
+      account: 'session_funding_balance',
+      direction: 'DEBIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'reserve_release',
+    },
+    {
+      account: 'purchase_authorization_reserve',
+      direction: 'CREDIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'reserve_release',
+    },
+  ]);
+}
+
+/** Plan §18 "merchant settlement": DR vink_purchase_expense / CR reserve. */
+export function settlementExpensePosting(amount: Money): LedgerPosting {
+  return posting([
+    {
+      account: 'vink_purchase_expense',
+      direction: 'DEBIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'merchant_settlement',
+    },
+    {
+      account: 'purchase_authorization_reserve',
+      direction: 'CREDIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'merchant_settlement',
+    },
+  ]);
+}
+
+/**
+ * Settlement overage → the platform fronts the extra to the merchant and books a receivable
+ * from the organizer (participants are never recharged, §4.7): DR organizer_recovery_receivable
+ * / CR platform_cash.
+ */
+export function recoveryReceivablePosting(amount: Money): LedgerPosting {
+  return posting([
+    {
+      account: 'organizer_recovery_receivable',
+      direction: 'DEBIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'recovery_receivable',
+    },
+    {
+      account: 'platform_cash',
+      direction: 'CREDIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'recovery_receivable',
+    },
+  ]);
+}
+
+/** Organizer paid the recovery: DR processor_clearing / CR organizer_recovery_receivable. */
+export function recoveryChargePosting(amount: Money): LedgerPosting {
+  return posting([
+    {
+      account: 'processor_clearing',
+      direction: 'DEBIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'recovery_charge',
+    },
+    {
+      account: 'organizer_recovery_receivable',
+      direction: 'CREDIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'recovery_charge',
+    },
+  ]);
+}
+
+/** Recovery defaulted: the platform absorbs the loss (DR expense / CR receivable). */
+export function recoveryWriteoffPosting(amount: Money): LedgerPosting {
+  return posting([
+    {
+      account: 'vink_purchase_expense',
+      direction: 'DEBIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'recovery_writeoff',
+    },
+    {
+      account: 'organizer_recovery_receivable',
+      direction: 'CREDIT',
+      amountMinor: amount.amountMinor,
+      entryType: 'recovery_writeoff',
+    },
+  ]);
+}
+
 /**
  * Failed-session refund of a captured contribution: reverse the funding move and the
  * capture in one balanced posting (corrections are reversals — never edits).

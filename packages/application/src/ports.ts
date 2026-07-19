@@ -11,6 +11,10 @@ import type {
   DomainEventName,
   GuestIdentityId,
   Participant,
+  PurchaseAuthorization,
+  RecoveryObligation,
+  Settlement,
+  TemporaryCard,
   Vink,
   VinkId,
 } from '../../domain/src/index.ts';
@@ -85,6 +89,17 @@ export interface VinkTx {
   appendContributionHistory(row: ContributionStatusHistoryRow): Promise<void>;
   /** Balanced double-entry posting — the adapter's DB constraints are the final guard. */
   insertLedgerPosting(posting: LedgerPostingInput): Promise<void>;
+  insertCard(card: TemporaryCard): Promise<void>;
+  getCardByVinkForUpdate(vinkId: VinkId): Promise<TemporaryCard | null>;
+  updateCard(card: TemporaryCard): Promise<void>;
+  insertPurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void>;
+  listPurchaseAuthorizationsForUpdate(vinkId: VinkId): Promise<PurchaseAuthorization[]>;
+  updatePurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void>;
+  insertSettlement(settlement: Settlement): Promise<void>;
+  listSettlementsForUpdate(vinkId: VinkId): Promise<Settlement[]>;
+  insertRecoveryObligation(obligation: RecoveryObligation): Promise<void>;
+  listRecoveryObligationsForUpdate(vinkId: VinkId): Promise<RecoveryObligation[]>;
+  updateRecoveryObligation(obligation: RecoveryObligation): Promise<void>;
 }
 
 /** Read-only operations (no locks). */
@@ -92,6 +107,8 @@ export interface VinkReader {
   getVink(id: VinkId): Promise<Vink | null>;
   getVinkByPublicCode(publicCode: string): Promise<Vink | null>;
   listParticipants(vinkId: VinkId): Promise<Participant[]>;
+  getCardByVink(vinkId: VinkId): Promise<TemporaryCard | null>;
+  listRecoveryObligations(vinkId: VinkId): Promise<RecoveryObligation[]>;
   listActivity(vinkId: VinkId): Promise<ActivityEntry[]>;
   /** Resolves a guest access-token hash to its participant, or null (expired/unknown). */
   findGuestParticipant(
