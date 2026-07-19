@@ -46,7 +46,14 @@
       "Bash(echo \"app: $?\")",
       "Read(//Users/alvinkyere870gmail.com/apps/**)",
       "Bash(echo \"api: $?\")",
-      "Bash(./node_modules/.bin/tsc --noEmit -p packages/application/tsconfig.json)"
+      "Bash(./node_modules/.bin/tsc --noEmit -p packages/application/tsconfig.json)",
+      "Bash(node -e \"console.log\\(typeof WebSocket\\)\")",
+      "Bash(pnpm --filter @vinkin/api add @fastify/websocket)",
+      "Bash(xargs cat)",
+      "Bash(echo \"tc: $?\")",
+      "Bash(node pv8_repro.mjs)",
+      "Bash(rm -f \"/Users/alvinkyere870gmail.com/code/vinkin/apps/api/pv8_repro.mjs\")",
+      "Bash(echo \"tc exit: $?\")"
     ]
   }
 }

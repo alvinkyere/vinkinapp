@@ -15,7 +15,7 @@ const RUN = process.env.VINKIN_INTEGRATION === '1';
 describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, () => {
   let db: IsolatedTestDb;
   let provider: MockFinancialProvider;
-  let app: ReturnType<typeof buildApp>;
+  let app: Awaited<ReturnType<typeof buildApp>>;
   const stamp = Date.now();
   const users = {
     organizer: `pv6_org_${stamp}`,
@@ -97,7 +97,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
   before(async () => {
     db = await createIsolatedTestDb('purchase');
     provider = new MockFinancialProvider();
-    app = buildApp({
+    app = await buildApp({
       env: db.env,
       sql: db.sql,
       provider,

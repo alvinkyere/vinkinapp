@@ -12,12 +12,12 @@ const RUN = process.env.VINKIN_INTEGRATION === '1';
 
 describe('auth end-to-end (PostgreSQL)', { skip: !RUN }, () => {
   let db: IsolatedTestDb;
-  let app: ReturnType<typeof buildApp>;
+  let app: Awaited<ReturnType<typeof buildApp>>;
   const username = `it_user_${Date.now()}`;
 
   before(async () => {
     db = await createIsolatedTestDb('auth');
-    app = buildApp({
+    app = await buildApp({
       env: db.env,
       sql: db.sql,
       checkDb: async () => {

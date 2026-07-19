@@ -22,7 +22,8 @@ M0–M10 sequence below is unchanged and resumes for provider integration when t
 | PV5 | mock contribution flow: authorize/decline/timeout scenarios, D5 funding resolver, deadline sweeps, ledger postings with DB-enforced invariants | **DONE** (report: `milestone-reports/PV5.md`) — exit gate (no overfund/double-count under concurrency) proven vs real PG |
 | PV6 | mock card + purchase flow: issuance from FUNDED, first-merchant lock, merchant auth/capture/reversal/settlement, card closure | **DONE** (report: `milestone-reports/PV6.md`) — exit gate (exactly one purchase) proven vs real PG |
 | PV7 | recovery + refunds: settlement-overage recovery obligation, organizer off-session charging/restriction retry ladder, failed-session refunds, retry-refund job | **DONE** (report: `milestone-reports/PV7.md`) — exit gate (every failed/adjusted path reaches an explicit state) proven vs real PG; caught + fixed a PV3-shaped rollback defect |
-| PV8–PV12 | see master plan §24 | PV8 next: real-time experience (WebSocket channels, snapshot reconciliation, outbox-driven live updates) |
+| PV8 | real-time experience: WebSocket channels, snapshot-on-connect reconciliation, outbox publisher, funding/participant/timer live updates | **DONE** (report: `milestone-reports/PV8.md`) — exit gate (multiple clients, same live state) proven vs real PG + real HTTP server; caught + fixed a plugin-registration-order defect |
+| PV9–PV12 | see master plan §24 | PV9 next: organizer mobile application (Flutter) — first client of the REST + realtime surface built PV1–PV8 |
 
 ## 1. Sequence and dependencies
 

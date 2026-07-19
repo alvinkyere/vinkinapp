@@ -14,7 +14,7 @@ const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
 describe('guest join & sharing end-to-end (PostgreSQL)', { skip: !RUN }, () => {
   let db: IsolatedTestDb;
-  let app: ReturnType<typeof buildApp>;
+  let app: Awaited<ReturnType<typeof buildApp>>;
   const organizer = `pv4_org_${Date.now()}`;
   let organizerToken: string;
 
@@ -45,7 +45,7 @@ describe('guest join & sharing end-to-end (PostgreSQL)', { skip: !RUN }, () => {
 
   before(async () => {
     db = await createIsolatedTestDb('guest');
-    app = buildApp({
+    app = await buildApp({
       env: db.env,
       sql: db.sql,
       checkDb: async () => {
@@ -219,7 +219,7 @@ describe('guest join & sharing end-to-end (PostgreSQL)', { skip: !RUN }, () => {
   });
 
   it('rate-limits the public join surface (429 with retry-after)', async () => {
-    const limited = buildApp({
+    const limited = await buildApp({
       env: db.env,
       sql: db.sql,
       checkDb: async () => {

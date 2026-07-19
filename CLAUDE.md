@@ -56,23 +56,29 @@ deadline sweeps (PG-owned truth), E5 lost-response replay.
 FUNDED, **VinkIn's own §17 merchant decision** with first-merchant lock, reversal,
 capture→settlement (MATCHED→COMPLETED / OVERAGE→RECOVERY_REQUIRED).
 
-**PV7 done** (`milestone-reports/PV7.md`): recovery + refunds — migration 0006
-(recovery_obligations), recovery engine (organizer off-session charge via the mock's
-offSessionRecovery capability, retry ladder to DEFAULTED→RESTRICTED, participants never
-recharged), refund engine (failed-session refund on EXPIRED, E8 REFUND_FAILED as an
-explicit state, retry-refund job body). **Caught and fixed a PV3-shaped defect**: card
-provisioning's failure branch wrote its FUNDING_REVERSAL transitions and then threw inside
-the transaction, so PostgreSQL rolled the reversal back — 35 in-memory unit tests missed it
-(no rollback semantics there), the real-PG integration suite caught it immediately. Fixed
-by committing an outcome before raising the caller-visible error (same pattern as PV3's
-auth fix — noted as a standing thing to check in future commands). **173 unit + 40
-integration tests green** (real local PG 16 on :55432). Owner push runs PV3–PV7 through CI.
+**PV7 done** (`milestone-reports/PV7.md`): recovery + refunds — organizer off-session
+recovery ladder to DEFAULTED→RESTRICTED, failed-session refunds (E8). Caught+fixed a
+PV3-shaped rollback defect in card provisioning.
 
-Next: **PV8 — real-time experience** (WebSocket `vink:{vinkId}` channels, snapshot
-reconciliation on reconnect, outbox-driven live updates — first real consumer of
-`outbox_events.published_at`). Also the natural point to revisit the "provider calls inside
-the DB transaction" flag (D10) now that a real outbox publisher exists. Machine notes: pnpm
-11 + PostgreSQL 16 binaries installed; still no Docker. Sandbox S1–S12 blocked on keys.
+**PV8 done** (`milestone-reports/PV8.md`): real-time experience — in-process pub/sub hub,
+exhaustive `DomainEventName → client message type` mapping (Plan §14), an outbox publisher
+(**the first real consumer of `outbox_events.published_at`**, written since PV3), and
+`GET /api/v1/vinks/:vinkId/live` WebSocket channel with snapshot-on-every-connection
+(satisfies the reconnection rule with no separate code path to get wrong). **Caught and
+fixed another integration-only defect**: `buildApp` registered `@fastify/websocket` without
+awaiting it, so routes added synchronously right after were never wrapped by the plugin's
+`onRoute` hook — every WS handler silently received `(request, reply)` instead of
+`(socket, request)`. A standalone repro script (not the test framework) surfaced the real
+stack trace; fix was making `buildApp` async and awaiting the plugin registration before
+any route registers (9 call sites + type declarations updated). **146 unit + 49
+integration tests green** (real local PG 16 + real listening HTTP server — WS upgrades
+can't go through `.inject()`). Owner push runs PV3–PV8 through CI.
+
+Next: **PV9 — organizer mobile application (Flutter)**, the first client of everything
+built PV1–PV8. Also the point to revisit D10's two standing flags (provider-calls-in-
+transaction, single-process realtime fanout) before client work multiplies what depends on
+them. Machine notes: pnpm 11 + PostgreSQL 16 binaries installed; still no Docker; Flutter
+SDK needed for PV9. Sandbox S1–S12 blocked on keys.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

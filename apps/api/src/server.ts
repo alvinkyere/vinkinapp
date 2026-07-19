@@ -4,6 +4,8 @@ import { createRedis } from './redis/client.ts';
 import { buildApp } from './app.ts';
 import { startOtel } from './observability/otel.ts';
 import { startSweepScheduler } from './jobs/sweeps.ts';
+import { startOutboxPublisher } from './realtime/outbox-publisher.ts';
+import { RealtimeHub } from './realtime/hub.ts';
 import { MockFinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 
 const env = loadEnv();
@@ -12,11 +14,14 @@ const sql = createDb(env);
 const redis = createRedis(env);
 // The only provider until the M0 gate admits a real adapter (master plan §28).
 const provider = new MockFinancialProvider();
+// Shared with the outbox publisher below so committed events reach live WebSocket clients.
+const hub = new RealtimeHub();
 
-const app = buildApp({
+const app = await buildApp({
   env,
   sql,
   provider,
+  hub,
   checkDb: async () => {
     await sql`SELECT 1`;
   },
@@ -24,6 +29,8 @@ const app = buildApp({
     await redis.ping();
   },
 });
+
+const stopOutboxPublisher = startOutboxPublisher(sql, hub);
 
 let stopSweeps: (() => Promise<void>) | null = null;
 try {
@@ -39,6 +46,7 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true;
   app.log.info({ signal }, 'shutting down');
   await app.close();
+  stopOutboxPublisher();
   if (stopSweeps !== null) await stopSweeps();
   await sql.end({ timeout: 5 });
   redis.disconnect();

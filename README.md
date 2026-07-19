@@ -34,9 +34,11 @@ PV6 mock card + purchase:    COMPLETE  (issuance from FUNDED, first-merchant loc
                                         decision, capture/settlement, exactly-one purchase)
 PV7 recovery + refunds:      COMPLETE  (organizer off-session recovery ladder, failed-
                                         session refunds E8; caught+fixed a rollback defect)
-Repo-wide:                   173 unit + 40 integration tests green; lint/format/guard green
-Next:                        PV8 — real-time experience (WebSocket, outbox-driven updates)
-Owner actions:               git push (runs PV3–PV7 CI); install Docker Desktop
+PV8 real-time experience:    COMPLETE  (WebSocket channels, outbox publisher, snapshot-on-
+                                        connect; caught+fixed a plugin-registration defect)
+Repo-wide:                   146 unit + 49 integration tests green; lint/format/guard green
+Next:                        PV9 — organizer mobile application (Flutter)
+Owner actions:               git push (runs PV3–PV8 CI); install Docker Desktop + Flutter SDK
 ```
 
 ## Repository map
