@@ -3,7 +3,17 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/node_modules/**', '**/.turbo/**', '**/coverage/**'],
+    // apps/guest-web and apps/operations-console (PV10/PV11, Next.js) lint separately via
+    // their own `next lint` / eslint configs (React/JSX rules this root config doesn't
+    // carry) — run `pnpm --filter @vinkin/guest-web lint` etc., same split as apps/mobile's
+    // `flutter analyze`.
+    ignores: [
+      '**/node_modules/**',
+      '**/.turbo/**',
+      '**/coverage/**',
+      'apps/guest-web/**',
+      'apps/operations-console/**',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

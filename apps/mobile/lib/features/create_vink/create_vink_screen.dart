@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/auth/auth_controller.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/models/vink.dart';
+import '../../core/analytics/analytics.dart';
 import '../../design_system/colors/vinkin_colors.dart';
 import '../../design_system/components/money_text.dart';
 import '../../design_system/components/vinkin_button.dart';
@@ -38,6 +39,8 @@ class _CreateVinkScreenState extends ConsumerState<CreateVinkScreen> {
   bool _busy = false;
   String? _error;
 
+  Analytics get _analytics => ref.read(analyticsProvider);
+
   Future<void> _createVink() async {
     setState(() {
       _busy = true;
@@ -62,13 +65,16 @@ class _CreateVinkScreenState extends ConsumerState<CreateVinkScreen> {
       );
       final vink = response['vink'] as Map<String, dynamic>;
       final organizerParticipant = (response['participants'] as List<dynamic>).first as Map<String, dynamic>;
+      final vinkId = vink['id'] as String;
+      _analytics.track('create_vink_submitted', {'category': _category, 'subtotalMinor': subtotalMinor}, vinkId);
       setState(() {
-        _vinkId = vink['id'] as String;
+        _vinkId = vinkId;
         _requiredAmountMinor = subtotalMinor;
         _organizerParticipantId = organizerParticipant['id'] as String;
         _step = 1;
       });
     } on ApiException catch (error) {
+      _analytics.track('create_vink_failed', {'errorCode': error.code});
       setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -121,11 +127,13 @@ class _CreateVinkScreenState extends ConsumerState<CreateVinkScreen> {
       ];
       await client.put('/api/v1/vinks/$_vinkId/split', body: {'method': 'CUSTOM_AMOUNT', 'amounts': amounts});
       final snapshot = await client.get('/api/v1/vinks/$_vinkId');
+      _analytics.track('split_applied', {'participantCount': count}, _vinkId);
       setState(() {
         _splitPreview = VinkSnapshot.fromJson(snapshot);
         _step = 2;
       });
     } on ApiException catch (error) {
+      _analytics.track('split_failed', {'errorCode': error.code}, _vinkId);
       setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -141,9 +149,14 @@ class _CreateVinkScreenState extends ConsumerState<CreateVinkScreen> {
     try {
       final client = ref.read(apiClientProvider);
       await client.post('/api/v1/vinks/$_vinkId/open');
+      // The E1 exit-gate moment for the organizer's own task funnel: everything from here
+      // (funding/card/completion) is driven by participants and the deadline sweep, not the
+      // organizer's further action.
+      _analytics.track('vink_opened', {}, _vinkId);
       ref.invalidate(myVinksProvider);
       if (mounted) context.go('/vinks/$_vinkId');
     } on ApiException catch (error) {
+      _analytics.track('vink_open_failed', {'errorCode': error.code}, _vinkId);
       setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);

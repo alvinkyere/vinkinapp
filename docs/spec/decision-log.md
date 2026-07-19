@@ -8,6 +8,73 @@ contract.
 
 ---
 
+## D18 — Funnel analytics: instrument only what persisted state can't already show
+
+- **Decision:** the PV12 exit gate names six numbers (≥25 completed Vinks, ≥75 participant
+  joins, ≥80% organizer task completion, median join-to-contribution time, top five failure
+  points, no unresolved critical defects). Four of the five measurable ones are computed
+  directly from existing tables (`vinks`, `participants`, `contributions`) at query time —
+  no client instrumentation. A new `analytics_events` table (migration 0008) and public
+  ingestion endpoint (`POST /api/v1/analytics/events`) exist for exactly the one thing
+  persisted state structurally cannot show: where someone abandoned or hit an error *before*
+  anything was written to the database (a guest who saw "no longer accepting participants"
+  and left; an organizer whose create-Vink form failed validation). Both client apps
+  (`apps/guest-web`, `apps/mobile`) report a small, named set of funnel-entry and `_failed`
+  events; the operations console's `/analytics` page (PV11) surfaces all six numbers
+  together with the pilot's own thresholds.
+- **Date:** 2026-07-19
+- **Status:** PROPOSED
+- **Reason:** the owner asked specifically for "funnel analytics instrumentation" toward
+  PV12 without specifying event taxonomy or an analytics vendor. Duplicating
+  already-persisted facts (a completed Vink, a joined participant) as client events would
+  be redundant and could drift from the database's own truth; instrumenting only
+  client-side failure/abandonment moments adds real, non-duplicated value without inventing
+  an event schema broader than the exit gate actually needs.
+- **Alternatives considered:** a full page-view/interaction event stream (rejected —
+  matches neither "avoid a broad admin platform" from D17's brief nor any named PV12
+  requirement beyond the six numbers); a third-party analytics SDK (rejected, same reasoning
+  as the `DebugAnalytics` stub already in place since PV9 — no vendor has been chosen, same
+  spirit as the payment-provider boundary, D10).
+- **Affected modules:** `apps/api/src/modules/analytics/*`, `apps/api/src/modules/ops/analytics.ts`,
+  `apps/guest-web/lib/analytics.ts`, `apps/mobile/lib/core/analytics/analytics.dart`,
+  `apps/operations-console/app/analytics/`.
+- **Revisit trigger:** if the actual PV12 pilot run finds the failure-point taxonomy too
+  coarse to diagnose real issues, or an analytics vendor gets chosen for a later phase.
+
+## D17 — Operator identity for the PV11 operations console: shared password, named per session
+
+- **Decision:** the ops console (`apps/operations-console/`) is not a new user/role in the
+  existing `users` table. An operator logs in with a free-text **name** (for audit
+  attribution) plus a single shared secret from `env.OPERATOR_PASSWORD`, checked at
+  `POST /internal/ops/auth/login`. Success mints a short-lived signed token
+  (`kind: 'operator'`, embedding the name, reusing `JWT_SECRET`) that every other
+  `/internal/ops/*` route requires. Every ops-console action that mutates anything
+  (merchant-authorization, capture, run-deadlines, resolve-pending) writes a row to a new
+  `operator_audit_log` table naming the operator, the action, and its target — satisfying
+  Spec §21's "record operations-console actions in an audit log" without inventing a
+  multi-operator account/role/permission system the Spec never asked for.
+- **Date:** 2026-07-19
+- **Status:** PROPOSED
+- **Reason:** the Spec and master plan name "an operator" throughout (§21, PV11 exit gate)
+  but never define what an operator account is, and governance doc 00 only says PV11 access
+  is "operator-only" in the `demo` environment without specifying how that's enforced. A
+  full operator-account system (its own table, roles, password reset, invitations) is
+  exactly the kind of scope the owner's PV11 brief explicitly warned against ("avoid turning
+  PV11 into a broad internal admin platform"). A single shared credential is the minimum
+  that (a) genuinely gates access, (b) lets every action be attributed to a name for the
+  audit log, and (c) matches this milestone's actual need — a handful of trusted people
+  operating one pilot, not a multi-tenant admin product.
+- **Alternatives considered:** reusing the `users` table with an `is_operator` flag
+  (rejected — pulls operators into the same identity system as organizers/participants,
+  which the Spec treats as a different trust boundary, for no benefit at this scale);
+  per-operator accounts in a new table (rejected as premature — nothing in PV11's scope
+  needs to distinguish *which* trusted person is on shift beyond what they type into the
+  audit log).
+- **Affected modules:** `apps/api/src/modules/ops/*` (new), `apps/operations-console/`.
+- **Revisit trigger:** PV12 (a real pilot, multiple operators on rotating shifts) if
+  attribution-by-typed-name proves too weak in practice; certainly before any
+  production/real-money environment, where shared credentials are a non-starter regardless.
+
 ## D16 — Production-shaped realtime fanout: Redis-backed hub, in-process retained for tests
 
 - **Decision:** `apps/api/src/realtime/hub.ts` exposes a `RealtimeHub` interface with two

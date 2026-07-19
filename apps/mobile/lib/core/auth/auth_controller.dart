@@ -76,5 +76,5 @@ class AuthController extends Notifier<AuthState> {
 
 final tokenStoreProvider = Provider<SecureTokenStore>((ref) => SecureTokenStore());
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient(tokenStore: ref.read(tokenStoreProvider)));
-final analyticsProvider = Provider<Analytics>((ref) => DebugAnalytics());
+final analyticsProvider = Provider<Analytics>((ref) => HttpAnalytics());
 final authControllerProvider = NotifierProvider<AuthController, AuthState>(AuthController.new);

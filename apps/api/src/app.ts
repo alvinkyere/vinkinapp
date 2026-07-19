@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import websocketPlugin from '@fastify/websocket';
+import corsPlugin from '@fastify/cors';
 import { ZodError } from 'zod';
 import type { Env } from './config/env.ts';
 import type { Sql } from './db/client.ts';
@@ -18,6 +19,8 @@ import { registerContributionRoutes } from './modules/contributions/routes.ts';
 import { registerPurchaseRoutes } from './modules/purchases/routes.ts';
 import { registerRecoveryRoutes } from './modules/recovery/routes.ts';
 import { registerRealtimeRoutes } from './modules/realtime/routes.ts';
+import { registerOpsRoutes } from './modules/ops/routes.ts';
+import { registerAnalyticsRoutes } from './modules/analytics/routes.ts';
 import { InProcessRealtimeHub, type RealtimeHub } from './realtime/hub.ts';
 import type { FinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 
@@ -59,6 +62,14 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // `request.params` off what is actually the reply object (PV8 integration defect; see
   // milestone report).
   await app.register(websocketPlugin);
+  // PV10/PV11: the guest web app and the ops console (apps/guest-web, apps/operations-
+  // console — both Next.js) run on their own origins — unlike the organizer Flutter app,
+  // browser fetches are subject to CORS. `VINKIN_PUBLIC_BASE_URL` is already the guest web
+  // app's own origin (it's what join links point at, PV4); `OPERATIONS_CONSOLE_BASE_URL`
+  // is the same idea for PV11.
+  await app.register(corsPlugin, {
+    origin: [deps.env.VINKIN_PUBLIC_BASE_URL, deps.env.OPERATIONS_CONSOLE_BASE_URL],
+  });
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -79,10 +90,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     registerAuthRoutes(app, deps.env, deps.sql);
     registerVinkRoutes(app, deps.env, deps.sql);
     registerSharingRoutes(app, deps.env, deps.sql, deps.publicRateLimits);
+    registerAnalyticsRoutes(app, deps.sql);
     if (deps.provider !== undefined) {
       registerContributionRoutes(app, deps.env, deps.sql, deps.provider);
       registerPurchaseRoutes(app, deps.env, deps.sql, deps.provider);
       registerRecoveryRoutes(app, deps.env, deps.sql, deps.provider);
+      registerOpsRoutes(app, deps.env, deps.sql, deps.provider);
     }
     registerRealtimeRoutes(app, deps.env, deps.sql, deps.hub ?? new InProcessRealtimeHub());
   }

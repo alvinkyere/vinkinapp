@@ -97,9 +97,68 @@ per event). **147 unit + 55 integration tests green**, `flutter analyze`/`flutte
 clean. Known gap: no organizer self-approve-contribution UI yet (organizer split defaults to
 $0, flagged for PV10).
 
-Next: **PV10 — participant/guest mobile experience**. Machine notes: pnpm 11 + PostgreSQL 16
-+ Redis + Flutter SDK all installed (via brew/dart; still no Docker). Sandbox S1–S12 blocked
-on keys.
+**PV10 done** (`milestone-reports/PV10.md`): participant/guest web experience — corrected
+from the PV9 report's wrong assumption ("more Flutter") after re-reading the Spec: master
+plan §4 requires guest checkout to be **a Next.js web app** (`apps/guest-web/`), not Flutter.
+Built the full E9 join/contribute flow (join by public code, no account, live funding
+progress, contribution approval, signup-conversion prompt) against real local PostgreSQL +
+Redis + `apps/api/src/server.ts`, verified with Playwright at a real mobile viewport.
+Backend additions (all flagged, all tested): the realtime `/live` channel now accepts guest
+`vgt_` tokens alongside organizer JWTs (guest-scoped `GuestVinkView` snapshot, never the
+organizer's full view); `GuestVinkView`/the join response now expose `vinkId` (needed to
+open that channel, previously withheld pre-join only); CORS added
+(`VINKIN_PUBLIC_BASE_URL` is the allowed origin — it was already, by design, "the guest web
+app's own origin" since PV4). Caught + fixed the identical class of live-update bug PV9
+found in the Flutter Lobby (participant share data going stale on a lean live event; same
+fix — re-fetch on event). Also found (environment, not product): Turbopack dev mode's HMR
+websocket fails to handshake here and silently blocks all hydration — verified directly,
+worked around by testing against real production builds throughout, which is what
+`playwright.config.ts` does automatically. **133 non-integration + 57 integration tests
+green** (integration count up from 55 — the guest realtime tests), `lint`/`typecheck` clean
+including the new `@vinkin/guest-web` package. Known gap carried over: still no organizer
+self-approve-contribution UI (flagged in both PV9 and PV10 reports now).
+
+**PV11 done** (`milestone-reports/PV11.md`, owner-scoped brief: "operational rather than
+consumer-facing… must not introduce new financial semantics… avoid turning PV11 into a
+broad internal admin platform"): operations console — a Next.js app
+(`apps/operations-console/`) letting an authorized operator search vinks and inspect every
+table one touches (participants, contributions, card, purchase authorizations, settlements,
+recovery, ledger — genuinely balance-checked, outbox delivery status, state history, audit
+log) on one page, plus the two "safe simulation controls" PV12 will actually need (merchant
+authorization + capture — no real terminal exists for the pilot). **D17**: operator identity
+is a shared password + typed name, not per-operator accounts — deliberately, matching the
+brief's own "avoid a broad admin platform" instruction; revisit trigger is PV12 itself
+(multiple operators on rotating shifts). The two action routes call the exact same PV6
+application commands the existing `/internal/simulator/*` surface calls — no new financial
+logic, only operator auth + audit logging layered on top. Caught + fixed a real UI bug during
+end-to-end testing: the Capture form's own `key` prop (added to satisfy a lint rule) caused
+React to remount it the instant a capture succeeded — destroying the success message before
+the operator could see it, even though the backend had genuinely completed the settlement
+correctly every time. **170 tests green** (apps/api up to 60, +3 for ops), `lint`/`typecheck`
+clean including `@vinkin/operations-console`; automated Playwright exit-gate test drives a
+full inspect-and-complete cycle through the real console UI against the real backend.
+
+**PV12 prep — funnel analytics done** (`milestone-reports/PV12-prep-analytics.md`;
+**not PV12 itself** — that exit gate needs an actual closed campus pilot with real people,
+which no code satisfies; owner chose this over a survey flow or a disclosure audit when
+asked how to prepare). **D18**: four of PV12's five measurable exit-gate numbers are pure
+queries over existing tables (no new instrumentation); a new `analytics_events` table +
+`POST /api/v1/analytics/events` (public, rate-limited) exist only for the one real gap —
+client-side failure/abandonment visibility that persisted state structurally can't show.
+Both client apps report a small named event set (`apps/guest-web/lib/analytics.ts`,
+`apps/mobile/lib/core/analytics/analytics.dart` — the latter finally wiring PV9's
+`Analytics` stub to the backend); the ops console's new `/analytics` page shows all six
+numbers with the pilot's own thresholds. Caught + fixed a real bug while touching guest-web:
+a leftover debug loading-state readout from PV10's investigation had been shipping to real
+users since PV10, undetected because no test asserted the loading state's text content.
+**63 backend tests green** (up from 60); verified end-to-end by re-running guest-web's own
+E9 test and confirming its real browser-generated events landed in the database and appear
+correctly in the dashboard.
+
+Next: **PV12 — Validation Pilot** (the actual pilot; an owner/operational decision, not
+engineering work). Machine notes: pnpm 11 + PostgreSQL 16 + Redis + Flutter SDK +
+Playwright(Chromium) all installed (via brew/dart/npm; still no Docker). Sandbox S1–S12
+blocked on keys.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

@@ -44,10 +44,36 @@ PV9 organizer mobile app:    COMPLETE  (Flutter app, apps/mobile/; full E1 journ
                                         server; caught+fixed a BullMQ Redis-config defect
                                         that had silently disabled the sweep scheduler since
                                         PV1, and a Lobby live-update defect — see report)
-Repo-wide:                   147 unit + 55 integration tests green; lint/format/guard green;
-                              flutter analyze + flutter test clean
-Next:                        PV10 — participant/guest mobile experience
-Owner actions:               git push (runs PV3–PV9 CI); install Docker Desktop
+PV10 guest web app:          COMPLETE  (Next.js app, apps/guest-web/; PV9 report's "more
+                                        Flutter" assumption corrected — Spec §4 requires a
+                                        web app for guest checkout; full E9 journey verified
+                                        via Playwright at a mobile viewport against the real
+                                        local server; caught+fixed the same live-update bug
+                                        class as PV9's Lobby screen, plus added guest-token
+                                        realtime support, CORS, and vinkId exposure — see
+                                        report)
+PV11 operations console:     COMPLETE  (Next.js app, apps/operations-console/; owner-scoped
+                                        brief — operational, no new financial semantics,
+                                        avoid a broad admin platform; vink search + one
+                                        detail page covering every table a vink touches,
+                                        the two merchant simulation controls PV12 needs, and
+                                        a full operator audit trail; caught+fixed a real UI
+                                        bug where a form's own `key` prop destroyed its
+                                        success message on a genuinely-successful capture —
+                                        see report)
+PV12 prep: funnel analytics: DONE  (NOT PV12 itself — that exit gate needs an actual closed
+                                    campus pilot; owner-directed prep work. D18: 4 of 5
+                                    measurable exit-gate numbers are pure queries over
+                                    existing tables; new analytics_events table + public
+                                    ingestion endpoint cover only client-side failure/
+                                    abandonment visibility. Both client apps instrumented;
+                                    ops console's /analytics page shows all six numbers
+                                    against pilot thresholds — see report)
+Repo-wide:                    173 tests green (apps/api up to 63, +3 for analytics);
+                               lint/format/guard/typecheck green incl. every app;
+                               flutter analyze + flutter test clean
+Next:                         PV12 — validation pilot (owner/operational, not engineering)
+Owner actions:                git push (runs PV3–PV11 CI); install Docker Desktop
 ```
 
 ## Repository map
@@ -87,7 +113,9 @@ docs/
 
 apps/
 ├── api/                                  # PV1 Fastify API: health, auth, migrations, jobs
-└── mobile/                               # PV9 organizer Flutter app (apps/mobile/)
+├── mobile/                               # PV9 organizer Flutter app (apps/mobile/)
+├── guest-web/                            # PV10 guest Next.js app (apps/guest-web/)
+└── operations-console/                   # PV11 ops Next.js app (apps/operations-console/)
 
 packages/
 ├── domain/                               # PV2 domain core: money, state machines (canonical
@@ -119,7 +147,9 @@ tooling/scripts/check-provider-imports.mjs # PV0 guard: no provider SDK outside 
 pnpm install          # one-time (pnpm 11 via `npm install -g pnpm`)
 
 pnpm dev              # docker compose up + migrate + API on :3000 (needs Docker Desktop)
-pnpm test             # all packages via turbo (99 tests)
+pnpm test             # all packages via turbo (173 tests: 63 apps/api [40 gated by
+                       # VINKIN_INTEGRATION=1] + 36 application + 48 domain + 6 ledger +
+                       # 20 payment-provider-contract-tests — against real local PG+Redis)
 pnpm typecheck        # strict tsc across all packages
 pnpm lint             # eslint (typescript-eslint recommended)
 pnpm format:check     # prettier (code only; docs are never reformatted)

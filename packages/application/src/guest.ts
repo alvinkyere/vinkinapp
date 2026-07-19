@@ -139,6 +139,10 @@ export interface GuestVinkView {
   vink: PublicVinkSummary;
   participant: {
     id: Participant['id'];
+    /** Needed by PV10's guest web client to open the realtime channel (keyed by vink id,
+     * same route the organizer app uses) — not exposed pre-join (`PublicVinkSummary`
+     * deliberately carries no internal ids), only once genuinely joined. */
+    vinkId: Participant['vinkId'];
     displayName: string;
     status: Participant['status'];
     allocatedAmountMinor: number;
@@ -165,6 +169,7 @@ export async function getGuestVinkView(
     vink: toPublicSummary(vink, participantCount, now),
     participant: {
       id: resolved.participant.id,
+      vinkId: resolved.participant.vinkId,
       displayName: resolved.participant.displayName,
       status: resolved.participant.status,
       allocatedAmountMinor: resolved.participant.allocatedAmount.amountMinor,

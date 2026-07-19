@@ -126,12 +126,16 @@ export function registerSharingRoutes(
           },
           { publicCode, displayName: body.displayName, accessTokenHash: tokenHash },
         );
-        // The raw token appears exactly once, here, in the join response.
+        // The raw token appears exactly once, here, in the join response. vinkId (not part
+        // of the anonymous pre-join PublicVinkSummary) is included now that this guest has
+        // genuinely joined — PV10's guest web client needs it to open the realtime channel,
+        // the same vinkId-keyed route the organizer app uses.
         return reply.code(201).send({
           guestToken: token,
           vink: joined.vink,
           participant: {
             id: joined.participant.id,
+            vinkId: joined.participant.vinkId,
             displayName: joined.participant.displayName,
             status: joined.participant.status,
           },

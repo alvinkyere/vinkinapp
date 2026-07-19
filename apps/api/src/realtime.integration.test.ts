@@ -264,4 +264,145 @@ describe('real-time channel end-to-end (PostgreSQL + WebSocket)', { skip: !RUN }
     const unknownVink = await connect(liveUrl('00000000-0000-4000-8000-000000000000'));
     assert.equal((await waitForClose(unknownVink)).code, 4404);
   });
+
+  it('a guest (vgt_ token, PV10) gets a guest-scoped snapshot and the same live events as the organizer', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 2_000,
+        tipMinor: 0,
+        submissionDeadline: new Date(Date.now() + 3_600_000).toISOString(),
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const vinkId = created.json().vink.id as string;
+    const publicCode = created.json().vink.publicCode as string;
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/participants`,
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: { username: users.memberA },
+    });
+    await app.inject({
+      method: 'PUT',
+      url: `/api/v1/vinks/${vinkId}/split`,
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: { method: 'EQUAL' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/open`,
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: {},
+    });
+
+    const joined = await app.inject({
+      method: 'POST',
+      url: `/api/v1/public/vinks/${publicCode}/participants`,
+      payload: { displayName: 'Guest One' },
+    });
+    const guestToken = joined.json().guestToken as string;
+
+    const organizerClient = await connect(liveUrl(vinkId));
+    const guestClient = await connect(`${baseUrl}/api/v1/vinks/${vinkId}/live?token=${guestToken}`);
+    const organizerMessages = collector(organizerClient);
+    const guestMessages = collector(guestClient);
+
+    const guestSnapshot = await waitFor(guestMessages, (m) => m.type === 'snapshot');
+    // Guest-scoped view (Plan PV4 GuestVinkView): their own participant record, never the
+    // organizer's full participant list or card data.
+    const snapshotBody = guestSnapshot.snapshot as {
+      vink: { state: string };
+      participant: { displayName: string };
+    };
+    assert.equal(snapshotBody.vink.state, 'OPEN');
+    assert.equal(snapshotBody.participant.displayName, 'Guest One');
+    assert.equal('participants' in (guestSnapshot.snapshot as object), false);
+    assert.equal('card' in (guestSnapshot.snapshot as object), false);
+
+    // The same domain event reaches both the organizer and the guest — one event stream,
+    // no requester-specific payload branching. memberA is one of two funding participants
+    // (organizer + memberA, split EQUAL), so this alone doesn't fund the vink, just emits.
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/contributions/authorize`,
+      headers: { authorization: `Bearer ${tokens.memberA}` },
+      payload: {},
+    });
+    const organizerEvent = await waitFor(organizerMessages, (m) => m.eventType !== undefined);
+    const guestEvent = await waitFor(guestMessages, (m) => m.eventType !== undefined);
+    assert.deepEqual(organizerEvent, guestEvent);
+
+    organizerClient.close();
+    guestClient.close();
+  });
+
+  it('a guest token is rejected on a vink it never joined, and an invalid guest token is unauthenticated', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 1_000,
+        tipMinor: 0,
+        submissionDeadline: new Date(Date.now() + 3_600_000).toISOString(),
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const vinkId = created.json().vink.id as string;
+    const publicCode = created.json().vink.publicCode as string;
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/participants`,
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: { username: users.memberA },
+    });
+    await app.inject({
+      method: 'PUT',
+      url: `/api/v1/vinks/${vinkId}/split`,
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: { method: 'EQUAL' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/open`,
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: {},
+    });
+
+    const otherCreated = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 1_000,
+        tipMinor: 0,
+        submissionDeadline: new Date(Date.now() + 3_600_000).toISOString(),
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const otherVinkId = otherCreated.json().vink.id as string;
+
+    const joined = await app.inject({
+      method: 'POST',
+      url: `/api/v1/public/vinks/${publicCode}/participants`,
+      payload: { displayName: 'Wrong Vink Guest' },
+    });
+    const guestToken = joined.json().guestToken as string;
+
+    const wrongVink = await connect(
+      `${baseUrl}/api/v1/vinks/${otherVinkId}/live?token=${guestToken}`,
+    );
+    assert.equal((await waitForClose(wrongVink)).code, 4403);
+
+    const invalidToken = await connect(
+      `${baseUrl}/api/v1/vinks/${vinkId}/live?token=vgt_not-a-real-token`,
+    );
+    assert.equal((await waitForClose(invalidToken)).code, 4401);
+  });
 });
