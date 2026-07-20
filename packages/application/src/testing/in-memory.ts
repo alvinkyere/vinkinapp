@@ -205,6 +205,12 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
     return [...this.recoveryObligations.values()].filter((row) => row.vinkId === vinkId);
   }
 
+  async listContributionsByVink(vinkId: VinkId): Promise<Contribution[]> {
+    return [...this.contributions.values()]
+      .filter((row) => row.vinkId === vinkId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
   async listActivity(vinkId: VinkId): Promise<ActivityEntry[]> {
     const transitions: ActivityEntry[] = this.history
       .filter((row) => row.vinkId === vinkId)

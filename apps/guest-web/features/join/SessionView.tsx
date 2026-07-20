@@ -74,10 +74,10 @@ export function SessionView({
   const showSignupConversion = hasAuthorized || view.vink.state !== 'OPEN';
 
   return (
-    <div className="mx-auto flex w-full max-w-md flex-col gap-6 p-6">
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-gray-900">Hi, {view.participant.displayName}</h1>
+    <div className="mx-auto flex w-full max-w-md flex-col gap-6 p-6 font-sans">
+      <div className="rounded-[2rem] bg-white p-7 shadow-[0_20px_60px_-15px_rgba(10,10,11,0.15)]">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="font-display text-lg font-bold text-ink">Hi, {view.participant.displayName}</h1>
           <div aria-live="polite">
             <StatusBadge state={view.vink.state} />
           </div>
@@ -92,24 +92,24 @@ export function SessionView({
 
       {showSimulationBanner ? <SimulationBanner /> : null}
 
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <p className="text-sm text-gray-500">Your share</p>
-        <p className="mt-1 text-2xl font-bold tabular-nums text-gray-900">
+      <div className="rounded-[2rem] bg-white p-7 shadow-[0_1px_2px_rgba(10,10,11,0.04),0_8px_24px_-8px_rgba(10,10,11,0.08)]">
+        <p className="text-sm text-smoke">Your share</p>
+        <p className="mt-1 font-display text-2xl font-extrabold tabular-nums text-ink">
           {formatMoney(view.participant.allocatedAmountMinor)}
         </p>
 
         {view.participant.allocatedAmountMinor === 0 ? (
-          <p className="mt-3 text-sm text-gray-500">
+          <p className="mt-3 text-sm text-smoke">
             The organizer hasn&apos;t assigned you a share yet.
           </p>
         ) : hasAuthorized ? (
-          <p role="status" className="mt-3 text-sm font-medium text-emerald-700">
+          <p role="status" className="mt-3 text-sm font-medium text-blue">
             You&apos;re in — your share is approved.
           </p>
         ) : canContribute ? (
           <>
             {mutation.isError ? (
-              <p role="alert" className="mt-3 text-sm text-red-600">
+              <p role="alert" className="mt-3 text-sm text-danger">
                 {mutation.error instanceof ApiError
                   ? mutation.error.message
                   : 'Something went wrong — try again.'}
@@ -119,13 +119,13 @@ export function SessionView({
               type="button"
               onClick={() => mutation.mutate()}
               disabled={mutation.isPending}
-              className="mt-4 w-full rounded-lg bg-blue-600 px-4 py-3 text-base font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-4 w-full rounded-full bg-blue px-9 py-4 font-display text-sm font-bold tracking-wide text-white uppercase transition hover:bg-blue-deep disabled:cursor-not-allowed disabled:opacity-40"
             >
               {mutation.isPending ? 'Approving…' : `Approve ${formatMoney(view.participant.allocatedAmountMinor)}`}
             </button>
           </>
         ) : (
-          <p className="mt-3 text-sm text-gray-500">
+          <p className="mt-3 text-sm text-smoke">
             This Vink is no longer accepting contributions.
           </p>
         )}

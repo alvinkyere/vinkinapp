@@ -491,6 +491,15 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
     return rows.map((row) => rowToRecovery(row as Row));
   }
 
+  // PV13 design correction: the live lobby needs per-participant payment status ("paid" /
+  // "processing" / "waiting") — a plain read, unlike listContributionsForUpdate's locked
+  // variant used inside command transactions.
+  async listContributionsByVink(vinkId: VinkId): Promise<Contribution[]> {
+    const rows = await this.#sql`SELECT * FROM contributions
+      WHERE vink_id = ${vinkId} ORDER BY created_at, id`;
+    return rows.map((row) => rowToContribution(row as Row));
+  }
+
   async listActivity(vinkId: VinkId): Promise<ActivityEntry[]> {
     // Deterministic ordering: timestamp, then kind ('event' < 'transition' — the event that
     // a transition emits sorts before its history row), then per-table insertion sequence.

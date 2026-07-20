@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../design_system/vink_theme.dart';
 import 'router.dart';
-import 'theme.dart';
 
 final _routerProvider = Provider<GoRouter>(buildRouter);
 
@@ -15,7 +15,7 @@ class VinkinApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'VinkIn',
       debugShowCheckedModeBanner: false,
-      theme: buildVinkinTheme(),
+      theme: buildVinkTheme(),
       routerConfig: router,
     );
   }

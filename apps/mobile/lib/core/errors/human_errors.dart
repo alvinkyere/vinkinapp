@@ -1,0 +1,25 @@
+import 'api_exception.dart';
+
+/// Maps backend error codes (packages/application/src/errors.ts, apps/api/src/modules/*)
+/// to the plain, actionable copy the design correction requires — "we couldn't find that
+/// username," never `PARTICIPANT_NOT_FOUND`. Codes not in this table fall back to a
+/// generic-but-still-human message, never the raw code.
+String humanErrorMessage(ApiException error) {
+  return switch (error.code) {
+    'USER_NOT_FOUND' => "We couldn't find that VinkIn username.",
+    'VINK_NOT_FOUND' => "We couldn't find that Vink. The link may be out of date.",
+    'VINK_NOT_JOINABLE' => "This Vink is no longer accepting new participants.",
+    'VINK_VERSION_CONFLICT' => "Someone else just changed this Vink. Refreshing…",
+    'PARTICIPANT_NOT_FOUND' => "We couldn't find that participant.",
+    'PARTICIPANT_EXITED' => "That person already left this Vink.",
+    'INVALID_SPLIT' => "Your shares don't add up to the total yet.",
+    'UNSUPPORTED_SPLIT_METHOD' => "That split method isn't available yet.",
+    'AUTHORIZATION_DECLINED' => "We couldn't confirm your contribution. Nothing was charged. Try again.",
+    'FORBIDDEN' => "You don't have permission to do that.",
+    'VALIDATION_FAILED' => "Please check the details and try again.",
+    'RATE_LIMITED' => "That's a lot of tries — wait a moment and try again.",
+    'GUEST_UNAUTHENTICATED' => "Your session expired. Open the link again to continue.",
+    'INVALID_AMOUNT' => 'Enter an amount greater than zero.',
+    _ => "Something went wrong. Nothing was charged — try again.",
+  };
+}

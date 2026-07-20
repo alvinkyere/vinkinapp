@@ -2,13 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/auth/auth_controller.dart';
-import '../../core/models/vink.dart';
-import '../../design_system/colors/vinkin_colors.dart';
-import '../../design_system/components/async_state_view.dart';
+import '../../core/errors/api_exception.dart';
+import '../../core/errors/human_errors.dart';
+import '../../design_system/components/vink_buttons.dart';
+import '../../design_system/components/vink_empty_state.dart';
+import '../../design_system/components/vink_inline_error.dart';
+import '../../design_system/components/vink_progress_indicator.dart';
+import '../../design_system/components/vink_status_badge.dart';
+import '../../design_system/components/vink_surface_card.dart';
 import '../../design_system/components/money_text.dart';
-import '../../design_system/components/status_pill.dart';
-import '../../design_system/spacing/vinkin_spacing.dart';
-import '../../design_system/typography/vinkin_typography.dart';
+import '../../design_system/vink_colors.dart';
+import '../../design_system/vink_spacing.dart';
+import '../../design_system/vink_typography.dart';
+import '../activity/activity_copy.dart';
+import '../activity/activity_providers.dart';
+import '../create_vink/purchase_category.dart';
 import 'home_providers.dart';
 
 class HomeScreen extends ConsumerWidget {
@@ -16,99 +24,218 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final vinksAsync = ref.watch(myVinksProvider);
     final authState = ref.watch(authControllerProvider);
-    final displayName = authState is AuthSignedIn ? authState.user.displayName : '';
+    final firstName = authState is AuthSignedIn ? authState.user.displayName.split(' ').first : '';
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Hi, $displayName'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Log out',
-            onPressed: () => ref.read(authControllerProvider.notifier).logout(),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/create-vink'),
-        icon: const Icon(Icons.add),
-        label: const Text('New Vink'),
-      ),
-      body: RefreshIndicator(
-        onRefresh: () => ref.refresh(myVinksProvider.future),
-        child: AsyncStateView<List<Vink>>(
-          loading: vinksAsync.isLoading,
-          error: vinksAsync.error,
-          data: vinksAsync.valueOrNull,
-          onRetry: () => ref.invalidate(myVinksProvider),
-          builder: (context, vinks) {
-            if (vinks.isEmpty) {
-              return ListView(
-                children: const [
-                  Padding(
-                    padding: EdgeInsets.all(VinkinSpacing.xxl),
-                    child: Center(
-                      child: Text('No Vinks yet — tap "New Vink" to start one.', style: VinkinTypography.bodySecondary),
-                    ),
-                  ),
-                ],
-              );
-            }
-            return ListView.separated(
-              padding: const EdgeInsets.all(VinkinSpacing.md),
-              itemCount: vinks.length,
-              separatorBuilder: (_, _) => const SizedBox(height: VinkinSpacing.sm),
-              itemBuilder: (context, index) {
-                final vink = vinks[index];
-                return _VinkListTile(vink: vink, onTap: () => context.push('/vinks/${vink.id}'));
-              },
-            );
+      backgroundColor: VinkColors.paper,
+      body: SafeArea(
+        child: RefreshIndicator(
+          color: VinkColors.blue,
+          onRefresh: () async {
+            ref.invalidate(myVinksProvider);
+            ref.invalidate(activeVinksProvider);
+            ref.invalidate(recentActivityProvider);
           },
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(VinkSpacing.lg, VinkSpacing.lg, VinkSpacing.lg, VinkSpacing.xxl),
+            children: [
+              Text('Hi, $firstName', style: VinkTypography.heroDisplay.copyWith(fontSize: 28)),
+              const SizedBox(height: VinkSpacing.xs),
+              Text(
+                'Everyone in. One purchase.',
+                style: VinkTypography.bodySecondary,
+              ),
+              const SizedBox(height: VinkSpacing.lg),
+              VinkPrimaryButton(
+                label: 'Start a Vink',
+                glow: true,
+                onPressed: () => context.push('/create-vink'),
+              ),
+              const SizedBox(height: VinkSpacing.xxl),
+              Text('Active Vinks', style: VinkTypography.cardTitle),
+              const SizedBox(height: VinkSpacing.md),
+              const _ActiveVinksSection(),
+              const SizedBox(height: VinkSpacing.xxl),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Recent activity', style: VinkTypography.cardTitle),
+                  VinkTextButton(label: 'See all', onPressed: () => context.go('/activity')),
+                ],
+              ),
+              const SizedBox(height: VinkSpacing.sm),
+              const _RecentActivityPreview(),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _VinkListTile extends StatelessWidget {
-  const _VinkListTile({required this.vink, required this.onTap});
+class _ActiveVinksSection extends ConsumerWidget {
+  const _ActiveVinksSection();
 
-  final Vink vink;
-  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activeAsync = ref.watch(activeVinksProvider);
+
+    return activeAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: VinkSpacing.lg),
+        child: VinkLoadingState(message: 'Loading your Vinks…'),
+      ),
+      error: (error, _) => VinkInlineError(
+        message: error is ApiException ? humanErrorMessage(error) : "Couldn't load your Vinks.",
+      ),
+      data: (active) {
+        if (active.isEmpty) {
+          return VinkSurfaceCard(
+            child: VinkEmptyState(
+              title: 'Nothing active right now',
+              message: 'Split a purchase with your group — everyone pays their share, you pay the merchant once.',
+              action: VinkPrimaryButton(label: 'Start your first Vink', onPressed: () => context.push('/create-vink')),
+            ),
+          );
+        }
+        return Column(
+          children: [
+            for (final item in active) ...[
+              _ActiveVinkCard(item: item),
+              const SizedBox(height: VinkSpacing.md),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ActiveVinkCard extends StatelessWidget {
+  const _ActiveVinkCard({required this.item});
+
+  final ActiveVink item;
 
   @override
   Widget build(BuildContext context) {
+    final vink = item.vink;
+    final progress = vink.requiredAmountMinor == 0 ? 0.0 : vink.fundedAmountMinor / vink.requiredAmountMinor;
+    final timeLabel = _timeRemainingLabel(vink.submissionDeadline);
+    final actionLabel = _nextActionLabel(vink.state);
+    final statusLabel = vinkStatusLabel(vink.state);
+    final title = purchaseCategoryLabel(vink.purchaseCategory);
+
     return Semantics(
       button: true,
-      label: '${vink.purchaseCategory} vink, ${MoneyText.format(vink.requiredAmountMinor)}, status ${vink.state}',
-      child: Material(
-        color: VinkinColors.surface,
-        borderRadius: BorderRadius.circular(VinkinSpacing.sm),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(VinkinSpacing.sm),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(VinkinSpacing.md),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(vink.purchaseCategory, style: VinkinTypography.label),
-                      const SizedBox(height: 2),
-                      MoneyText(vink.requiredAmountMinor, style: VinkinTypography.title),
-                    ],
+      label:
+          '$title, ${MoneyText.format(vink.fundedAmountMinor)} of ${MoneyText.format(vink.requiredAmountMinor)} funded, '
+          '${item.participantCount} people, $statusLabel. $actionLabel',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(32),
+        onTap: () => context.push('/vinks/${vink.id}'),
+        child: VinkSurfaceCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: Text(title, style: VinkTypography.cardTitle)),
+                  VinkStatusBadge(state: vink.state),
+                ],
+              ),
+              const SizedBox(height: VinkSpacing.md),
+              VinkProgressIndicator(
+                fundedAmountLabel: MoneyText.format(vink.fundedAmountMinor),
+                requiredAmountLabel: MoneyText.format(vink.requiredAmountMinor),
+                progress: progress,
+              ),
+              const SizedBox(height: VinkSpacing.md),
+              Row(
+                children: [
+                  Icon(Icons.people_outline_rounded, size: 16, color: VinkColors.smoke),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${item.participantCount} ${item.participantCount == 1 ? 'person' : 'people'}',
+                    style: VinkTypography.bodySmallSecondary,
                   ),
-                ),
-                StatusPill(vink.state),
-              ],
-            ),
+                  if (timeLabel != null) ...[
+                    const SizedBox(width: VinkSpacing.md),
+                    Icon(Icons.schedule_rounded, size: 16, color: VinkColors.smoke),
+                    const SizedBox(width: 4),
+                    Text(timeLabel, style: VinkTypography.bodySmallSecondary),
+                  ],
+                ],
+              ),
+              const SizedBox(height: VinkSpacing.md),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: VinkSecondaryButton(label: actionLabel, onPressed: () => context.push('/vinks/${vink.id}')),
+              ),
+            ],
           ),
         ),
       ),
+    );
+  }
+}
+
+String _nextActionLabel(String state) => switch (state) {
+  'DRAFT' => 'Finish setup',
+  'OPEN' => 'View & share',
+  'SUBMISSIONS_CLOSED' || 'PROCESSING_GRACE' => 'View progress',
+  'FUNDED' || 'CARD_PROVISIONING' => 'View progress',
+  'CARD_READY' => 'Pay now',
+  'FUNDING_REVERSAL' || 'RECOVERY_REQUIRED' || 'RECOVERY_PENDING' => 'Needs attention',
+  'PURCHASE_AUTHORIZED' || 'SETTLING' => 'View progress',
+  _ => 'View Vink',
+};
+
+String? _timeRemainingLabel(DateTime? deadline) {
+  if (deadline == null) return null;
+  final diff = deadline.difference(DateTime.now());
+  if (diff.isNegative) return 'Past deadline';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m left';
+  if (diff.inHours < 24) return '${diff.inHours}h left';
+  return '${diff.inDays}d left';
+}
+
+class _RecentActivityPreview extends ConsumerWidget {
+  const _RecentActivityPreview();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activityAsync = ref.watch(recentActivityProvider);
+
+    return activityAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: VinkSpacing.md),
+        child: VinkLoadingState(),
+      ),
+      error: (_, _) => Text(
+        'Recent activity isn\'t available right now.',
+        style: VinkTypography.bodySmallSecondary,
+      ),
+      data: (entries) {
+        if (entries.isEmpty) {
+          return Text(
+            'Nothing to show yet — activity from your Vinks will appear here.',
+            style: VinkTypography.bodySmallSecondary,
+          );
+        }
+        final preview = entries.take(3).toList();
+        return Column(
+          children: [
+            for (final item in preview) ...[
+              VinkSurfaceCard(
+                padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.md, vertical: VinkSpacing.sm + 4),
+                child: Text(activityCopy(item.entry, vinkTitle: item.vinkTitle), style: VinkTypography.body),
+              ),
+              const SizedBox(height: VinkSpacing.sm),
+            ],
+          ],
+        );
+      },
     );
   }
 }

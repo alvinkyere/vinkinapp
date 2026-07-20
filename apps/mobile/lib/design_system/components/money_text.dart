@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../typography/vinkin_typography.dart';
+import '../vink_typography.dart';
 
 /// Renders integer minor units (Plan §15 — never floating point) as a dollar string. The
 /// ONLY place cents-to-dollars formatting happens, so every screen agrees.
@@ -22,7 +22,7 @@ class MoneyText extends StatelessWidget {
     final String formatted = format(amountMinor);
     return Semantics(
       label: '${formatted.replaceFirst('\$', '')} dollars',
-      child: Text(formatted, style: style ?? VinkinTypography.money),
+      child: Text(formatted, style: style ?? VinkTypography.amountMedium),
     );
   }
 }

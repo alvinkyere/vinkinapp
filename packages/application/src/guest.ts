@@ -15,7 +15,13 @@ import {
   type Vink,
 } from '../../domain/src/index.ts';
 import { ApplicationError } from './errors.ts';
-import type { GuestIdentityRecord, PublicCommandContext, VinkReader } from './ports.ts';
+import type {
+  CommandContext,
+  GuestIdentityRecord,
+  PublicCommandContext,
+  VinkReader,
+} from './ports.ts';
+import { loadOwnedVink } from './support/guards.ts';
 
 export const GUEST_TOKEN_TTL_DAYS = 7;
 
@@ -114,6 +120,76 @@ export async function guestJoinVinkCommand(
       (row) => row.status !== 'REMOVED',
     ).length;
     return { vink: toPublicSummary(vink, participantCount, now), participant, guest };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// InviteGuestCommand — the organizer adds a non-member by name (PV13 design correction:
+// "unknown username" must never be a dead end). Same guest_identities/participants shape
+// guestJoinVinkCommand writes, but organizer-initiated and organizer-authenticated —
+// mirrors addParticipantCommand's own DRAFT-or-OPEN precondition (commands.ts) rather than
+// guestJoinVinkCommand's public isJoinable check, since the organizer controls timing here,
+// not an anonymous visitor hitting a public link.
+// ---------------------------------------------------------------------------
+
+export interface InviteGuestInput {
+  vinkId: Vink['id'];
+  expectedVersion?: number;
+  displayName: string;
+  /** SHA-256 hash of the transport-minted guest token — same handling rule as
+   * GuestJoinInput above: the application layer never sees the raw secret. */
+  accessTokenHash: string;
+}
+
+export interface InviteGuestResult {
+  participant: Participant;
+  guest: GuestIdentityRecord;
+}
+
+export async function inviteGuestCommand(
+  ctx: CommandContext,
+  input: InviteGuestInput,
+): Promise<InviteGuestResult> {
+  return ctx.uow.run(async (tx) => {
+    const vink = await loadOwnedVink(tx, input.vinkId, ctx.actorUserId, input.expectedVersion);
+    if (vink.state !== 'DRAFT' && vink.state !== 'OPEN') {
+      throw new ApplicationError('INVALID_COMMAND', `guests cannot be invited in ${vink.state}`);
+    }
+    const now = ctx.clock.now();
+    const guest: GuestIdentityRecord = {
+      id: newGuestIdentityId(),
+      displayName: input.displayName,
+      accessTokenHash: input.accessTokenHash,
+      expiresAt: new Date(now.getTime() + GUEST_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: now.toISOString(),
+    };
+    const participant: Participant = {
+      id: newParticipantId(),
+      vinkId: vink.id,
+      userId: null,
+      guestIdentityId: guest.id,
+      displayName: input.displayName,
+      role: 'MEMBER',
+      status: 'JOINED',
+      allocatedAmount: money(0),
+      maximumApprovedAmount: money(0),
+      joinedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    await tx.insertGuestIdentity(guest);
+    await tx.insertParticipant(participant);
+    await tx.insertOutbox({
+      eventType: 'ParticipantJoined',
+      aggregateType: 'vink',
+      aggregateId: vink.id,
+      payload: {
+        vinkId: vink.id,
+        participantId: participant.id,
+        guest: true,
+        invitedByOrganizer: true,
+      },
+    });
+    return { participant, guest };
   });
 }
 

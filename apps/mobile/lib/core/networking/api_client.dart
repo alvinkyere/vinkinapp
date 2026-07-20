@@ -63,20 +63,35 @@ class ApiClient {
   Future<Map<String, dynamic>> put(String path, {Map<String, dynamic>? body}) =>
       _unwrap(_dio.put(path, data: body ?? const {}));
 
+  /// For the handful of endpoints (e.g. `GET .../activity`) whose handler sends the
+  /// resource list directly as the response body instead of wrapping it in an object.
+  Future<List<dynamic>> getList(String path) async {
+    try {
+      final response = await _dio.get(path);
+      return response.data as List<dynamic>;
+    } on DioException catch (error) {
+      throw _toApiException(error);
+    }
+  }
+
   Future<Map<String, dynamic>> _unwrap(Future<Response<dynamic>> request) async {
     try {
       final response = await request;
       return response.data as Map<String, dynamic>;
     } on DioException catch (error) {
-      final data = error.response?.data;
-      if (data is Map<String, dynamic>) {
-        throw ApiException(
-          statusCode: error.response?.statusCode ?? 0,
-          code: data['error'] as String? ?? 'UNKNOWN_ERROR',
-          message: data['message'] as String?,
-        );
-      }
-      throw ApiException(statusCode: error.response?.statusCode ?? 0, code: 'NETWORK_ERROR', message: error.message);
+      throw _toApiException(error);
     }
+  }
+
+  ApiException _toApiException(DioException error) {
+    final data = error.response?.data;
+    if (data is Map<String, dynamic>) {
+      return ApiException(
+        statusCode: error.response?.statusCode ?? 0,
+        code: data['error'] as String? ?? 'UNKNOWN_ERROR',
+        message: data['message'] as String?,
+      );
+    }
+    return ApiException(statusCode: error.response?.statusCode ?? 0, code: 'NETWORK_ERROR', message: error.message);
   }
 }

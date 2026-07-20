@@ -44,6 +44,17 @@ dependencies:
   flutter_secure_storage: ^9.2.2
   web_socket_channel: ^3.0.1
 
+  # PV13 design correction: Bricolage Grotesque (display) + Inter (body) are the exact
+  # fonts vinkin.org self-hosts via next/font (confirmed from the site's compiled CSS,
+  # docs/design/vinkin-design-system.md) — both are Google Fonts, fetched/cached at
+  # runtime rather than bundled as assets to keep the app free of binary font files.
+  google_fonts: ^6.2.1
+
+  # PV13 design correction: native Share sheet + QR rendering for guest-invite and
+  # participant-share links (create-Vink "Add people" step, live lobby sharing surface).
+  share_plus: ^10.1.4
+  qr_flutter: ^4.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -109,6 +109,10 @@ export interface VinkReader {
   listParticipants(vinkId: VinkId): Promise<Participant[]>;
   getCardByVink(vinkId: VinkId): Promise<TemporaryCard | null>;
   listRecoveryObligations(vinkId: VinkId): Promise<RecoveryObligation[]>;
+  /** Plain (unlocked) read — for status projections like the organizer lobby's
+   * per-participant "paid / processing / waiting" view; commands use
+   * `VinkTx.listContributionsForUpdate` instead. */
+  listContributionsByVink(vinkId: VinkId): Promise<Contribution[]>;
   listActivity(vinkId: VinkId): Promise<ActivityEntry[]>;
   /** Newest first — the organizer's own vink history (Plan §20 "Vink history"). */
   listVinksByOrganizer(organizerUserId: string): Promise<Vink[]>;

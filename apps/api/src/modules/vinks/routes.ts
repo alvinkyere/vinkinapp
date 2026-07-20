@@ -15,12 +15,14 @@ import {
   createVinkCommand,
   getVinkActivity,
   getVinkSnapshot,
+  inviteGuestCommand,
   listMyVinks,
   openVinkCommand,
   removeParticipantCommand,
   setSplitCommand,
   type CommandContext,
 } from '../../../../../packages/application/src/index.ts';
+import { newGuestToken } from '../../auth/guest-tokens.ts';
 import {
   DomainError,
   IllegalTransitionError,
@@ -66,6 +68,11 @@ const addParticipantSchema = z.object({
   expectedVersion: z.number().int().positive().optional(),
   username: z.string().min(1),
   displayName: z.string().min(1).max(80).optional(),
+});
+
+const inviteGuestSchema = z.object({
+  expectedVersion: z.number().int().positive().optional(),
+  displayName: z.string().min(1).max(80),
 });
 
 const splitSchema = z.discriminatedUnion('method', [
@@ -123,6 +130,13 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
       actorUserId,
       correlationId: String(request.id),
     };
+  }
+
+  // A distinct path from sharing/routes.ts's `/join/:publicCode` (the anonymous, pick-
+  // your-own-name link): this one carries a pre-minted token for one specific named guest,
+  // so apps/guest-web redeems it straight into a live session with no join form to fill in.
+  function guestJoinUrl(token: string): string {
+    return `${env.VINKIN_PUBLIC_BASE_URL.replace(/\/$/, '')}/g/${token}`;
   }
 
   async function handle(
@@ -207,6 +221,37 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
         ...(body.expectedVersion !== undefined && { expectedVersion: body.expectedVersion }),
       }),
     );
+  });
+
+  // PV13 design correction: "unknown username" must never be a dead end for the organizer
+  // — invite a non-member by name instead. Same guest_identities/participants shape PV4's
+  // public guestJoinVinkCommand writes (guest.ts), just organizer-initiated: the raw token
+  // is minted here (never seen by the application layer, same rule as the public join
+  // route) and returned once, in this response, for the organizer to share.
+  app.post('/api/v1/vinks/:vinkId/guests', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    const { vinkId } = request.params as { vinkId: string };
+    const body = inviteGuestSchema.parse(request.body);
+    const { token, tokenHash } = newGuestToken();
+    return handle(reply, 201, async () => {
+      const result = await inviteGuestCommand(contextFor(request, claims.userId), {
+        vinkId: vinkId as VinkId,
+        displayName: body.displayName,
+        accessTokenHash: tokenHash,
+        ...(body.expectedVersion !== undefined && { expectedVersion: body.expectedVersion }),
+      });
+      return {
+        guestToken: token,
+        joinUrl: guestJoinUrl(token),
+        participant: {
+          id: result.participant.id,
+          vinkId: result.participant.vinkId,
+          displayName: result.participant.displayName,
+          status: result.participant.status,
+        },
+      };
+    });
   });
 
   app.delete('/api/v1/vinks/:vinkId/participants/:participantId', async (request, reply) => {

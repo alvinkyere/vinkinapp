@@ -1,28 +1,38 @@
-const LABELS: Record<string, { label: string; className: string }> = {
-  DRAFT: { label: 'Draft', className: 'bg-gray-100 text-gray-700' },
-  OPEN: { label: 'Open for contributions', className: 'bg-blue-100 text-blue-800' },
-  SUBMISSIONS_CLOSED: { label: 'Submissions closed', className: 'bg-amber-100 text-amber-800' },
-  PROCESSING_GRACE: { label: 'Finishing up', className: 'bg-amber-100 text-amber-800' },
-  FUNDED: { label: 'Funded', className: 'bg-emerald-100 text-emerald-800' },
-  EXPIRED: { label: 'Expired', className: 'bg-red-100 text-red-800' },
-  CARD_PROVISIONING: { label: 'Preparing card', className: 'bg-violet-100 text-violet-800' },
-  CARD_READY: { label: 'Card ready', className: 'bg-violet-100 text-violet-800' },
-  FUNDING_REVERSAL: { label: 'Reversing funds', className: 'bg-red-100 text-red-800' },
-  PURCHASE_AUTHORIZED: { label: 'Purchase in progress', className: 'bg-violet-100 text-violet-800' },
-  SETTLING: { label: 'Settling', className: 'bg-violet-100 text-violet-800' },
-  COMPLETED: { label: 'Completed', className: 'bg-emerald-100 text-emerald-800' },
-  RECOVERY_REQUIRED: { label: 'Recovery needed', className: 'bg-red-100 text-red-800' },
-  RECOVERY_PENDING: { label: 'Recovery in progress', className: 'bg-amber-100 text-amber-800' },
-  CANCELLED: { label: 'Cancelled', className: 'bg-gray-100 text-gray-700' },
-  RESTRICTED: { label: 'Restricted', className: 'bg-red-100 text-red-800' },
+// Mirrors apps/mobile/lib/design_system/components/vink_status_badge.dart's exact D11
+// state → human-copy table and tone groups, so a guest sees the identical vocabulary the
+// organizer's app uses — no raw backend state name, ever, on either surface.
+const LABELS: Record<string, { label: string; tone: 'neutral' | 'active' | 'positive' | 'attention' }> = {
+  DRAFT: { label: 'Draft', tone: 'neutral' },
+  OPEN: { label: 'Waiting for everyone', tone: 'neutral' },
+  SUBMISSIONS_CLOSED: { label: 'Wrapping up', tone: 'active' },
+  PROCESSING_GRACE: { label: 'Confirming payments', tone: 'active' },
+  FUNDED: { label: "Everyone's in", tone: 'positive' },
+  CARD_PROVISIONING: { label: 'Getting your card ready', tone: 'active' },
+  CARD_READY: { label: 'Ready to pay', tone: 'positive' },
+  FUNDING_REVERSAL: { label: 'Refunding', tone: 'attention' },
+  PURCHASE_AUTHORIZED: { label: 'Paying now', tone: 'active' },
+  SETTLING: { label: 'Finishing up', tone: 'active' },
+  COMPLETED: { label: 'Completed', tone: 'positive' },
+  RECOVERY_REQUIRED: { label: 'Resolving a shortfall', tone: 'attention' },
+  RECOVERY_PENDING: { label: 'Resolving a shortfall', tone: 'attention' },
+  CANCELLED: { label: 'Cancelled', tone: 'neutral' },
+  RESTRICTED: { label: 'Restricted', tone: 'attention' },
+  EXPIRED: { label: 'Expired', tone: 'attention' },
+};
+
+const TONE_CLASSES: Record<string, string> = {
+  neutral: 'bg-ink/8 text-smoke',
+  active: 'bg-blue/12 text-blue',
+  positive: 'bg-blue text-white',
+  attention: 'bg-danger/12 text-danger',
 };
 
 export function StatusBadge({ state }: { state: string }) {
-  const entry = LABELS[state] ?? { label: state, className: 'bg-gray-100 text-gray-700' };
+  const entry = LABELS[state] ?? { label: state, tone: 'neutral' as const };
   return (
     <span
       role="status"
-      className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-3 py-1 text-sm font-medium ${entry.className}`}
+      className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold font-sans ${TONE_CLASSES[entry.tone]}`}
     >
       {entry.label}
     </span>

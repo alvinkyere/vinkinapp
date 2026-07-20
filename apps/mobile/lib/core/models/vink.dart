@@ -9,6 +9,7 @@ class VinkParticipant {
     required this.role,
     required this.status,
     required this.allocatedAmountMinor,
+    this.guestIdentityId,
   });
 
   final String id;
@@ -17,12 +18,21 @@ class VinkParticipant {
   final String status;
   final int allocatedAmountMinor;
 
+  /// Non-null exactly when this participant joined without a VinkIn account (PV4/PV13) —
+  /// the domain's own invariant (packages/domain/src/entities.ts) is "exactly one of
+  /// userId or guestIdentityId," so this alone is enough to tell guest from member.
+  final String? guestIdentityId;
+
+  bool get isGuest => guestIdentityId != null;
+  bool get isOrganizer => role == 'ORGANIZER';
+
   factory VinkParticipant.fromJson(Map<String, dynamic> json) => VinkParticipant(
     id: json['id'] as String,
     displayName: json['displayName'] as String,
     role: json['role'] as String,
     status: json['status'] as String,
     allocatedAmountMinor: (json['allocatedAmount']?['amountMinor'] as num?)?.toInt() ?? 0,
+    guestIdentityId: json['guestIdentityId'] as String?,
   );
 }
 
@@ -57,6 +67,7 @@ class Vink {
     required this.fundedAmountMinor,
     required this.version,
     required this.organizerUserId,
+    this.submissionDeadline,
   });
 
   final String id;
@@ -67,6 +78,7 @@ class Vink {
   final int fundedAmountMinor;
   final int version;
   final String organizerUserId;
+  final DateTime? submissionDeadline;
 
   factory Vink.fromJson(Map<String, dynamic> json) => Vink(
     id: json['id'] as String,
@@ -77,6 +89,9 @@ class Vink {
     fundedAmountMinor: (json['fundedAmount']?['amountMinor'] as num).toInt(),
     version: (json['version'] as num).toInt(),
     organizerUserId: json['organizerUserId'] as String,
+    submissionDeadline: json['submissionDeadline'] == null
+        ? null
+        : DateTime.parse(json['submissionDeadline'] as String),
   );
 }
 
@@ -87,6 +102,7 @@ class VinkSnapshot {
     required this.unallocatedAmountMinor,
     required this.allowedActions,
     required this.card,
+    this.contributionStatusByParticipant = const {},
   });
 
   final Vink vink;
@@ -94,6 +110,12 @@ class VinkSnapshot {
   final int unallocatedAmountMinor;
   final List<String> allowedActions;
   final VinkCard? card;
+
+  /// Each participant's most recent contribution attempt's raw status (Contribution
+  /// ['status'] — CREATED/AUTHORIZED/CAPTURED/etc.), keyed by participant id. Absence
+  /// means no attempt yet. See `features/vink_lobby/participant_payment_state.dart` for the
+  /// human "paid / processing / waiting" projection this feeds.
+  final Map<String, String> contributionStatusByParticipant;
 
   factory VinkSnapshot.fromJson(Map<String, dynamic> json) => VinkSnapshot(
     vink: Vink.fromJson(json['vink'] as Map<String, dynamic>),
@@ -103,5 +125,9 @@ class VinkSnapshot {
     unallocatedAmountMinor: (json['unallocatedAmountMinor'] as num).toInt(),
     allowedActions: (json['allowedActions'] as List<dynamic>).cast<String>(),
     card: json['card'] == null ? null : VinkCard.fromJson(json['card'] as Map<String, dynamic>),
+    contributionStatusByParticipant: {
+      for (final entry in (json['contributions'] as List<dynamic>? ?? const []))
+        (entry as Map<String, dynamic>)['participantId'] as String: entry['status'] as String,
+    },
   );
 }

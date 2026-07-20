@@ -155,10 +155,77 @@ users since PV10, undetected because no test asserted the loading state's text c
 E9 test and confirming its real browser-generated events landed in the database and appear
 correctly in the dashboard.
 
-Next: **PV12 — Validation Pilot** (the actual pilot; an owner/operational decision, not
-engineering work). Machine notes: pnpm 11 + PostgreSQL 16 + Redis + Flutter SDK +
-Playwright(Chromium) all installed (via brew/dart/npm; still no Docker). Sandbox S1–S12
-blocked on keys.
+**PV13 done** (`milestone-reports/PV13.md`, owner-directed correction after reviewing the PV9
+app: "technically functional but not product-ready" — didn't resemble vinkin.org, didn't
+clearly split a bill, excluded the organizer from contributing, treated any non-member
+username as a dead end. Full rebuild, not patches, per the brief's own instruction). Fetched
+vinkin.org's real compiled CSS/HTML directly and wrote `docs/design/vinkin-design-system.md`
+(exact colors/fonts/shapes/copy, not an approximation); built a full Flutter design-token +
+component system and **actually wired the real theme in** (`buildVinkTheme()` existed since
+earlier this pass but was never connected to `MaterialApp.router` until now — the old
+Material-default theme and its entire parallel design system are deleted, not superseded);
+rebuilt Home/Create-Vink(5 steps)/Live-Lobby/Profile/onboarding on it; restyled guest-web onto
+the identical tokens (still Next.js, not converted to Flutter). Organizer's own "Pay my $X"
+now goes through the exact same `POST /contributions/authorize` path every participant uses
+— no shortcut. Unknown usernames offer a guest path (organizer-initiated `inviteGuestCommand`,
+reusing D14's guest-identity/token machinery) instead of a dead end. One small, deliberate
+backend addition: a plain read, `VinkReader.listContributionsByVink`, feeding the lobby's
+per-participant paid/processing/waiting status — additive only, no D15/ledger/settlement
+impact. The rewritten `integration_test/e1_test.dart` (the brief's own fully scripted $120
+Vink journey) caught and fixed four real defects on its first real run: an ambiguous duplicate
+"Start a Vink" button; the category picker offering `RESTAURANT`/`HOTEL`/`FUEL`/`CAR_RENTAL`,
+which the domain's own policy layer has always rejected (`policyForCategory`,
+`packages/domain/src/policy.ts` — three of those were never actually enabled, PV9's original
+picker already knew to exclude them and PV13 briefly regressed that); a step that swallowed
+API errors silently; and a bottom-sheet layout overflow. **23/23 Flutter tests green**,
+`flutter analyze` clean; **36/36 application + 63/63 apps/api tests green**
+(`VINKIN_INTEGRATION=1`), repo-wide `typecheck`/`lint`/`format:check`/`guard` clean; guest-web's
+own `next build` + `tsc` + `eslint` + Playwright E9 all clean. Known gaps (flagged in the
+report, not hidden): no freeform Vink name/merchant field exists anywhere in the domain (the
+brief's "Purpose" step framing doesn't map onto a real field — flagged as a product question,
+not silently added); the 13 named screenshots and the explicit vinkin.org side-by-side visual
+comparison were not produced as a deliverable set — `flutter test -d <device>`'s
+`takeScreenshot()` doesn't persist files without `flutter drive` + a driver script, discovered
+too late in this pass to wire up.
+
+**PV13 Screenshots done** (`milestone-reports/PV13-SCREENSHOTS.md`): resolved PV13's own
+flagged screenshot-capture gap and delivered the 13 official product screenshots. Root cause
+of the earlier gap: `flutter test -d <device>`'s `takeScreenshot()` only captures pixels —
+persisting them needs `flutter drive` + `integration_test/integration_test_driver_extended.dart`'s
+`integrationDriver({onScreenshot})` (a different file than the un-parameterized
+`integration_test_driver.dart` the prior report guessed at; confirmed by reading the installed
+SDK source). New: `apps/mobile/test_driver/integration_test.dart` (the driver) and
+`apps/mobile/integration_test/screenshot_test.dart` (one continuous real Vink lifecycle —
+create → add people → split → review → open → organizer pays own share → member/guest
+contributions → live FUNDED → real-swept card → merchant simulation → live COMPLETED, on a
+freshly-created "iPhone 16 Pro (Screenshots)" simulator); `apps/guest-web/tests/screenshots.spec.ts`
+for the guest side; `apps/guest-web/scripts/compose-screenshots.mjs` for the contact sheet,
+device-frame compositions, and website comparison (Playwright-rendered HTML/CSS — no
+ImageMagick/ffmpeg/cwebp in this environment); `docs/design/website-screenshot-plan.md`.
+**D19** (finding, not yet a decision): `fundedAmountMinor` only updates atomically once the
+*last* participant contributes (`resolveFunding`, D5) — individual authorizations never move
+the pooled total, so the "$90 of $120, 3 of 4 paid" progress-bar moment vinkin.org's own hero
+mockup visually implies does not exist as a reachable state today; flagged for the owner,
+unchanged (a settlement-semantics question, out of scope to alter unilaterally). The capture
+run itself caught and fixed three real defects along the way: a duplicate "Start a Vink"
+button ambiguity, a stale-response race in the lobby's realtime refresh (overlapping WS-
+triggered fetches could complete out of order and overwrite newer data with older — fixed
+with a monotonic request-sequence guard), and a bottom-sheet layout overflow on this device
+size. **23/23 Flutter tests green**, guest-web `tsc`/`eslint` clean, both Playwright suites
+(E9 + screenshots) green together.
+
+Next: the visual side-by-side comparison already exists
+(`artifacts/product-screenshots/vinkin-website-product-comparison.png`) but hasn't had owner
+eyes on it yet; a live-UI proof of the custom-split mismatch scenario (PV13's other flagged
+gap) is still open. Then **PV12 — Validation Pilot** (the actual pilot; an owner/operational
+decision, not engineering work). Machine notes: pnpm 11 + PostgreSQL 16 + Redis + Flutter SDK
++ Playwright(Chromium) all installed (via brew/dart/npm; still no Docker) — the local API
+server must be started with
+`VINKIN_PUBLIC_BASE_URL=http://127.0.0.1:3100 OPERATIONS_CONSOLE_BASE_URL=http://127.0.0.1:3200`
+(the CORS-allowed origins) or guest-web's/ops-console's own Playwright suites fail on CORS,
+not on anything in their own code — this bit the screenshot pass itself mid-session (a plain
+server restart silently dropped the override) and cost real debugging time; worth a
+`.env`/start-script fix if this keeps recurring. Sandbox S1–S12 blocked on keys.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

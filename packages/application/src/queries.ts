@@ -24,6 +24,13 @@ export interface RecoveryView {
   attemptCount: number;
 }
 
+export interface ParticipantContributionView {
+  participantId: string;
+  /** The participant's most recent contribution attempt's status (Contribution['status']) —
+   * absent entirely means they haven't attempted one yet ("waiting" in the UI). */
+  status: string;
+}
+
 export interface VinkSnapshot {
   vink: Vink;
   participants: Participant[];
@@ -33,6 +40,9 @@ export interface VinkSnapshot {
   card: CardView | null;
   /** Present once a recovery obligation exists (settlement overage → organizer owes). */
   recovery: RecoveryView | null;
+  /** One entry per participant with at least one contribution attempt, latest attempt only —
+   * the organizer lobby's "paid / processing / waiting" per-row status (PV13). */
+  contributions: ParticipantContributionView[];
 }
 
 export function computeAllowedActions(vink: Vink, participants: Participant[]): AllowedAction[] {
@@ -76,11 +86,24 @@ export async function getVinkSnapshot(
   const card = await reader.getCardByVink(vinkId);
   const obligations = await reader.listRecoveryObligations(vinkId);
   const obligation = obligations.at(-1) ?? null;
+  const contributions = await reader.listContributionsByVink(vinkId);
+  const latestContributionByParticipant = new Map<string, string>();
+  for (const contribution of contributions) {
+    // Rows arrive oldest-first (listContributionsByVink), so the last write per participant
+    // is always the most recent attempt.
+    latestContributionByParticipant.set(contribution.participantId, contribution.status);
+  }
   return {
     vink,
     participants,
     unallocatedAmountMinor: unallocatedAmount(vink, active).amountMinor,
     allowedActions: computeAllowedActions(vink, participants),
+    contributions: [...latestContributionByParticipant.entries()].map(
+      ([participantId, status]) => ({
+        participantId,
+        status,
+      }),
+    ),
     card:
       card === null
         ? null

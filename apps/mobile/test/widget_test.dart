@@ -29,6 +29,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('VinkIn'), findsOneWidget);
-    expect(find.text('Create an account'), findsOneWidget);
+    // VinkPrimaryButton renders its label uppercase (design correction: every button on
+    // vinkin.org is uppercase, wide-tracked, font-display) — the widget tree's actual text.
+    expect(find.text('CREATE AN ACCOUNT'), findsOneWidget);
   });
 }

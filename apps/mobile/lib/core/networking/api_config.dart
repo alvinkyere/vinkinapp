@@ -11,4 +11,13 @@ class ApiConfig {
   );
 
   static String get wsBaseUrl => baseUrl.replaceFirst('http', 'ws');
+
+  /// apps/guest-web's own address — mirrors the API's `VINKIN_PUBLIC_BASE_URL` default
+  /// (apps/api/src/config/env.ts) so a locally-run stack's share links resolve without
+  /// extra config. Used to build the general `/join/:publicCode` link (live lobby sharing);
+  /// the per-guest `/g/:token` link is returned ready-made by the invite-guest endpoint.
+  static const String guestWebBaseUrl = String.fromEnvironment(
+    'VINKIN_GUEST_WEB_BASE_URL',
+    defaultValue: 'http://127.0.0.1:3100',
+  );
 }

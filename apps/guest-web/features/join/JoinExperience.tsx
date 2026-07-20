@@ -98,7 +98,7 @@ export function JoinExperience({ publicCode }: { publicCode: string }) {
 
 function StatusMessage({ children }: { children: React.ReactNode }) {
   return (
-    <div role="status" className="mx-auto flex w-full max-w-md flex-col items-center gap-2 p-10 text-center text-gray-600">
+    <div role="status" className="mx-auto flex w-full max-w-md flex-col items-center gap-2 p-10 text-center font-sans text-smoke">
       {children}
     </div>
   );

@@ -46,35 +46,35 @@ export function JoinForm({
 
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-6 p-6">
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-gray-900">
+      <div className="rounded-[2rem] bg-white p-7 shadow-[0_20px_60px_-15px_rgba(10,10,11,0.15)]">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="font-display text-lg font-bold text-ink">
             {CATEGORY_LABELS[summary.purchaseCategory] ?? summary.purchaseCategory}
           </h1>
           <StatusBadge state={summary.state} />
         </div>
-        <p className="mt-2 text-3xl font-bold tabular-nums text-gray-900">
+        <p className="mt-2 font-display text-3xl font-extrabold tabular-nums text-ink">
           {formatMoney(summary.requiredAmountMinor)}
         </p>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-smoke font-sans">
           {summary.participantCount} {summary.participantCount === 1 ? 'person' : 'people'} so far
         </p>
       </div>
 
       {!summary.joinable ? (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <p className="rounded-xl bg-danger/8 px-4 py-3 text-sm text-danger font-sans">
           This Vink is no longer accepting new participants.
         </p>
       ) : (
         <form
-          className="flex flex-col gap-3"
+          className="flex flex-col gap-3 font-sans"
           onSubmit={(event) => {
             event.preventDefault();
             if (displayName.trim().length === 0) return;
             mutation.mutate(displayName.trim());
           }}
         >
-          <label htmlFor="displayName" className="text-sm font-medium text-gray-700">
+          <label htmlFor="displayName" className="text-sm font-medium text-ink">
             Your name
           </label>
           <input
@@ -85,11 +85,11 @@ export function JoinForm({
             maxLength={80}
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
-            className="rounded-lg border border-gray-300 px-4 py-3 text-base focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            className="rounded-xl bg-white px-4 py-3 text-base text-ink outline outline-ink/12 focus:outline-2 focus:outline-blue"
             placeholder="e.g. Jordan"
           />
           {mutation.isError ? (
-            <p role="alert" className="text-sm text-red-600">
+            <p role="alert" className="text-sm text-danger">
               {mutation.error instanceof ApiError
                 ? mutation.error.message
                 : 'Something went wrong — try again.'}
@@ -98,7 +98,7 @@ export function JoinForm({
           <button
             type="submit"
             disabled={mutation.isPending || displayName.trim().length === 0}
-            className="mt-2 rounded-lg bg-blue-600 px-4 py-3 text-base font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-2 rounded-full bg-blue px-9 py-4 font-display text-sm font-bold tracking-wide text-white uppercase transition hover:bg-blue-deep disabled:cursor-not-allowed disabled:opacity-40"
           >
             {mutation.isPending ? 'Joining…' : 'Join this Vink'}
           </button>
