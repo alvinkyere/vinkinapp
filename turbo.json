@@ -2,7 +2,8 @@
   "$schema": "https://turborepo.com/schema.json",
   "tasks": {
     "test": {
-      "cache": false
+      "cache": false,
+      "env": ["VINKIN_INTEGRATION", "VINKIN_OTEL_ENABLED"]
     },
     "typecheck": {
       "outputs": []

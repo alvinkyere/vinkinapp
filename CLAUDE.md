@@ -214,18 +214,50 @@ with a monotonic request-sequence guard), and a bottom-sheet layout overflow on 
 size. **23/23 Flutter tests green**, guest-web `tsc`/`eslint` clean, both Playwright suites
 (E9 + screenshots) green together.
 
-Next: the visual side-by-side comparison already exists
-(`artifacts/product-screenshots/vinkin-website-product-comparison.png`) but hasn't had owner
-eyes on it yet; a live-UI proof of the custom-split mismatch scenario (PV13's other flagged
-gap) is still open. Then **PV12 — Validation Pilot** (the actual pilot; an owner/operational
-decision, not engineering work). Machine notes: pnpm 11 + PostgreSQL 16 + Redis + Flutter SDK
-+ Playwright(Chromium) all installed (via brew/dart/npm; still no Docker) — the local API
+**Track change (2026-07-20):** the owner supplied a new engineering plan
+(`ENG0`–`ENG15`) that now governs everything below PV13 — UX owns customer-facing product
+decisions going forward; this engineering track owns correctness, reliability, contracts,
+deployment, auth, security, observability, provider integration, and production readiness.
+Sequence: `ENG0 → ENG1 → ENG2 → ENG3 → ENG4 → ENG5 → ENG6 → ENG7 → ENG8 → ENG9 → PV12 → M0 →
+ENG12 → ENG13 → ENG14 → ENG15`.
+
+**ENG0 done** (`milestone-reports/ENG0-BASELINE.md`): baseline certified at commit `fe876d7`
+(owner to tag `eng0-baseline` once this milestone's two fixes are committed — see the report
+for the exact commands; per house rule, git actions are provided, not run, here). Found and
+fixed two real defects in the verification suite itself: `pnpm test` was silently skipping
+every integration test (`turbo.json`'s `test` task declared no `env` key, and Turborepo 2.x
+defaults to strict env mode, so `VINKIN_INTEGRATION=1` never reached the task — 19 of
+`@vinkin/api`'s suites were `# SKIP`, undercounting every prior milestone's "N tests green" by
+what actually ran under the documented command; fixed by adding `"env": ["VINKIN_INTEGRATION",
+"VINKIN_OTEL_ENABLED"]`), and `pnpm format:check` failing on two gitignored, Next.js
+auto-generated `next-env.d.ts` files never meant to be hand-formatted (fixed via
+`.prettierignore`). Re-verified full suite green: **191 Node/TS tests + 23 Flutter tests**,
+lint/typecheck/format:check/guard all clean. One defect documented but deliberately not
+fixed (out of baseline-certification scope, real code change): `flutter analyze` now reports
+7 info-level issues (exit 1) — SDK drift since earlier reports, one of which
+(`use_build_context_synchronously` in `add_person_sheet.dart:242`) is a real async-gap
+correctness lint worth a look during ENG1/ENG3, not a blind fix here. No obsolete/experimental
+code found to quarantine. One design system per client reconfirmed by reading the actual
+wiring, not docs (`buildVinkTheme()` → `MaterialApp.router` in mobile; guest-web's
+`globals.css` on the same tokens).
+
+Carried-over PV13 gaps (still open, unchanged by ENG0): the visual side-by-side comparison
+already exists (`artifacts/product-screenshots/vinkin-website-product-comparison.png`) but
+hasn't had owner eyes on it yet; a live-UI proof of the custom-split mismatch scenario is
+still open. Machine notes: pnpm 11 + PostgreSQL 16 + Redis + Flutter SDK +
+Playwright(Chromium) all installed (via brew/dart/npm; still no Docker) — the local API
 server must be started with
 `VINKIN_PUBLIC_BASE_URL=http://127.0.0.1:3100 OPERATIONS_CONSOLE_BASE_URL=http://127.0.0.1:3200`
 (the CORS-allowed origins) or guest-web's/ops-console's own Playwright suites fail on CORS,
 not on anything in their own code — this bit the screenshot pass itself mid-session (a plain
-server restart silently dropped the override) and cost real debugging time; worth a
-`.env`/start-script fix if this keeps recurring. Sandbox S1–S12 blocked on keys.
+server restart silently dropped the override) and cost real debugging time; still worth a
+`.env`/start-script fix (flagged again in ENG0-BASELINE.md as a candidate ENG1/ENG3 item).
+Sandbox S1–S12 blocked on keys.
+
+Next: **ENG1 — Core Workflow Correctness**, starting with §1 (diagnose the indefinite
+"Connecting…" defect, add correlation tracing client→API→DB→outbox→realtime) per the
+engineering plan's own stated priority order. `PV12` (the actual closed pilot) remains an
+owner/operational decision deferred until ENG0–ENG9 close.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 
