@@ -339,7 +339,10 @@ describe('real-time channel end-to-end (PostgreSQL + WebSocket)', { skip: !RUN }
     // lines above; matching "any eventType" races against that backlog instead of the new
     // event this action actually triggers, exactly like every other assertion in this file
     // already does (waitFor(..., m => m.type === 'funding_progress_updated') etc.).
-    const organizerEvent = await waitFor(organizerMessages, (m) => m.type === 'contribution_pending');
+    const organizerEvent = await waitFor(
+      organizerMessages,
+      (m) => m.type === 'contribution_pending',
+    );
     const guestEvent = await waitFor(guestMessages, (m) => m.type === 'contribution_pending');
     assert.deepEqual(organizerEvent, guestEvent);
 
