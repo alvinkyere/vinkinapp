@@ -102,7 +102,13 @@ export function registerSharingRoutes(
   app.get('/api/v1/join/:publicCode', { preHandler: viewLimiter }, async (request, reply) => {
     const { publicCode } = request.params as { publicCode: string };
     try {
-      return reply.send(await getPublicVinkView(store, publicCode, new Date()));
+      // D23 (Slice I1) — the DRAFT-gate is opt-in behind the flag; additive fields
+      // (contributionProgress/vinkOutcome) are always present regardless.
+      return reply.send(
+        await getPublicVinkView(store, publicCode, new Date(), {
+          gateDraft: env.VINKIN_CONTRIBUTION_PROJECTION_ENABLED === '1',
+        }),
+      );
     } catch (error) {
       const mapped = guestError(error);
       if (mapped === null) throw error;
@@ -156,7 +162,11 @@ export function registerSharingRoutes(
         : null;
     if (token === null) return reply.code(401).send({ error: 'GUEST_UNAUTHENTICATED' });
     try {
-      return reply.send(await getGuestVinkView(store, hashGuestToken(token), new Date()));
+      return reply.send(
+        await getGuestVinkView(store, hashGuestToken(token), new Date(), {
+          gateDraft: env.VINKIN_CONTRIBUTION_PROJECTION_ENABLED === '1',
+        }),
+      );
     } catch (error) {
       const mapped = guestError(error);
       if (mapped === null) throw error;

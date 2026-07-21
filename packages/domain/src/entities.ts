@@ -49,6 +49,9 @@ export interface Vink {
   processingGraceDeadline: string;
   merchantLockStatus: MerchantLockStatus;
   version: number; // optimistic concurrency (Plan §11); increments on every mutation
+  /** Client-generated, stable across retries of the same create attempt (ENG1 #4) — lets a
+   * lost-response retry return this same Vink instead of creating a duplicate. */
+  creationIdempotencyKey: string;
   createdAt: string;
   updatedAt: string;
 }

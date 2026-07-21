@@ -5,6 +5,8 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/auth/auth_controller.dart';
 import '../../core/errors/api_exception.dart';
+import '../../core/errors/failure_classifier.dart';
+import '../../core/networking/idempotency_key.dart';
 import '../../design_system/components/vink_buttons.dart';
 import '../../design_system/components/vink_inline_error.dart';
 import '../../design_system/components/vink_text_field.dart';
@@ -36,6 +38,13 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
   String? _error;
   String? _lastTriedUsername;
   PersonEntry? _readyGuest;
+
+  // ENG1 #4: generated lazily on the first "Add guest" attempt and reused across retries of
+  // that same attempt — a lost-response retry is rejected server-side (INVITE_ALREADY_SENT)
+  // instead of creating a second guest. Add-by-username needs no key of its own: the
+  // server's own PARTICIPANT_ALREADY_ADDED check (keyed on username, not a client-generated
+  // key) already covers the identical duplicate-add case.
+  String? _guestInviteIdempotencyKey;
 
   @override
   void dispose() {
@@ -69,9 +78,17 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
           _lastTriedUsername = username;
           _phase = _Phase.notFound;
         });
-      } else {
-        setState(() => _error = "Something went wrong. Try again.");
+        return;
       }
+      final failure = classifyFailure(error);
+      if (failure.category == FailureCategory.alreadyCompleted) {
+        // ENG1 #4: they're already a participant — a lost-response retry catching up with
+        // reality, not a failure. Close quietly rather than show an error; the parent's own
+        // next server sync (Review step's snapshot fetch) picks up the real participant list.
+        if (mounted) Navigator.of(context).pop();
+        return;
+      }
+      setState(() => _error = failure.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -86,7 +103,11 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
     });
     try {
       final client = ref.read(apiClientProvider);
-      final response = await client.post('/api/v1/vinks/${widget.vinkId}/guests', body: {'displayName': displayName});
+      _guestInviteIdempotencyKey ??= newIdempotencyKey();
+      final response = await client.post(
+        '/api/v1/vinks/${widget.vinkId}/guests',
+        body: {'displayName': displayName, 'invitationIdempotencyKey': _guestInviteIdempotencyKey},
+      );
       final participant = response['participant'] as Map<String, dynamic>;
       setState(() {
         _readyGuest = PersonEntry(
@@ -98,8 +119,17 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
         );
         _phase = _Phase.guestReady;
       });
-    } on ApiException {
-      setState(() => _error = "Couldn't add them as a guest. Try again.");
+    } on ApiException catch (error) {
+      final failure = classifyFailure(error);
+      if (failure.category == FailureCategory.alreadyCompleted) {
+        // ENG1 #4: this exact invite already went out on an earlier attempt whose response
+        // was lost. The raw join link can't be recovered (D14 — only its hash is ever
+        // stored), so there's nothing better to show than closing quietly: no duplicate
+        // guest was created, which is the actual correctness guarantee that matters here.
+        if (mounted) Navigator.of(context).pop();
+        return;
+      }
+      setState(() => _error = failure.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

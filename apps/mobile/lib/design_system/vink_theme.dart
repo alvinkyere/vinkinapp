@@ -57,6 +57,11 @@ ThemeData buildVinkTheme() {
         borderSide: const BorderSide(color: VinkColors.danger, width: 1.5),
       ),
       labelStyle: VinkTypography.bodySmallSecondary,
+      // Field error text (VinkTextField/VinkMoneyField's errorText) would otherwise render
+      // in Material's default colorScheme.error (danger) at a size that fails WCAG AA
+      // (D36; docs/design/phase-8-visual-system-refinement.md §11/§24). The error border
+      // above (a non-text use) still carries the danger signal.
+      errorStyle: VinkTypography.bodySmall.copyWith(color: VinkColors.ink),
     ),
     splashFactory: InkRipple.splashFactory,
   );

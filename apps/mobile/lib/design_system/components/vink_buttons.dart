@@ -10,6 +10,52 @@ import '../vink_typography.dart';
 /// clears the 44×44pt minimum touch target with room for label ascenders/descenders.
 const double _minButtonHeight = 48;
 
+/// Swaps a button's label for a loading spinner without the button visibly resizing
+/// (docs/design/phase-9-motion-system.md §2/§7, docs/design/phase-10-implementation-readiness.md
+/// I0): both the label and the spinner are always laid out — only their opacity toggles —
+/// so the Stack's intrinsic width is always the label's width (the spinner is smaller), and
+/// switching `loading` never changes the button's footprint.
+class _ButtonContent extends StatelessWidget {
+  const _ButtonContent({
+    required this.label,
+    required this.loading,
+    required this.spinnerColor,
+    required this.textStyle,
+    this.spinnerSize = 20,
+  });
+
+  final String label;
+  final bool loading;
+  final Color spinnerColor;
+  final TextStyle textStyle;
+  final double spinnerSize;
+
+  @override
+  Widget build(BuildContext context) {
+    // The label stays mounted (opacity-toggled, never removed) so it always reserves the
+    // button's natural width; the spinner is only mounted while loading, which is safe
+    // because it's smaller than the label and can never make the Stack narrower.
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Opacity(
+          opacity: loading ? 0 : 1,
+          child: Text(label.toUpperCase(), style: textStyle),
+        ),
+        if (loading)
+          SizedBox(
+            width: spinnerSize,
+            height: spinnerSize,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: spinnerColor,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 /// `bg-blue text-white`, hover → `bg-blue-deep`; the site's large `px-9 py-4` padding.
 /// The one dominant action per screen (docs/design/vinkin-design-system.md "Buttons").
 class VinkPrimaryButton extends StatelessWidget {
@@ -43,7 +89,9 @@ class VinkPrimaryButton extends StatelessWidget {
           boxShadow: glow && !disabled ? VinkShadows.ctaGlow : null,
         ),
         child: Material(
-          color: disabled ? VinkColors.ink.withValues(alpha: 0.15) : VinkColors.blue,
+          color: disabled
+              ? VinkColors.ink.withValues(alpha: 0.15)
+              : VinkColors.blue,
           borderRadius: BorderRadius.circular(VinkRadius.pill),
           child: InkWell(
             onTap: disabled ? null : onPressed,
@@ -52,18 +100,19 @@ class VinkPrimaryButton extends StatelessWidget {
             highlightColor: VinkColors.blueDeep.withValues(alpha: 0.2),
             child: Container(
               constraints: const BoxConstraints(minHeight: _minButtonHeight),
-              padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.xl, vertical: VinkSpacing.md),
+              padding: const EdgeInsets.symmetric(
+                horizontal: VinkSpacing.xl,
+                vertical: VinkSpacing.md,
+              ),
               alignment: Alignment.center,
-              child: loading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: VinkColors.white),
-                    )
-                  : Text(
-                      label.toUpperCase(),
-                      style: VinkTypography.buttonLabel.copyWith(color: VinkColors.white),
-                    ),
+              child: _ButtonContent(
+                label: label,
+                loading: loading,
+                spinnerColor: VinkColors.white,
+                textStyle: VinkTypography.buttonLabel.copyWith(
+                  color: VinkColors.white,
+                ),
+              ),
             ),
           ),
         ),
@@ -74,7 +123,13 @@ class VinkPrimaryButton extends StatelessWidget {
 
 /// `bg-paper text-ink` — a quieter action, e.g. beside a primary button.
 class VinkSecondaryButton extends StatelessWidget {
-  const VinkSecondaryButton({super.key, required this.label, required this.onPressed, this.loading = false, this.semanticLabel});
+  const VinkSecondaryButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.loading = false,
+    this.semanticLabel,
+  });
 
   final String label;
   final VoidCallback? onPressed;
@@ -96,24 +151,24 @@ class VinkSecondaryButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(VinkRadius.pill),
           child: Container(
             constraints: const BoxConstraints(minHeight: _minButtonHeight),
-            padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.lg, vertical: VinkSpacing.sm + 2),
+            padding: const EdgeInsets.symmetric(
+              horizontal: VinkSpacing.lg,
+              vertical: VinkSpacing.sm + 2,
+            ),
             alignment: Alignment.center,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(VinkRadius.pill),
               border: Border.all(color: VinkColors.ink.withValues(alpha: 0.15)),
             ),
-            child: loading
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2.5, color: VinkColors.ink),
-                  )
-                : Text(
-                    label.toUpperCase(),
-                    style: VinkTypography.buttonLabel.copyWith(
-                      color: disabled ? VinkColors.smoke : VinkColors.ink,
-                    ),
-                  ),
+            child: _ButtonContent(
+              label: label,
+              loading: loading,
+              spinnerColor: VinkColors.ink,
+              spinnerSize: 18,
+              textStyle: VinkTypography.buttonLabel.copyWith(
+                color: disabled ? VinkColors.smoke : VinkColors.ink,
+              ),
+            ),
           ),
         ),
       ),
@@ -121,10 +176,21 @@ class VinkSecondaryButton extends StatelessWidget {
   }
 }
 
-/// A destructive variant of the outline button (cancel a Vink) — the one place this app
-/// needs a color the site itself never shows (see VinkColors.danger's doc comment).
+/// A destructive variant of the outline button (cancel a Vink). Foreground text is
+/// `VinkColors.ink` (text.primary), not `danger` — `danger` text at this button's actual
+/// rendered size (`buttonLabel`, 15px/700) fails WCAG AA against `white`/`paper`
+/// (docs/spec/decision-log.md D36; docs/design/phase-8-visual-system-refinement.md §4/§10/§24
+/// — bold weight alone doesn't qualify for the large-text exception, since 15px is under the
+/// 18.66px-bold floor). `danger` is kept on the border only, a non-text use verified against
+/// the 3:1 non-text threshold, so the destructive intent still reads visually.
 class VinkDestructiveButton extends StatelessWidget {
-  const VinkDestructiveButton({super.key, required this.label, required this.onPressed, this.loading = false, this.semanticLabel});
+  const VinkDestructiveButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.loading = false,
+    this.semanticLabel,
+  });
 
   final String label;
   final VoidCallback? onPressed;
@@ -146,24 +212,32 @@ class VinkDestructiveButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(VinkRadius.pill),
           child: Container(
             constraints: const BoxConstraints(minHeight: _minButtonHeight),
-            padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.lg, vertical: VinkSpacing.sm + 2),
+            padding: const EdgeInsets.symmetric(
+              horizontal: VinkSpacing.lg,
+              vertical: VinkSpacing.sm + 2,
+            ),
             alignment: Alignment.center,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(VinkRadius.pill),
-              border: Border.all(color: VinkColors.danger.withValues(alpha: disabled ? 0.3 : 0.6)),
+              border: Border.all(
+                color: VinkColors.danger.withValues(
+                  alpha: disabled ? 0.3 : 0.6,
+                ),
+              ),
             ),
-            child: loading
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2.5, color: VinkColors.danger.withValues(alpha: 0.6)),
-                  )
-                : Text(
-                    label.toUpperCase(),
-                    style: VinkTypography.buttonLabel.copyWith(
-                      color: disabled ? VinkColors.danger.withValues(alpha: 0.4) : VinkColors.danger,
-                    ),
-                  ),
+            child: _ButtonContent(
+              label: label,
+              loading: loading,
+              spinnerColor: disabled
+                  ? VinkColors.ink.withValues(alpha: 0.4)
+                  : VinkColors.ink,
+              spinnerSize: 18,
+              textStyle: VinkTypography.buttonLabel.copyWith(
+                color: disabled
+                    ? VinkColors.ink.withValues(alpha: 0.4)
+                    : VinkColors.ink,
+              ),
+            ),
           ),
         ),
       ),
@@ -174,7 +248,12 @@ class VinkDestructiveButton extends StatelessWidget {
 /// A plain text action — "Try another username", "Edit", "Sign out". Body font (not
 /// display), since these are quiet, secondary actions, not brand-voice CTAs.
 class VinkTextButton extends StatelessWidget {
-  const VinkTextButton({super.key, required this.label, required this.onPressed, this.color = VinkColors.blue});
+  const VinkTextButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.color = VinkColors.blue,
+  });
 
   final String label;
   final VoidCallback? onPressed;
@@ -192,11 +271,16 @@ class VinkTextButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(VinkRadius.lg),
         child: Container(
           constraints: const BoxConstraints(minHeight: 44),
-          padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.sm, vertical: VinkSpacing.sm),
+          padding: const EdgeInsets.symmetric(
+            horizontal: VinkSpacing.sm,
+            vertical: VinkSpacing.sm,
+          ),
           alignment: Alignment.center,
           child: Text(
             label,
-            style: VinkTypography.label.copyWith(color: disabled ? VinkColors.smoke : color),
+            style: VinkTypography.label.copyWith(
+              color: disabled ? VinkColors.smoke : color,
+            ),
           ),
         ),
       ),

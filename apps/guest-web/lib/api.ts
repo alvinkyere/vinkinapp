@@ -1,6 +1,11 @@
 import { API_BASE_URL } from './config';
 import { ApiError } from './api-error';
-import type { AuthorizeContributionResponse, GuestVinkView, PublicVinkSummary } from './types';
+import type {
+  AuthorizeContributionResponse,
+  GuestVinkViewResult,
+  PublicVinkSummary,
+  PublicVinkView,
+} from './types';
 
 async function request<T>(
   path: string,
@@ -22,8 +27,13 @@ async function request<T>(
   return body as T;
 }
 
-export function getPublicVinkView(publicCode: string): Promise<PublicVinkSummary> {
-  return request<PublicVinkSummary>(`/api/v1/join/${publicCode}`);
+// The backend (`apps/api/src/modules/sharing/routes.ts`) always calls the additive-fields
+// overload — `vinkOutcome`/`contributionProgress` are always present on the wire regardless
+// of `VINKIN_CONTRIBUTION_PROJECTION_ENABLED`; only whether a DRAFT vink collapses to
+// `NotOpenYetView` depends on that (backend-owned) flag. The response type reflects what the
+// wire can actually send, independent of this app's own `guest_contribution_status_ui` flag.
+export function getPublicVinkView(publicCode: string): Promise<PublicVinkView> {
+  return request<PublicVinkView>(`/api/v1/join/${publicCode}`);
 }
 
 export function joinVink(
@@ -40,8 +50,8 @@ export function joinVink(
   });
 }
 
-export function getGuestSession(guestToken: string): Promise<GuestVinkView> {
-  return request<GuestVinkView>('/api/v1/guest/session', { guestToken });
+export function getGuestSession(guestToken: string): Promise<GuestVinkViewResult> {
+  return request<GuestVinkViewResult>('/api/v1/guest/session', { guestToken });
 }
 
 export function authorizeGuestContribution(

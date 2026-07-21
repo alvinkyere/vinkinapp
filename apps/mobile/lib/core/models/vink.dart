@@ -26,14 +26,16 @@ class VinkParticipant {
   bool get isGuest => guestIdentityId != null;
   bool get isOrganizer => role == 'ORGANIZER';
 
-  factory VinkParticipant.fromJson(Map<String, dynamic> json) => VinkParticipant(
-    id: json['id'] as String,
-    displayName: json['displayName'] as String,
-    role: json['role'] as String,
-    status: json['status'] as String,
-    allocatedAmountMinor: (json['allocatedAmount']?['amountMinor'] as num?)?.toInt() ?? 0,
-    guestIdentityId: json['guestIdentityId'] as String?,
-  );
+  factory VinkParticipant.fromJson(Map<String, dynamic> json) =>
+      VinkParticipant(
+        id: json['id'] as String,
+        displayName: json['displayName'] as String,
+        role: json['role'] as String,
+        status: json['status'] as String,
+        allocatedAmountMinor:
+            (json['allocatedAmount']?['amountMinor'] as num?)?.toInt() ?? 0,
+        guestIdentityId: json['guestIdentityId'] as String?,
+      );
 }
 
 class VinkCard {
@@ -68,6 +70,7 @@ class Vink {
     required this.version,
     required this.organizerUserId,
     this.submissionDeadline,
+    this.role,
   });
 
   final String id;
@@ -80,19 +83,113 @@ class Vink {
   final String organizerUserId;
   final DateTime? submissionDeadline;
 
+  /// Slice I2B, additive: present on `GET /api/v1/vinks` entries once
+  /// `VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL` is on server-side — `'organizer'` or
+  /// `'participant'`. Absent (null) for every pre-I2B caller and whenever the flag is off,
+  /// which this model treats identically to `'organizer'` (today's only possible value) —
+  /// see [isOrganizerRole].
+  final String? role;
+
+  /// Defaults to organizer when [role] is absent — the exact pre-I2B assumption, since every
+  /// vink `GET /api/v1/vinks` could ever return before this slice was organizer-owned.
+  bool get isOrganizerRole => role != 'participant';
+
   factory Vink.fromJson(Map<String, dynamic> json) => Vink(
     id: json['id'] as String,
     publicCode: json['publicCode'] as String,
     purchaseCategory: json['purchaseCategory'] as String,
     state: json['state'] as String,
-    requiredAmountMinor: (json['requiredAmount']?['amountMinor'] as num).toInt(),
+    requiredAmountMinor: (json['requiredAmount']?['amountMinor'] as num)
+        .toInt(),
     fundedAmountMinor: (json['fundedAmount']?['amountMinor'] as num).toInt(),
     version: (json['version'] as num).toInt(),
     organizerUserId: json['organizerUserId'] as String,
     submissionDeadline: json['submissionDeadline'] == null
         ? null
         : DateTime.parse(json['submissionDeadline'] as String),
+    role: json['role'] as String?,
   );
+}
+
+/// Slice I2B — the customer-safe counterpart to [VinkSnapshot] for a signed-in participant
+/// who isn't the organizer. Mirrors `packages/application/src/guest.ts`'s
+/// `ParticipantVinkView` wire shape exactly (itself the authenticated-member twin of the
+/// already-shipped `GuestVinkView`).
+class ParticipantVinkSummary {
+  const ParticipantVinkSummary({
+    required this.purchaseCategory,
+    required this.state,
+    required this.requiredAmountMinor,
+    required this.confirmedAmountMinor,
+    required this.confirmedParticipantCount,
+    required this.totalParticipantCount,
+    required this.vinkOutcome,
+  });
+
+  final String purchaseCategory;
+  final String state;
+  final int requiredAmountMinor;
+  final int confirmedAmountMinor;
+  final int confirmedParticipantCount;
+  final int totalParticipantCount;
+
+  /// D25's six-way guest-safe outcome category, reused as-is for a signed-in participant —
+  /// the categorization is identity-agnostic (state + own contribution status only).
+  final String vinkOutcome;
+
+  factory ParticipantVinkSummary.fromJson(
+    Map<String, dynamic> json,
+  ) => ParticipantVinkSummary(
+    purchaseCategory: json['purchaseCategory'] as String,
+    state: json['state'] as String,
+    requiredAmountMinor: (json['requiredAmountMinor'] as num).toInt(),
+    confirmedAmountMinor:
+        (json['contributionProgress']['confirmedAmountMinor'] as num).toInt(),
+    confirmedParticipantCount:
+        (json['contributionProgress']['confirmedParticipantCount'] as num)
+            .toInt(),
+    totalParticipantCount:
+        (json['contributionProgress']['totalParticipantCount'] as num).toInt(),
+    vinkOutcome: json['vinkOutcome'] as String,
+  );
+}
+
+class ParticipantSelf {
+  const ParticipantSelf({
+    required this.displayName,
+    required this.allocatedAmountMinor,
+    required this.contributionStatus,
+  });
+
+  final String displayName;
+  final int allocatedAmountMinor;
+
+  /// D24/D25's eight-value guest-safe contribution status, reused as-is.
+  final String contributionStatus;
+
+  factory ParticipantSelf.fromJson(Map<String, dynamic> json) =>
+      ParticipantSelf(
+        displayName: json['displayName'] as String,
+        allocatedAmountMinor: (json['allocatedAmountMinor'] as num).toInt(),
+        contributionStatus: json['contributionStatus'] as String,
+      );
+}
+
+class ParticipantVinkView {
+  const ParticipantVinkView({required this.vink, required this.participant});
+
+  final ParticipantVinkSummary vink;
+  final ParticipantSelf participant;
+
+  factory ParticipantVinkView.fromJson(Map<String, dynamic> json) =>
+      ParticipantVinkView(
+        vink: ParticipantVinkSummary.fromJson(
+          json['vink'] as Map<String, dynamic>,
+        ),
+        participant: ParticipantSelf.fromJson(
+          json['participant'] as Map<String, dynamic>,
+        ),
+      );
 }
 
 class VinkSnapshot {
@@ -124,10 +221,13 @@ class VinkSnapshot {
         .toList(),
     unallocatedAmountMinor: (json['unallocatedAmountMinor'] as num).toInt(),
     allowedActions: (json['allowedActions'] as List<dynamic>).cast<String>(),
-    card: json['card'] == null ? null : VinkCard.fromJson(json['card'] as Map<String, dynamic>),
+    card: json['card'] == null
+        ? null
+        : VinkCard.fromJson(json['card'] as Map<String, dynamic>),
     contributionStatusByParticipant: {
       for (final entry in (json['contributions'] as List<dynamic>? ?? const []))
-        (entry as Map<String, dynamic>)['participantId'] as String: entry['status'] as String,
+        (entry as Map<String, dynamic>)['participantId'] as String:
+            entry['status'] as String,
     },
   );
 }

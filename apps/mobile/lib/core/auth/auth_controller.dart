@@ -62,6 +62,16 @@ class AuthController extends Notifier<AuthState> {
     state = AuthSignedIn(VinkinUser.fromJson(response['user'] as Map<String, dynamic>), response['accessToken'] as String);
   }
 
+  /// ENG1 #3: called when a request's own retry-once-after-refresh already failed
+  /// (`ApiClient`'s interceptor) — the session is provably dead server-side, distinct from
+  /// `logout()` (a deliberate user action that also tells the server). No network call here;
+  /// the server already doesn't recognize this session. Router redirects to `/welcome`
+  /// reactively off this state change, same as any other sign-out.
+  Future<void> expireSession() async {
+    await _tokenStore.clear();
+    state = const AuthSignedOut();
+  }
+
   Future<void> logout() async {
     final refreshToken = await _tokenStore.readRefreshToken();
     await _tokenStore.clear();

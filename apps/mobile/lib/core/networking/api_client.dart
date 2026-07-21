@@ -13,7 +13,13 @@ class ApiClient {
     // ignore: prefer_initializing_formals — `_tokenStore` is deliberately private while the
     // constructor parameter stays public (`tokenStore`) for a readable call site elsewhere.
     : _tokenStore = tokenStore,
-      _dio = Dio(BaseOptions(baseUrl: ApiConfig.baseUrl, connectTimeout: const Duration(seconds: 10))) {
+      _dio = Dio(
+        BaseOptions(
+          baseUrl: ApiConfig.baseUrl,
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 15),
+        ),
+      ) {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {

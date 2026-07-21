@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getGuestSession } from '../../lib/api';
 import { wsBaseUrl } from '../../lib/config';
-import type { GuestVinkView } from '../../lib/types';
+import { isFullGuestSession } from '../../lib/guest-view-guards';
+import type { GuestVinkView, GuestVinkViewResult } from '../../lib/types';
 
 type LiveMessage = Record<string, unknown>;
 
@@ -21,12 +22,34 @@ const RECONNECT_DELAY_MS = 2_000;
  * app's Lobby screen needed in PV9 for the identical reason — a lean live event must never
  * leave the rest of the view stale.
  */
+export interface GuestRealtimeResult {
+  view: GuestVinkView | null;
+  /** Slice I3 — an explicit, immediate re-fetch, for use right after this guest's own
+   * mutation (e.g. `authorizeGuestContribution`) succeeds: mirrors the exact fix pattern
+   * `apps/mobile`'s organizer Lobby needed in PV9/ENG1 for the same reason — a server-truth
+   * status must be read fresh after the guest's own action, not assumed from local state,
+   * and not left to wait on the next WS event (which usually arrives promptly, but "usually"
+   * isn't good enough for D25's "never re-offer the action" guarantee). */
+  refetch: () => Promise<void>;
+}
+
 export function useGuestRealtime(
   vinkId: string | null,
   guestToken: string | null,
   initial: GuestVinkView | null,
-): GuestVinkView | null {
+): GuestRealtimeResult {
   const [view, setView] = useState<GuestVinkView | null>(initial);
+  const guestTokenRef = useRef(guestToken);
+  useEffect(() => {
+    guestTokenRef.current = guestToken;
+  }, [guestToken]);
+
+  const refetch = useCallback(async () => {
+    const token = guestTokenRef.current;
+    if (token === null) return;
+    const fresh = await getGuestSession(token);
+    if (isFullGuestSession(fresh)) setView(fresh);
+  }, []);
 
   useEffect(() => {
     if (vinkId === null || guestToken === null) return;
@@ -40,7 +63,8 @@ export function useGuestRealtime(
       socket.addEventListener('message', (event) => {
         const message = JSON.parse(String(event.data)) as LiveMessage;
         if (message.type === 'snapshot') {
-          setView(message.snapshot as GuestVinkView);
+          const snapshot = message.snapshot as GuestVinkViewResult;
+          if (isFullGuestSession(snapshot)) setView(snapshot);
           return;
         }
         const state = message.state as string | undefined;
@@ -60,7 +84,7 @@ export function useGuestRealtime(
         );
         getGuestSession(token)
           .then((fresh) => {
-            if (!disposed) setView(fresh);
+            if (!disposed && isFullGuestSession(fresh)) setView(fresh);
           })
           .catch(() => {
             // The next live message (or a reconnect) will trigger another attempt; the
@@ -80,5 +104,5 @@ export function useGuestRealtime(
     };
   }, [vinkId, guestToken]);
 
-  return view;
+  return { view, refetch };
 }

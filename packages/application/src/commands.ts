@@ -4,6 +4,7 @@
  * Transports (HTTP today, WebSocket/jobs later) bind to these; nothing else mutates state.
  */
 
+import { randomUUID } from 'node:crypto';
 import {
   assertVinkAmounts,
   computeSplit,
@@ -21,14 +22,18 @@ import {
   type Vink,
   type VinkId,
 } from '../../domain/src/index.ts';
-import { ApplicationError } from './errors.ts';
+import { ApplicationError, CreationIdempotencyRaceError } from './errors.ts';
 import type { CommandContext, VinkTx } from './ports.ts';
 import { applyVinkTransition } from './support/transition.ts';
 import { loadOwnedVink } from './support/guards.ts';
 import { newPublicCode } from './support/public-code.ts';
 
-/** Grace window after submissions close (G9 proposed default, config later). */
-const PROCESSING_GRACE_SECONDS = 60;
+// ENG1 timer semantics: these match VINK_OPEN_DURATION_SECONDS/VINK_PROCESSING_GRACE_SECONDS'
+// own defaults (apps/api/src/config/env.ts) exactly — the fallback for any caller (most
+// tests, internal tooling) that doesn't thread real `ctx.timers` in, so behavior is
+// unchanged for everyone who doesn't opt into configuring it.
+const DEFAULT_OPEN_DURATION_SECONDS = 86_400;
+const DEFAULT_PROCESSING_GRACE_SECONDS = 60;
 
 export interface VinkWithParticipants {
   vink: Vink;
@@ -75,8 +80,32 @@ export interface CreateVinkInput {
   purchaseCategory: PurchaseCategory;
   subtotalMinor: number;
   tipMinor: number;
-  submissionDeadline: string; // ISO-8601
+  /** ISO-8601. ENG1 timer semantics: optional — the real client no longer computes and sends
+   * this itself (it used to hardcode `now + 24h`, exactly the "accidentally hard-coded"
+   * client-side timing the ENG1 brief warns about); omitting it defers to the server's own
+   * `ctx.timers.openDurationSeconds` (or the matching default). An explicit value is still
+   * accepted — genuinely useful for tests that need specific control over deadline timing,
+   * not a production backdoor, since the real app stopped sending one. */
+  submissionDeadline?: string;
   organizerDisplayName: string;
+  /** Client-generated, stable across retries of the same create attempt (ENG1 #4): a lost-
+   * response retry with the same key replays the original Vink instead of creating a
+   * duplicate. Optional so existing callers (tests, internal tooling) are unaffected —
+   * omitting it just forgoes replay protection for that call. */
+  creationIdempotencyKey?: string;
+}
+
+async function findVinkReplay(
+  tx: VinkTx,
+  organizerUserId: string,
+  creationIdempotencyKey: string,
+): Promise<VinkWithParticipants | null> {
+  const existing = await tx.findVinkByCreationIdempotencyKey(
+    organizerUserId,
+    creationIdempotencyKey,
+  );
+  if (existing === null) return null;
+  return { vink: existing, participants: await tx.listParticipants(existing.id) };
 }
 
 export async function createVinkCommand(
@@ -87,11 +116,21 @@ export async function createVinkCommand(
   const subtotal = money(input.subtotalMinor);
   const tip = money(input.tipMinor);
   const required = money(subtotal.amountMinor + tip.amountMinor);
-  const deadline = new Date(input.submissionDeadline);
   const now = ctx.clock.now();
+  const openDurationSeconds = ctx.timers?.openDurationSeconds ?? DEFAULT_OPEN_DURATION_SECONDS;
+  const processingGraceSeconds =
+    ctx.timers?.processingGraceSeconds ?? DEFAULT_PROCESSING_GRACE_SECONDS;
+  const deadline =
+    input.submissionDeadline !== undefined
+      ? new Date(input.submissionDeadline)
+      : new Date(now.getTime() + openDurationSeconds * 1000);
   if (Number.isNaN(deadline.getTime()) || deadline.getTime() <= now.getTime()) {
     throw new ApplicationError('INVALID_COMMAND', 'submissionDeadline must be in the future');
   }
+  // A caller that doesn't care about replay protection (internal tooling, most tests) still
+  // gets a key so every row satisfies the NOT NULL/unique constraint — a fresh random one
+  // never collides, so it behaves exactly like "always insert," same as before this existed.
+  const creationIdempotencyKey = input.creationIdempotencyKey ?? randomUUID();
 
   const vink: Vink = {
     id: newVinkId(),
@@ -108,10 +147,11 @@ export async function createVinkCommand(
     state: 'DRAFT',
     submissionDeadline: deadline.toISOString(),
     processingGraceDeadline: new Date(
-      deadline.getTime() + PROCESSING_GRACE_SECONDS * 1000,
+      deadline.getTime() + processingGraceSeconds * 1000,
     ).toISOString(),
     merchantLockStatus: 'UNLOCKED',
     version: 1,
+    creationIdempotencyKey,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   };
@@ -131,17 +171,34 @@ export async function createVinkCommand(
     updatedAt: now.toISOString(),
   };
 
-  return ctx.uow.run(async (tx) => {
-    await tx.insertVink(vink);
-    await tx.insertParticipant(organizer);
-    await tx.insertOutbox({
-      eventType: 'VinkCreated',
-      aggregateType: 'vink',
-      aggregateId: vink.id,
-      payload: { vinkId: vink.id, requiredAmountMinor: vink.requiredAmount.amountMinor },
+  try {
+    return await ctx.uow.run(async (tx) => {
+      // The common case (response lost after the original request already committed): the
+      // retry finds the earlier row and replays it, no new insert, no duplicate VinkCreated.
+      const replay = await findVinkReplay(tx, vink.organizerUserId, creationIdempotencyKey);
+      if (replay !== null) return replay;
+
+      await tx.insertVink(vink);
+      await tx.insertParticipant(organizer);
+      await tx.insertOutbox({
+        eventType: 'VinkCreated',
+        aggregateType: 'vink',
+        aggregateId: vink.id,
+        payload: { vinkId: vink.id, requiredAmountMinor: vink.requiredAmount.amountMinor },
+      });
+      return { vink, participants: [organizer] };
     });
-    return { vink, participants: [organizer] };
-  });
+  } catch (error) {
+    if (!(error instanceof CreationIdempotencyRaceError)) throw error;
+    // Rarer case: two truly concurrent requests both missed each other's pre-check and both
+    // tried to insert; this one lost at the unique constraint. The winner has already
+    // committed in its own transaction, so replay it fresh rather than surfacing an error.
+    const winner = await ctx.uow.run((tx) =>
+      findVinkReplay(tx, vink.organizerUserId, creationIdempotencyKey),
+    );
+    if (winner === null) throw error; // unreachable: the constraint only fires if a winner exists
+    return winner;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +236,8 @@ export async function configureVinkCommand(
       }
       submissionDeadline = deadline.toISOString();
       processingGraceDeadline = new Date(
-        deadline.getTime() + PROCESSING_GRACE_SECONDS * 1000,
+        deadline.getTime() +
+          (ctx.timers?.processingGraceSeconds ?? DEFAULT_PROCESSING_GRACE_SECONDS) * 1000,
       ).toISOString();
     }
     const updated: Vink = {
@@ -224,7 +282,10 @@ export async function addParticipantCommand(
     }
     const existing = activeParticipants(await tx.listParticipants(vink.id));
     if (existing.some((participant) => participant.userId === input.userId)) {
-      throw new ApplicationError('INVALID_COMMAND', 'user is already a participant');
+      // ENG1 #4: a distinct code (not generic INVALID_COMMAND) so a duplicate add — a
+      // double-tap, or a lost-response retry — can be told apart from a genuinely invalid
+      // command and treated as "already done," not an error.
+      throw new ApplicationError('PARTICIPANT_ALREADY_ADDED', 'user is already a participant');
     }
     const now = ctx.clock.now().toISOString();
     const participant: Participant = {

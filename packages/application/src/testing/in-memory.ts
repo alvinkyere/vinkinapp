@@ -15,6 +15,7 @@ import type {
   VinkId,
 } from '../../../domain/src/index.ts';
 import { assertBalanced } from '../../../ledger/src/index.ts';
+import { CreationIdempotencyRaceError, InviteIdempotencyRaceError } from '../errors.ts';
 import type {
   ActivityEntry,
   ContributionStatusHistoryRow,
@@ -46,7 +47,28 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
   }
 
   async insertVink(vink: Vink): Promise<void> {
+    // Mimics the DB's unique (organizer_user_id, creation_idempotency_key) index — the same
+    // race a concurrent createVinkCommand retry can hit in production.
+    for (const existing of this.vinks.values()) {
+      if (
+        existing.organizerUserId === vink.organizerUserId &&
+        existing.creationIdempotencyKey === vink.creationIdempotencyKey
+      ) {
+        throw new CreationIdempotencyRaceError();
+      }
+    }
     this.vinks.set(vink.id, vink);
+  }
+
+  async findVinkByCreationIdempotencyKey(
+    organizerUserId: string,
+    key: string,
+  ): Promise<Vink | null> {
+    for (const vink of this.vinks.values()) {
+      if (vink.organizerUserId === organizerUserId && vink.creationIdempotencyKey === key)
+        return vink;
+    }
+    return null;
   }
 
   async getVinkForUpdate(id: VinkId): Promise<Vink | null> {
@@ -66,6 +88,22 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
 
   async insertGuestIdentity(guest: GuestIdentityRecord): Promise<void> {
     this.guests.set(guest.id, guest);
+  }
+
+  readonly guestInviteIdempotencyKeys = new Map<string, Participant['id']>();
+
+  async recordGuestInviteIdempotencyKey(
+    vinkId: VinkId,
+    key: string,
+    participantId: Participant['id'],
+  ): Promise<void> {
+    const composite = `${vinkId}:${key}`;
+    if (this.guestInviteIdempotencyKeys.has(composite)) throw new InviteIdempotencyRaceError();
+    this.guestInviteIdempotencyKeys.set(composite, participantId);
+  }
+
+  async findGuestInviteIdempotencyKey(vinkId: VinkId, key: string): Promise<boolean> {
+    return this.guestInviteIdempotencyKeys.has(`${vinkId}:${key}`);
   }
 
   async findGuestParticipant(
@@ -89,6 +127,19 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
   async listVinksByOrganizer(organizerUserId: string): Promise<Vink[]> {
     return [...this.vinks.values()]
       .filter((vink) => vink.organizerUserId === organizerUserId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async listVinksByParticipant(userId: string): Promise<Vink[]> {
+    const vinkIds = new Set<string>();
+    for (const participant of this.participants.values()) {
+      if (participant.userId === userId && participant.status !== 'REMOVED') {
+        vinkIds.add(participant.vinkId);
+      }
+    }
+    return [...vinkIds]
+      .map((id) => this.vinks.get(id))
+      .filter((vink): vink is Vink => vink !== undefined)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 

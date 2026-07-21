@@ -5,19 +5,12 @@ import { useMutation } from '@tanstack/react-query';
 import { joinVink } from '../../lib/api';
 import { ApiError } from '../../lib/api-error';
 import { track } from '../../lib/analytics';
+import { countdownLabel } from '../../lib/guest-copy';
+import { humanErrorMessage } from '../../lib/human-errors';
 import { formatMoney } from '../../lib/money';
+import { CATEGORY_LABELS } from '../../lib/purchase-category';
 import { StatusBadge } from '../../components/StatusBadge';
 import type { GuestSession, PublicVinkSummary } from '../../lib/types';
-
-const CATEGORY_LABELS: Record<string, string> = {
-  GROCERY: 'Grocery run',
-  RETAIL: 'Retail purchase',
-  ELECTRONICS: 'Electronics purchase',
-  RESTAURANT: 'Restaurant bill',
-  HOTEL: 'Hotel stay',
-  FUEL: 'Fuel',
-  CAR_RENTAL: 'Car rental',
-};
 
 export function JoinForm({
   publicCode,
@@ -29,6 +22,7 @@ export function JoinForm({
   onJoined: (session: GuestSession) => void;
 }) {
   const [displayName, setDisplayName] = useState('');
+  const deadlineLabel = summary.joinable ? countdownLabel(summary.submissionDeadline) : null;
 
   const mutation = useMutation({
     mutationFn: (name: string) => joinVink(publicCode, name),
@@ -59,10 +53,15 @@ export function JoinForm({
         <p className="mt-1 text-sm text-smoke font-sans">
           {summary.participantCount} {summary.participantCount === 1 ? 'person' : 'people'} so far
         </p>
+        {deadlineLabel !== null ? (
+          <p className="mt-1 text-sm text-smoke font-sans">{deadlineLabel}</p>
+        ) : null}
       </div>
 
       {!summary.joinable ? (
-        <p className="rounded-xl bg-danger/8 px-4 py-3 text-sm text-danger font-sans">
+        // text-ink, not text-danger: danger text at this size fails WCAG AA (D36) — the
+        // danger-tinted background carries the signal instead.
+        <p className="rounded-xl bg-danger/8 px-4 py-3 text-sm text-ink font-sans">
           This Vink is no longer accepting new participants.
         </p>
       ) : (
@@ -89,10 +88,10 @@ export function JoinForm({
             placeholder="e.g. Jordan"
           />
           {mutation.isError ? (
-            <p role="alert" className="text-sm text-danger">
-              {mutation.error instanceof ApiError
-                ? mutation.error.message
-                : 'Something went wrong — try again.'}
+            // text-ink, not text-danger: explanatory error copy uses primary text (D36;
+            // docs/design/phase-8-visual-system-refinement.md §11).
+            <p role="alert" className="text-sm text-ink">
+              {humanErrorMessage(mutation.error)}
             </p>
           ) : null}
           <button

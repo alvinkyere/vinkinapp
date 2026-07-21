@@ -5,16 +5,18 @@
  */
 
 import type postgres from 'postgres';
-import type {
-  ActivityEntry,
-  ContributionStatusHistoryRow,
-  GuestIdentityRecord,
-  LedgerPostingInput,
-  OutboxEventInput,
-  UnitOfWork,
-  VinkReader,
-  VinkStateHistoryRow,
-  VinkTx,
+import {
+  CreationIdempotencyRaceError,
+  InviteIdempotencyRaceError,
+  type ActivityEntry,
+  type ContributionStatusHistoryRow,
+  type GuestIdentityRecord,
+  type LedgerPostingInput,
+  type OutboxEventInput,
+  type UnitOfWork,
+  type VinkReader,
+  type VinkStateHistoryRow,
+  type VinkTx,
 } from '../../../../../packages/application/src/index.ts';
 import type {
   Contribution,
@@ -61,6 +63,7 @@ function rowToVink(row: Row): Vink {
     processingGraceDeadline: toIso(row.processing_grace_deadline),
     merchantLockStatus: row.merchant_lock_status as Vink['merchantLockStatus'],
     version: asMinor(row.version, 'version'),
+    creationIdempotencyKey: row.creation_idempotency_key as string,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -185,19 +188,39 @@ class PostgresVinkTx implements VinkTx {
   }
 
   async insertVink(vink: Vink): Promise<void> {
-    await this.#sql`INSERT INTO vinks (
-      id, organizer_user_id, public_code, currency, purchase_category, payment_policy,
-      subtotal_amount_minor, tip_amount_minor, maximum_amount_minor, required_amount_minor,
-      funded_amount_minor, state, submission_deadline, processing_grace_deadline,
-      merchant_lock_status, version, created_at, updated_at
-    ) VALUES (
-      ${vink.id}, ${vink.organizerUserId}, ${vink.publicCode}, ${vink.currency},
-      ${vink.purchaseCategory}, ${vink.paymentPolicy}, ${vink.subtotalAmount.amountMinor},
-      ${vink.tipAmount.amountMinor}, ${vink.maximumAmount.amountMinor},
-      ${vink.requiredAmount.amountMinor}, ${vink.fundedAmount.amountMinor}, ${vink.state},
-      ${vink.submissionDeadline}, ${vink.processingGraceDeadline}, ${vink.merchantLockStatus},
-      ${vink.version}, ${vink.createdAt}, ${vink.updatedAt}
-    )`;
+    try {
+      await this.#sql`INSERT INTO vinks (
+        id, organizer_user_id, public_code, currency, purchase_category, payment_policy,
+        subtotal_amount_minor, tip_amount_minor, maximum_amount_minor, required_amount_minor,
+        funded_amount_minor, state, submission_deadline, processing_grace_deadline,
+        merchant_lock_status, version, creation_idempotency_key, created_at, updated_at
+      ) VALUES (
+        ${vink.id}, ${vink.organizerUserId}, ${vink.publicCode}, ${vink.currency},
+        ${vink.purchaseCategory}, ${vink.paymentPolicy}, ${vink.subtotalAmount.amountMinor},
+        ${vink.tipAmount.amountMinor}, ${vink.maximumAmount.amountMinor},
+        ${vink.requiredAmount.amountMinor}, ${vink.fundedAmount.amountMinor}, ${vink.state},
+        ${vink.submissionDeadline}, ${vink.processingGraceDeadline}, ${vink.merchantLockStatus},
+        ${vink.version}, ${vink.creationIdempotencyKey}, ${vink.createdAt}, ${vink.updatedAt}
+      )`;
+    } catch (error) {
+      const pgError = error as { code?: string; constraint_name?: string };
+      if (
+        pgError.code === '23505' &&
+        pgError.constraint_name === 'ux_vinks_organizer_creation_key'
+      ) {
+        throw new CreationIdempotencyRaceError();
+      }
+      throw error;
+    }
+  }
+
+  async findVinkByCreationIdempotencyKey(
+    organizerUserId: string,
+    key: string,
+  ): Promise<Vink | null> {
+    const rows = await this.#sql`SELECT * FROM vinks
+      WHERE organizer_user_id = ${organizerUserId} AND creation_idempotency_key = ${key}`;
+    return rows.length === 0 ? null : rowToVink(rows[0] as Row);
   }
 
   async getVinkForUpdate(id: VinkId): Promise<Vink | null> {
@@ -215,6 +238,30 @@ class PostgresVinkTx implements VinkTx {
       .#sql`INSERT INTO guest_identities (id, display_name, access_token_hash, expires_at, created_at)
       VALUES (${guest.id}, ${guest.displayName}, ${guest.accessTokenHash}, ${guest.expiresAt},
               ${guest.createdAt})`;
+  }
+
+  async recordGuestInviteIdempotencyKey(
+    vinkId: VinkId,
+    key: string,
+    participantId: Participant['id'],
+  ): Promise<void> {
+    try {
+      await this
+        .#sql`INSERT INTO guest_invite_idempotency (vink_id, idempotency_key, participant_id)
+        VALUES (${vinkId}, ${key}, ${participantId})`;
+    } catch (error) {
+      const pgError = error as { code?: string };
+      // Unique violation on the (vink_id, idempotency_key) primary key: this pair was
+      // already claimed by a concurrent request — a genuine race, not a bug.
+      if (pgError.code === '23505') throw new InviteIdempotencyRaceError();
+      throw error;
+    }
+  }
+
+  async findGuestInviteIdempotencyKey(vinkId: VinkId, key: string): Promise<boolean> {
+    const rows = await this.#sql`SELECT 1 FROM guest_invite_idempotency
+      WHERE vink_id = ${vinkId} AND idempotency_key = ${key}`;
+    return rows.length > 0;
   }
 
   async updateVink(vink: Vink): Promise<void> {
@@ -440,6 +487,20 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
   async listVinksByOrganizer(organizerUserId: string): Promise<Vink[]> {
     const rows = await this.#sql`SELECT * FROM vinks
       WHERE organizer_user_id = ${organizerUserId} ORDER BY created_at DESC`;
+    return rows.map((row) => rowToVink(row as Row));
+  }
+
+  /** Slice I2 (docs/design/phase-10-implementation-readiness.md) — every Vink where this
+   * user has a non-removed participant row, by `user_id` (never a guest's
+   * `guest_identity_id`). `DISTINCT` guards against the (not expected, but not worth
+   * assuming away) case of more than one live participant row for the same
+   * (vink, user) pair. */
+  async listVinksByParticipant(userId: string): Promise<Vink[]> {
+    const rows = await this.#sql`
+      SELECT DISTINCT v.* FROM vinks v
+      JOIN participants p ON p.vink_id = v.id
+      WHERE p.user_id = ${userId} AND p.status != 'REMOVED'
+      ORDER BY v.created_at DESC`;
     return rows.map((row) => rowToVink(row as Row));
   }
 

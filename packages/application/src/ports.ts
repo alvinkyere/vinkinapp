@@ -68,12 +68,29 @@ export interface ActivityEntry {
 
 /** All operations inside one atomic unit of work. */
 export interface VinkTx {
+  /** Rejects (adapter throws `CreationIdempotencyRaceError`) if another transaction has
+   * already committed a vink for this same (organizer, creation idempotency key) pair. */
   insertVink(vink: Vink): Promise<void>;
+  /** For idempotent create-replay (ENG1 #4): a vink this organizer already created with this
+   * exact creation idempotency key, if one exists. Plain read — an optimization ahead of the
+   * database's own unique constraint, not the guard itself. */
+  findVinkByCreationIdempotencyKey(organizerUserId: string, key: string): Promise<Vink | null>;
   /** Row-locked read — the adapter must lock the vink row for the transaction's duration. */
   getVinkForUpdate(id: VinkId): Promise<Vink | null>;
   /** Row-locked read by public code (guest join path). */
   getVinkByPublicCodeForUpdate(publicCode: string): Promise<Vink | null>;
   insertGuestIdentity(guest: GuestIdentityRecord): Promise<void>;
+  /** ENG1 #4: records that this (vink, invitation idempotency key) pair was used, atomically
+   * with the guest identity/participant it invited. Rejects (adapter throws
+   * `InviteIdempotencyRaceError`) if another transaction already claimed the same pair. */
+  recordGuestInviteIdempotencyKey(
+    vinkId: VinkId,
+    key: string,
+    participantId: Participant['id'],
+  ): Promise<void>;
+  /** Plain read — an optimization ahead of the database's own unique constraint, not the
+   * guard itself. True if this exact (vink, key) pair was already used for an invite. */
+  findGuestInviteIdempotencyKey(vinkId: VinkId, key: string): Promise<boolean>;
   /** Persist the full row; `vink.version` has already been incremented by the command. */
   updateVink(vink: Vink): Promise<void>;
   insertParticipant(participant: Participant): Promise<void>;
@@ -116,6 +133,13 @@ export interface VinkReader {
   listActivity(vinkId: VinkId): Promise<ActivityEntry[]>;
   /** Newest first — the organizer's own vink history (Plan §20 "Vink history"). */
   listVinksByOrganizer(organizerUserId: string): Promise<Vink[]>;
+  /** Newest first — every Vink where this user has a non-removed participant row, by
+   * `userId` (member or organizer — a `Participant.userId` match, never a guest's
+   * `guestIdentityId`). Deliberately overlaps with `listVinksByOrganizer` — the organizer is
+   * also a participant of their own Vink (Phase 0 §3) — the caller (`queries.ts`) dedupes
+   * and attributes a role, this port method just answers "is this user a participant here at
+   * all" (docs/design/phase-10-implementation-readiness.md Slice I2). */
+  listVinksByParticipant(userId: string): Promise<Vink[]>;
   /** Resolves a guest access-token hash to its participant, or null (expired/unknown). */
   findGuestParticipant(
     accessTokenHash: string,
@@ -131,6 +155,18 @@ export interface Clock {
   now(): Date;
 }
 
+/** ENG1 timer semantics: one explicit config surface instead of scattered constants
+ * (createVinkCommand/configureVinkCommand). Optional on CommandContext — omitting it (most
+ * tests, internal tooling) falls back to defaults that match pre-existing hardcoded
+ * behavior exactly; only `apps/api`'s real HTTP context threads real config in. */
+export interface VinkTimers {
+  /** How long a newly created Vink stays OPEN before its submission deadline, when the
+   * caller doesn't supply an explicit `submissionDeadline`. */
+  openDurationSeconds: number;
+  /** Spec §14: processing-grace window after the submission deadline. */
+  processingGraceSeconds: number;
+}
+
 export interface CommandContext {
   uow: UnitOfWork;
   clock: Clock;
@@ -138,6 +174,7 @@ export interface CommandContext {
   actorUserId: string;
   /** Request/trace correlation id for history rows. */
   correlationId: string;
+  timers?: VinkTimers;
 }
 
 /** Context for unauthenticated public commands (guest join) — no actor user exists. */

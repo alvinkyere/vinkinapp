@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../networking/api_config.dart';
 
@@ -24,7 +25,11 @@ class RealtimeClient {
   void connect() {
     if (_disposed) return;
     final uri = Uri.parse('${ApiConfig.wsBaseUrl}/api/v1/vinks/$vinkId/live?token=$accessToken');
-    final channel = WebSocketChannel.connect(uri);
+    // Bounded: without an explicit connectTimeout, WebSocketChannel.connect never times out
+    // on its own — a stalled TCP handshake (unreachable host, dropped packets) falls through
+    // to the OS's own connect timeout, which can take minutes. ENG1 #1 traced VinkIn's
+    // reported indefinite "Connecting…" hang to exactly this.
+    final channel = IOWebSocketChannel.connect(uri, connectTimeout: const Duration(seconds: 8));
     _channel = channel;
     channel.stream.listen(
       (raw) {
@@ -32,7 +37,13 @@ class RealtimeClient {
         if (!_controller.isClosed) _controller.add(decoded);
       },
       onDone: _scheduleReconnect,
-      onError: (_) => _scheduleReconnect(),
+      onError: (error) {
+        // Surface the failure to listeners (e.g. so the lobby screen can show a retry
+        // affordance instead of silently retrying forever behind a "Connecting…" label)
+        // before scheduling the next attempt.
+        if (!_controller.isClosed) _controller.addError(error);
+        _scheduleReconnect();
+      },
       cancelOnError: true,
     );
   }

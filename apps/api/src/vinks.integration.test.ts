@@ -184,6 +184,222 @@ describe('vink lifecycle end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     assert.deepEqual(snapshot.json().allowedActions, []);
   });
 
+  it('ENG1 #4: create is idempotent — a lost-response retry replays the same Vink', async () => {
+    const idempotencyKey = `eng1-slice2-${Date.now()}-${Math.random()}`;
+    const payload = {
+      purchaseCategory: 'GROCERY',
+      subtotalMinor: 5_000,
+      tipMinor: 0,
+      submissionDeadline: FUTURE,
+      organizerDisplayName: 'Organizer',
+      creationIdempotencyKey: idempotencyKey,
+    };
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+      payload,
+    });
+    assert.equal(first.statusCode, 201);
+    const vinkId = first.json().vink.id as string;
+
+    // The client never saw `first`'s response (network drop after the server already
+    // committed) and retries with the SAME key — this must return the original Vink, not
+    // create a second one.
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+      payload,
+    });
+    assert.equal(retry.statusCode, 201);
+    assert.equal(retry.json().vink.id, vinkId);
+    assert.equal(retry.json().participants[0].id, first.json().participants[0].id);
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+    });
+    const matching = (list.json().vinks as Array<{ id: string }>).filter((v) => v.id === vinkId);
+    assert.equal(matching.length, 1, 'only one Vink exists for this idempotency key');
+
+    // A different key from the same organizer is a genuinely different Vink.
+    const different = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+      payload: { ...payload, creationIdempotencyKey: `${idempotencyKey}-different` },
+    });
+    assert.equal(different.statusCode, 201);
+    assert.notEqual(different.json().vink.id, vinkId);
+  });
+
+  it('ENG1 timer semantics: an omitted submissionDeadline gets a real server-computed deadline', async () => {
+    const before = Date.now();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 4_000,
+        tipMinor: 0,
+        organizerDisplayName: 'Organizer',
+        // submissionDeadline deliberately omitted.
+      },
+    });
+    assert.equal(created.statusCode, 201);
+    const deadlineMs = new Date(created.json().vink.submissionDeadline).getTime();
+    // VINK_OPEN_DURATION_SECONDS defaults to 86400 (24h) — exactly the prior hardcoded
+    // client-side behavior, now server-authoritative. A wide-but-real tolerance band, not an
+    // exact-millisecond match, since this crosses a real HTTP round trip.
+    const expectedMs = before + 86_400_000;
+    assert.ok(
+      Math.abs(deadlineMs - expectedMs) < 10_000,
+      `expected deadline near ${new Date(expectedMs).toISOString()}, got ${created.json().vink.submissionDeadline}`,
+    );
+  });
+
+  it('ENG1 #4: truly concurrent creates with the same idempotency key produce exactly one Vink', async () => {
+    const idempotencyKey = `eng1-slice2-race-${Date.now()}-${Math.random()}`;
+    const payload = {
+      purchaseCategory: 'GROCERY',
+      subtotalMinor: 3_000,
+      tipMinor: 0,
+      submissionDeadline: FUTURE,
+      organizerDisplayName: 'Organizer',
+      creationIdempotencyKey: idempotencyKey,
+    };
+
+    // Genuinely concurrent, not sequential — this is the race the database's own unique
+    // constraint has to resolve (the application layer's pre-check alone cannot).
+    const [a, b] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/vinks',
+        headers: authed(tokens.organizer!),
+        payload,
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/vinks',
+        headers: authed(tokens.organizer!),
+        payload,
+      }),
+    ]);
+    assert.equal(a.statusCode, 201);
+    assert.equal(b.statusCode, 201);
+    assert.equal(a.json().vink.id, b.json().vink.id, 'both requests must resolve to the same Vink');
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+    });
+    const matching = (list.json().vinks as Array<{ id: string }>).filter(
+      (v) => v.id === a.json().vink.id,
+    );
+    assert.equal(matching.length, 1, 'the race produced exactly one Vink, not two');
+  });
+
+  it('ENG1 #4: a repeated guest-invite idempotency key is rejected, not duplicated', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 8_000,
+        tipMinor: 0,
+        submissionDeadline: FUTURE,
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const vinkId = created.json().vink.id as string;
+    const invitationIdempotencyKey = `eng1-slice4-invite-${Date.now()}-${Math.random()}`;
+
+    const first = await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/guests`,
+      headers: authed(tokens.organizer!),
+      payload: { displayName: 'Dinner Guest', invitationIdempotencyKey },
+    });
+    assert.equal(first.statusCode, 201);
+
+    // The client never saw `first`'s response and retries with the SAME key — the raw guest
+    // token is gone by design (D14), so this must be rejected, not silently re-succeed with
+    // a second guest.
+    const retry = await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/guests`,
+      headers: authed(tokens.organizer!),
+      payload: { displayName: 'Dinner Guest', invitationIdempotencyKey },
+    });
+    assert.equal(retry.statusCode, 409);
+    assert.equal(retry.json().error, 'INVITE_ALREADY_SENT');
+
+    const snapshot = await app.inject({
+      method: 'GET',
+      url: `/api/v1/vinks/${vinkId}`,
+      headers: authed(tokens.organizer!),
+    });
+    const guests = (snapshot.json().participants as Array<{ displayName: string }>).filter(
+      (p) => p.displayName === 'Dinner Guest',
+    );
+    assert.equal(guests.length, 1, 'only one guest participant exists for this idempotency key');
+  });
+
+  it('ENG1 #4: truly concurrent guest invites with the same key produce exactly one guest', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 6_000,
+        tipMinor: 0,
+        submissionDeadline: FUTURE,
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const vinkId = created.json().vink.id as string;
+    const invitationIdempotencyKey = `eng1-slice4-race-${Date.now()}-${Math.random()}`;
+    const payload = { displayName: 'Race Guest', invitationIdempotencyKey };
+
+    const [a, b] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: `/api/v1/vinks/${vinkId}/guests`,
+        headers: authed(tokens.organizer!),
+        payload,
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/api/v1/vinks/${vinkId}/guests`,
+        headers: authed(tokens.organizer!),
+        payload,
+      }),
+    ]);
+    const statuses = [a.statusCode, b.statusCode].sort();
+    assert.deepEqual(
+      statuses,
+      [201, 409],
+      'exactly one request wins, the other is rejected as already-sent',
+    );
+
+    const snapshot = await app.inject({
+      method: 'GET',
+      url: `/api/v1/vinks/${vinkId}`,
+      headers: authed(tokens.organizer!),
+    });
+    const guests = (snapshot.json().participants as Array<{ displayName: string }>).filter(
+      (p) => p.displayName === 'Race Guest',
+    );
+    assert.equal(guests.length, 1, 'the race produced exactly one guest, not two');
+  });
+
   it('remove participant → cover remaining → open (journey E3, PV3 form)', async () => {
     const created = await app.inject({
       method: 'POST',

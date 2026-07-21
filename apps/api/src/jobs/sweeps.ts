@@ -23,7 +23,6 @@ import { createBullMqRedis } from '../redis/client.ts';
 import { PostgresVinkStore } from '../modules/vinks/store.ts';
 
 const SWEEP_QUEUE = 'vink-sweeps';
-export const SWEEP_INTERVAL_MS = 10_000;
 
 export interface SweepResult {
   closed: number;
@@ -103,7 +102,9 @@ export async function startSweepScheduler(
 ): Promise<() => Promise<void>> {
   const connection = createBullMqRedis(env);
   const queue = new Queue(SWEEP_QUEUE, { connection });
-  await queue.upsertJobScheduler('vink-sweeps-repeat', { every: SWEEP_INTERVAL_MS });
+  await queue.upsertJobScheduler('vink-sweeps-repeat', {
+    every: env.VINK_SWEEP_INTERVAL_SECONDS * 1000,
+  });
   const worker = new Worker(
     SWEEP_QUEUE,
     async () => {

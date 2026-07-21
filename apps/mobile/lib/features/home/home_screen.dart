@@ -25,7 +25,9 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authControllerProvider);
-    final firstName = authState is AuthSignedIn ? authState.user.displayName.split(' ').first : '';
+    final firstName = authState is AuthSignedIn
+        ? authState.user.displayName.split(' ').first
+        : '';
 
     return Scaffold(
       backgroundColor: VinkColors.paper,
@@ -38,9 +40,17 @@ class HomeScreen extends ConsumerWidget {
             ref.invalidate(recentActivityProvider);
           },
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(VinkSpacing.lg, VinkSpacing.lg, VinkSpacing.lg, VinkSpacing.xxl),
+            padding: const EdgeInsets.fromLTRB(
+              VinkSpacing.lg,
+              VinkSpacing.lg,
+              VinkSpacing.lg,
+              VinkSpacing.xxl,
+            ),
             children: [
-              Text('Hi, $firstName', style: VinkTypography.heroDisplay.copyWith(fontSize: 28)),
+              Text(
+                'Hi, $firstName',
+                style: VinkTypography.heroDisplay.copyWith(fontSize: 28),
+              ),
               const SizedBox(height: VinkSpacing.xs),
               Text(
                 'Everyone in. One purchase.',
@@ -61,7 +71,10 @@ class HomeScreen extends ConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Recent activity', style: VinkTypography.cardTitle),
-                  VinkTextButton(label: 'See all', onPressed: () => context.go('/activity')),
+                  VinkTextButton(
+                    label: 'See all',
+                    onPressed: () => context.go('/activity'),
+                  ),
                 ],
               ),
               const SizedBox(height: VinkSpacing.sm),
@@ -87,15 +100,21 @@ class _ActiveVinksSection extends ConsumerWidget {
         child: VinkLoadingState(message: 'Loading your Vinks…'),
       ),
       error: (error, _) => VinkInlineError(
-        message: error is ApiException ? humanErrorMessage(error) : "Couldn't load your Vinks.",
+        message: error is ApiException
+            ? humanErrorMessage(error)
+            : "Couldn't load your Vinks.",
       ),
       data: (active) {
         if (active.isEmpty) {
           return VinkSurfaceCard(
             child: VinkEmptyState(
               title: 'Nothing active right now',
-              message: 'Split a purchase with your group — everyone pays their share, you pay the merchant once.',
-              action: VinkPrimaryButton(label: 'Start your first Vink', onPressed: () => context.push('/create-vink')),
+              message:
+                  'Split a purchase with your group — everyone pays their share, you pay the merchant once.',
+              action: VinkPrimaryButton(
+                label: 'Start your first Vink',
+                onPressed: () => context.push('/create-vink'),
+              ),
             ),
           );
         }
@@ -120,11 +139,27 @@ class _ActiveVinkCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final vink = item.vink;
-    final progress = vink.requiredAmountMinor == 0 ? 0.0 : vink.fundedAmountMinor / vink.requiredAmountMinor;
+    final progress = vink.requiredAmountMinor == 0
+        ? 0.0
+        : vink.fundedAmountMinor / vink.requiredAmountMinor;
     final timeLabel = _timeRemainingLabel(vink.submissionDeadline);
     final actionLabel = _nextActionLabel(vink.state);
     final statusLabel = vinkStatusLabel(vink.state);
     final title = purchaseCategoryLabel(vink.purchaseCategory);
+    // ENG1 #5: a DRAFT Vink has no live/funding state to show — VinkLobbyScreen is for
+    // OPEN-and-beyond. State decides the destination, not the "Draft" label alone
+    // (VinkLobbyScreen redirects here too, for any other path that reaches a DRAFT vink).
+    // Slice I2B: a participant-role entry carries `?role=participant` so VinkLobbyScreen
+    // knows, without a network round trip, to use the customer-safe participant-view route
+    // rather than the organizer-only snapshot route (which would 403 for this user). A DRAFT
+    // vink is always organizer-owned (participants are never added before OPEN's own
+    // precondition is met in a way that surfaces here), so the role param is moot for that
+    // branch.
+    final destination = vink.state == 'DRAFT'
+        ? '/create-vink/resume/${vink.id}'
+        : vink.isOrganizerRole
+        ? '/vinks/${vink.id}'
+        : '/vinks/${vink.id}?role=participant';
 
     return Semantics(
       button: true,
@@ -133,7 +168,7 @@ class _ActiveVinkCard extends StatelessWidget {
           '${item.participantCount} people, $statusLabel. $actionLabel',
       child: InkWell(
         borderRadius: BorderRadius.circular(32),
-        onTap: () => context.push('/vinks/${vink.id}'),
+        onTap: () => context.push(destination),
         child: VinkSurfaceCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -153,7 +188,11 @@ class _ActiveVinkCard extends StatelessWidget {
               const SizedBox(height: VinkSpacing.md),
               Row(
                 children: [
-                  Icon(Icons.people_outline_rounded, size: 16, color: VinkColors.smoke),
+                  Icon(
+                    Icons.people_outline_rounded,
+                    size: 16,
+                    color: VinkColors.smoke,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     '${item.participantCount} ${item.participantCount == 1 ? 'person' : 'people'}',
@@ -161,7 +200,11 @@ class _ActiveVinkCard extends StatelessWidget {
                   ),
                   if (timeLabel != null) ...[
                     const SizedBox(width: VinkSpacing.md),
-                    Icon(Icons.schedule_rounded, size: 16, color: VinkColors.smoke),
+                    Icon(
+                      Icons.schedule_rounded,
+                      size: 16,
+                      color: VinkColors.smoke,
+                    ),
                     const SizedBox(width: 4),
                     Text(timeLabel, style: VinkTypography.bodySmallSecondary),
                   ],
@@ -170,7 +213,10 @@ class _ActiveVinkCard extends StatelessWidget {
               const SizedBox(height: VinkSpacing.md),
               Align(
                 alignment: Alignment.centerLeft,
-                child: VinkSecondaryButton(label: actionLabel, onPressed: () => context.push('/vinks/${vink.id}')),
+                child: VinkSecondaryButton(
+                  label: actionLabel,
+                  onPressed: () => context.push(destination),
+                ),
               ),
             ],
           ),
@@ -186,7 +232,9 @@ String _nextActionLabel(String state) => switch (state) {
   'SUBMISSIONS_CLOSED' || 'PROCESSING_GRACE' => 'View progress',
   'FUNDED' || 'CARD_PROVISIONING' => 'View progress',
   'CARD_READY' => 'Pay now',
-  'FUNDING_REVERSAL' || 'RECOVERY_REQUIRED' || 'RECOVERY_PENDING' => 'Needs attention',
+  'FUNDING_REVERSAL' ||
+  'RECOVERY_REQUIRED' ||
+  'RECOVERY_PENDING' => 'Needs attention',
   'PURCHASE_AUTHORIZED' || 'SETTLING' => 'View progress',
   _ => 'View Vink',
 };
@@ -228,8 +276,14 @@ class _RecentActivityPreview extends ConsumerWidget {
           children: [
             for (final item in preview) ...[
               VinkSurfaceCard(
-                padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.md, vertical: VinkSpacing.sm + 4),
-                child: Text(activityCopy(item.entry, vinkTitle: item.vinkTitle), style: VinkTypography.body),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: VinkSpacing.md,
+                  vertical: VinkSpacing.sm + 4,
+                ),
+                child: Text(
+                  activityCopy(item.entry, vinkTitle: item.vinkTitle),
+                  style: VinkTypography.body,
+                ),
               ),
               const SizedBox(height: VinkSpacing.sm),
             ],

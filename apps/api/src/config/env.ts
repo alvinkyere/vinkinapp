@@ -31,6 +31,21 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32).default(DEV_JWT_SECRET),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   VINKIN_OTEL_ENABLED: z.enum(['0', '1']).default('0'),
+  /** Slice I1 (docs/design/phase-10-implementation-readiness.md §11) — gates the D23
+   * DRAFT-gate on the guest-facing views (`getPublicVinkView`/`getGuestVinkView`). The
+   * additive `contributionProgress`/`vinkOutcome`/`contributionStatus` fields are always
+   * present regardless of this flag (pure additions, no backward-compat risk); only the
+   * genuinely breaking DRAFT-shape change is opt-in, same pattern as `VINKIN_OTEL_ENABLED`. */
+  VINKIN_CONTRIBUTION_PROJECTION_ENABLED: z.enum(['0', '1']).default('0'),
+  /** Slice I2B (docs/design/phase-10-implementation-readiness.md) — gates the
+   * participant-inclusive transport contract: `GET /api/v1/vinks` including the caller's
+   * participant-role vinks (with an additive `role` field per entry) and the new
+   * `GET /api/v1/vinks/:vinkId/participant-view` route. Same static, default-off,
+   * env-allowlisted pattern as `VINKIN_OTEL_ENABLED`/`VINKIN_CONTRIBUTION_PROJECTION_ENABLED`
+   * — no runtime flag service. Allowlisted for development/test per Phase 10 §11; off
+   * elsewhere until I6's Home/Activity consumption is proven in staging. Off preserves
+   * `GET /api/v1/vinks`'s exact current organizer-only shape byte-for-byte. */
+  VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL: z.enum(['0', '1']).default('0'),
   /** Base for share links / QR payloads — the guest web app's own origin (PV10,
    * apps/guest-web), also the allowed CORS origin for its browser fetches (app.ts). */
   VINKIN_PUBLIC_BASE_URL: z.url().default('http://localhost:3100'),
@@ -41,6 +56,21 @@ const envSchema = z.object({
   /** Origin for the ops console's browser fetches (PV11, apps/operations-console) — a
    * second allowed CORS origin alongside VINKIN_PUBLIC_BASE_URL. */
   OPERATIONS_CONSOLE_BASE_URL: z.url().default('http://localhost:3200'),
+  /** ENG1 timer semantics: one server-side source of truth for how long a Vink stays OPEN,
+   * replacing the client-computed absolute deadline `apps/mobile` used to hardcode. Default
+   * (86400 = 24h) is the EXACT current behavior, not a product-timing change — no decision
+   * closes what the pilot's real window should be (checked docs/spec/decision-log.md and the
+   * docs/design/ product-behavior docs; neither specifies a number). Revisit once one does. */
+  VINK_OPEN_DURATION_SECONDS: z.coerce.number().int().positive().default(86_400),
+  /** Spec §14 "Recommended initial timing": processing grace runs T to T+60s after the
+   * deadline. Default (60) matches the Spec's own recommendation and the value this was
+   * already hardcoded to (`PROCESSING_GRACE_SECONDS` in commands.ts) — a promotion to real
+   * config, not a behavior change. "The grace duration must be configurable" (§14). */
+  VINK_PROCESSING_GRACE_SECONDS: z.coerce.number().int().positive().default(60),
+  /** How often the deadline-sweep job polls for OPEN/grace/stuck-contribution work
+   * (apps/api/src/jobs/sweeps.ts). Default (10) matches the previous hardcoded
+   * `SWEEP_INTERVAL_MS` — an operational cadence, not product timing. */
+  VINK_SWEEP_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
 });
 
 export type Env = z.infer<typeof envSchema>;

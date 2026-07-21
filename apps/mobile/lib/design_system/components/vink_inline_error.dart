@@ -17,19 +17,36 @@ class VinkInlineError extends StatelessWidget {
       liveRegion: true,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.md, vertical: VinkSpacing.sm + 2),
+        padding: const EdgeInsets.symmetric(
+          horizontal: VinkSpacing.md,
+          vertical: VinkSpacing.sm + 2,
+        ),
         decoration: BoxDecoration(
           color: VinkColors.danger.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: VinkColors.danger.withValues(alpha: 0.2)),
         ),
+        // The "!" glyph stays danger-colored (an icon-role accent, verified against the
+        // 3:1 non-text threshold); the message itself uses ink, not danger — danger text
+        // at bodySmall (14px/400) fails WCAG AA (D36;
+        // docs/design/phase-8-visual-system-refinement.md §4/§11/§24). Explanatory error
+        // copy uses primary text; the tinted background + border carry the danger signal.
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('!', style: TextStyle(color: VinkColors.danger, fontWeight: FontWeight.w800)),
+            const Text(
+              '!',
+              style: TextStyle(
+                color: VinkColors.danger,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
             const SizedBox(width: VinkSpacing.sm),
             Expanded(
-              child: Text(message, style: VinkTypography.bodySmall.copyWith(color: VinkColors.danger)),
+              child: Text(
+                message,
+                style: VinkTypography.bodySmall.copyWith(color: VinkColors.ink),
+              ),
             ),
           ],
         ),

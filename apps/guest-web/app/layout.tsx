@@ -1,28 +1,28 @@
-import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Inter } from "next/font/google";
-import "./globals.css";
-import { Providers } from "./providers";
+import type { Metadata, Viewport } from 'next';
+import { Bricolage_Grotesque, Inter } from 'next/font/google';
+import './globals.css';
+import { Providers } from './providers';
 
 // The exact two fonts vinkin.org self-hosts via next/font (docs/design/vinkin-design-system.md):
 // Bricolage Grotesque for display/headings/buttons, Inter for body — same pairing the
 // Flutter app's design_system/vink_typography.dart uses.
 const bricolageGrotesque = Bricolage_Grotesque({
-  variable: "--font-bricolage-grotesque",
-  subsets: ["latin"],
+  variable: '--font-bricolage-grotesque',
+  subsets: ['latin'],
 });
 
 const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
+  variable: '--font-inter',
+  subsets: ['latin'],
 });
 
 export const metadata: Metadata = {
-  title: "VinkIn — Join a Vink",
-  description: "Join a group purchase and approve your share — no app install required.",
+  title: 'VinkIn — Join a Vink',
+  description: 'Join a group purchase and approve your share — no app install required.',
 };
 
 export const viewport: Viewport = {
-  width: "device-width",
+  width: 'device-width',
   initialScale: 1,
 };
 

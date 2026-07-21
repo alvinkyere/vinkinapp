@@ -12,6 +12,8 @@ String humanErrorMessage(ApiException error) {
     'VINK_VERSION_CONFLICT' => "Someone else just changed this Vink. Refreshing…",
     'PARTICIPANT_NOT_FOUND' => "We couldn't find that participant.",
     'PARTICIPANT_EXITED' => "That person already left this Vink.",
+    'PARTICIPANT_ALREADY_ADDED' => "They're already in this Vink.",
+    'INVITE_ALREADY_SENT' => "That invite already went out.",
     'INVALID_SPLIT' => "Your shares don't add up to the total yet.",
     'UNSUPPORTED_SPLIT_METHOD' => "That split method isn't available yet.",
     'AUTHORIZATION_DECLINED' => "We couldn't confirm your contribution. Nothing was charged. Try again.",

@@ -13,10 +13,12 @@ import {
   configureVinkCommand,
   coverRemainingCommand,
   createVinkCommand,
+  getParticipantVinkView,
   getVinkActivity,
   getVinkSnapshot,
   inviteGuestCommand,
   listMyVinks,
+  listMyVinksWithRole,
   openVinkCommand,
   removeParticipantCommand,
   setSplitCommand,
@@ -49,8 +51,16 @@ const createSchema = z.object({
   purchaseCategory: z.enum(PURCHASE_CATEGORIES),
   subtotalMinor: z.number().int().nonnegative(),
   tipMinor: z.number().int().nonnegative().default(0),
-  submissionDeadline: z.iso.datetime(),
+  // ENG1 timer semantics: optional — the real app no longer computes/sends this itself
+  // (previously hardcoded to `now + 24h` client-side); omitting it defers to the server's
+  // own VINK_OPEN_DURATION_SECONDS config. Still accepted explicitly where a caller
+  // genuinely needs specific control (tests).
+  submissionDeadline: z.iso.datetime().optional(),
   organizerDisplayName: z.string().min(1).max(80),
+  // ENG1 #4: client-generated, stable across retries of the same create attempt. Optional —
+  // a caller that omits it just forgoes replay protection (createVinkCommand fills in a
+  // fresh key that can never collide, same as before this existed).
+  creationIdempotencyKey: z.string().min(1).max(200).optional(),
 });
 
 const configureSchema = z.object({
@@ -73,6 +83,9 @@ const addParticipantSchema = z.object({
 const inviteGuestSchema = z.object({
   expectedVersion: z.number().int().positive().optional(),
   displayName: z.string().min(1).max(80),
+  // ENG1 #4: client-generated, stable across retries of the same "add as guest" attempt.
+  // Optional — a caller that omits it just forgoes duplicate protection.
+  invitationIdempotencyKey: z.string().min(1).max(200).optional(),
 });
 
 const splitSchema = z.discriminatedUnion('method', [
@@ -103,7 +116,9 @@ function errorStatus(error: unknown): { status: number; body: Record<string, unk
         ? 404
         : error.code === 'FORBIDDEN'
           ? 403
-          : error.code === 'VINK_VERSION_CONFLICT'
+          : error.code === 'VINK_VERSION_CONFLICT' ||
+              error.code === 'PARTICIPANT_ALREADY_ADDED' ||
+              error.code === 'INVITE_ALREADY_SENT'
             ? 409
             : 422;
     return { status, body: { error: error.code, message: error.message } };
@@ -129,6 +144,10 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
       clock: { now: () => new Date() },
       actorUserId,
       correlationId: String(request.id),
+      timers: {
+        openDurationSeconds: env.VINK_OPEN_DURATION_SECONDS,
+        processingGraceSeconds: env.VINK_PROCESSING_GRACE_SECONDS,
+      },
     };
   }
 
@@ -160,10 +179,21 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
     return handle(reply, 201, () => createVinkCommand(contextFor(request, claims.userId), body));
   });
 
+  // Slice I2B: flag off returns exactly today's shape (`Vink[]`, organizer-owned only) —
+  // untouched byte-for-byte. Flag on returns the organizer∪participant union (I2A's
+  // `listMyVinksWithRole`) with an additive `role` field spread onto each Vink's own JSON —
+  // never a differently-shaped wrapper, so an unaware client parsing today's `Vink` shape is
+  // unaffected either way (Phase 10 §12 compatibility rule).
   app.get('/api/v1/vinks', async (request, reply) => {
     const claims = await requireUser(request, reply, env);
     if (claims === null) return;
-    return handle(reply, 200, async () => ({ vinks: await listMyVinks(store, claims.userId) }));
+    return handle(reply, 200, async () => {
+      if (env.VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL === '1') {
+        const withRole = await listMyVinksWithRole(store, claims.userId);
+        return { vinks: withRole.map(({ vink, role }) => ({ ...vink, role })) };
+      }
+      return { vinks: await listMyVinks(store, claims.userId) };
+    });
   });
 
   app.get('/api/v1/vinks/:vinkId', async (request, reply) => {
@@ -171,6 +201,24 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
     if (claims === null) return;
     const { vinkId } = request.params as { vinkId: string };
     return handle(reply, 200, () => getVinkSnapshot(store, vinkId as VinkId, claims.userId));
+  });
+
+  // Slice I2B — the customer-safe counterpart to the organizer-only snapshot above, for a
+  // signed-in member who participates in (but doesn't organize) this vink. New route, not a
+  // branch inside the organizer snapshot handler above: keeps the well-tested organizer path
+  // completely untouched and gives the two response shapes (VinkSnapshot vs
+  // ParticipantVinkView) distinct, statically-knowable URLs rather than one URL whose shape
+  // depends on caller identity.
+  app.get('/api/v1/vinks/:vinkId/participant-view', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    if (env.VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL !== '1') {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
+    }
+    const { vinkId } = request.params as { vinkId: string };
+    return handle(reply, 200, () =>
+      getParticipantVinkView(store, vinkId as VinkId, claims.userId, new Date()),
+    );
   });
 
   app.patch('/api/v1/vinks/:vinkId', async (request, reply) => {
@@ -240,6 +288,9 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
         displayName: body.displayName,
         accessTokenHash: tokenHash,
         ...(body.expectedVersion !== undefined && { expectedVersion: body.expectedVersion }),
+        ...(body.invitationIdempotencyKey !== undefined && {
+          invitationIdempotencyKey: body.invitationIdempotencyKey,
+        }),
       });
       return {
         guestToken: token,

@@ -1,7 +1,10 @@
 // Mirrors apps/mobile/lib/design_system/components/vink_status_badge.dart's exact D11
 // state → human-copy table and tone groups, so a guest sees the identical vocabulary the
 // organizer's app uses — no raw backend state name, ever, on either surface.
-const LABELS: Record<string, { label: string; tone: 'neutral' | 'active' | 'positive' | 'attention' }> = {
+const LABELS: Record<
+  string,
+  { label: string; tone: 'neutral' | 'active' | 'positive' | 'attention' }
+> = {
   DRAFT: { label: 'Draft', tone: 'neutral' },
   OPEN: { label: 'Waiting for everyone', tone: 'neutral' },
   SUBMISSIONS_CLOSED: { label: 'Wrapping up', tone: 'active' },
@@ -20,11 +23,17 @@ const LABELS: Record<string, { label: string; tone: 'neutral' | 'active' | 'posi
   EXPIRED: { label: 'Expired', tone: 'attention' },
 };
 
+// `attention` keeps its danger-tinted background (a non-text use, passes the 3:1 non-text
+// threshold on its own) but uses `text-ink`, not `text-danger`, for the label itself:
+// danger-on-danger/12 fails WCAG AA at this badge's actual rendered text size (D36;
+// docs/design/phase-8-visual-system-refinement.md §4/§24 — bold weight alone doesn't grant
+// the large-text exception). Mirrors the identical fix in
+// apps/mobile/lib/design_system/components/vink_status_badge.dart.
 const TONE_CLASSES: Record<string, string> = {
   neutral: 'bg-ink/8 text-smoke',
   active: 'bg-blue/12 text-blue',
   positive: 'bg-blue text-white',
-  attention: 'bg-danger/12 text-danger',
+  attention: 'bg-danger/12 text-ink',
 };
 
 export function StatusBadge({ state }: { state: string }) {

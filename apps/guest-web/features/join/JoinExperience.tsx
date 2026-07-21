@@ -5,6 +5,9 @@ import { useQuery } from '@tanstack/react-query';
 import { getGuestSession, getPublicVinkView } from '../../lib/api';
 import { ApiError } from '../../lib/api-error';
 import { track } from '../../lib/analytics';
+import { GUEST_CONTRIBUTION_STATUS_UI_ENABLED } from '../../lib/config';
+import { isFullGuestSession, isNotOpenYetPublicView } from '../../lib/guest-view-guards';
+import { humanErrorMessage } from '../../lib/human-errors';
 import { clearGuestSession, loadGuestSession, saveGuestSession } from '../../lib/session-storage';
 import { useHasMounted } from '../../lib/use-has-mounted';
 import { JoinForm } from './JoinForm';
@@ -50,7 +53,8 @@ export function JoinExperience({ publicCode }: { publicCode: string }) {
   useEffect(() => {
     if (publicViewQuery.isSuccess) track('guest_join_page_viewed', { publicCode });
     if (publicViewQuery.isError) {
-      const status = publicViewQuery.error instanceof ApiError ? publicViewQuery.error.status : null;
+      const status =
+        publicViewQuery.error instanceof ApiError ? publicViewQuery.error.status : null;
       track('guest_join_lookup_failed', { publicCode, status });
     }
   }, [publicViewQuery.isSuccess, publicViewQuery.isError, publicViewQuery.error, publicCode]);
@@ -60,11 +64,24 @@ export function JoinExperience({ publicCode }: { publicCode: string }) {
   }
 
   if (effectiveSession !== null && sessionQuery.isSuccess) {
+    const session = sessionQuery.data;
+    // D23 (Slice I3): an organizer-invited guest can have a participant row on a DRAFT vink
+    // (`inviteGuestCommand` allows DRAFT-or-OPEN) — never render `SessionView` with a shape
+    // it doesn't have fields for. Gated: when the flag is off, this narrow (and, per Phase 10
+    // §11, not-yet-paired-with-the-backend-flag) case falls back to a plain loading state
+    // rather than a broken partial render — never a crash either way.
+    if (!isFullGuestSession(session)) {
+      return GUEST_CONTRIBUTION_STATUS_UI_ENABLED ? (
+        <NotOpenYet />
+      ) : (
+        <StatusMessage>Loading…</StatusMessage>
+      );
+    }
     return (
       <SessionView
         vinkId={effectiveSession.vinkId}
         guestToken={effectiveSession.guestToken}
-        initial={sessionQuery.data}
+        initial={session}
       />
     );
   }
@@ -72,18 +89,25 @@ export function JoinExperience({ publicCode }: { publicCode: string }) {
   if (effectiveSession === null) {
     if (publicViewQuery.isPending) return <StatusMessage>Loading…</StatusMessage>;
     if (publicViewQuery.isError) {
-      const notFound = publicViewQuery.error instanceof ApiError && publicViewQuery.error.status === 404;
-      return (
-        <StatusMessage>
-          {notFound ? "This link doesn't match any Vink." : 'Something went wrong loading this Vink.'}
-        </StatusMessage>
-      );
+      return <StatusMessage>{humanErrorMessage(publicViewQuery.error)}</StatusMessage>;
     }
     if (publicViewQuery.data !== undefined) {
+      const summary = publicViewQuery.data;
+      // D23 (Slice I3, permitted work): a DRAFT vink must never leak its amount/split/state
+      // to an anonymous visitor — the rejected alternative was "relabel the badge but still
+      // show the summary." Gated behind `guest_contribution_status_ui`; flag off preserves
+      // today's exact existing leak (a known, already-shipped regression, not a new risk).
+      if (isNotOpenYetPublicView(summary)) {
+        return GUEST_CONTRIBUTION_STATUS_UI_ENABLED ? (
+          <NotOpenYet />
+        ) : (
+          <StatusMessage>Loading…</StatusMessage>
+        );
+      }
       return (
         <JoinForm
           publicCode={publicCode}
-          summary={publicViewQuery.data}
+          summary={summary}
           onJoined={(newSession) => {
             saveGuestSession(newSession);
             setJoinedSession(newSession);
@@ -98,8 +122,25 @@ export function JoinExperience({ publicCode }: { publicCode: string }) {
 
 function StatusMessage({ children }: { children: React.ReactNode }) {
   return (
-    <div role="status" className="mx-auto flex w-full max-w-md flex-col items-center gap-2 p-10 text-center font-sans text-smoke">
+    <div
+      role="status"
+      className="mx-auto flex w-full max-w-md flex-col items-center gap-2 p-10 text-center font-sans text-smoke"
+    >
       {children}
+    </div>
+  );
+}
+
+// D23 / Phase 6 §16's exact row: heading "Not open yet", explanation "Check back soon." —
+// deliberately withholds everything else (amount, split, category), per D23's own rejected
+// alternative.
+function NotOpenYet() {
+  return (
+    <div className="mx-auto flex w-full max-w-md flex-col items-center gap-2 p-10 text-center font-sans">
+      <h1 className="font-display text-lg font-bold text-ink">Not open yet</h1>
+      <p role="status" className="text-sm text-smoke">
+        Check back soon.
+      </p>
     </div>
   );
 }

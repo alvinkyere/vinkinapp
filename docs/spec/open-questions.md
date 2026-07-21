@@ -25,11 +25,11 @@ built on a PROPOSED default if the answer could invalidate it.
 | G9 | Grace timings (§14 "recommended initial") | M5 | adopt §14 numbers as config defaults (T−15s close, T+60s grace) | OPEN |
 | G10 | Post-capture participant adjustment charging (§22 PARTICIPANT_PREAUTHORIZED) | M0→M8 | verify off-session charging in S10; fallback organizer-only adjustments | OPEN — tied to questionnaire §E17 |
 | G11 | KYC depth + vendor for organizer verification | M2 | provider-hosted verification; follows G1/G3 | OPEN |
-| G12 | Notification channels for time-critical events | M3+ | push primary; SMS fallback for guests | OPEN |
 
 ## Resolved
 
 | ID | Question | Resolution |
 |---|---|---|
+| G12 | Notification channels for time-critical events | CLOSED → D19 (owner 2026-07-20): automatic SMS/email guest delivery is canonical (members get in-app invitations); manual Copy Link/Share/QR remain available as fallback in every case; delivery mechanism itself not yet built |
 | G13 | Unspecified PV §8/§9 state-machine edges (FUNDING_REVERSAL exit; CANCELLATION_PENDING outcomes; RESOLUTION_PENDING exits; DRAFT cancellation) | CLOSED → D11 amendment (owner 2026-07-17): ratified exactly as implemented in `packages/domain`; DRAFT cancellation stays unmodeled |
 | G14 | Reconcile PV vs doc 03 state vocabulary | CLOSED → D11 amendment: PV names canonical everywhere; alternate vocabulary retired; doc 03 rewritten |

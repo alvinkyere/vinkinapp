@@ -254,10 +254,148 @@ server restart silently dropped the override) and cost real debugging time; stil
 `.env`/start-script fix (flagged again in ENG0-BASELINE.md as a candidate ENG1/ENG3 item).
 Sandbox S1–S12 blocked on keys.
 
-Next: **ENG1 — Core Workflow Correctness**, starting with §1 (diagnose the indefinite
-"Connecting…" defect, add correlation tracing client→API→DB→outbox→realtime) per the
-engineering plan's own stated priority order. `PV12` (the actual closed pilot) remains an
-owner/operational decision deferred until ENG0–ENG9 close.
+**ENG1 in progress.** The owner refined the plan's priority order (2026-07-20): idempotent
+creation before setup recovery before retry classification before broader duplicate-tap
+protection before timers before the merchant-payment command split, executed as separate
+reviewable slices rather than all of ENG1 at once.
+
+- **ENG1 §1 done** (diagnose + fix the indefinite "Connecting…" defect, folded into this same
+  session before slicing began): root cause was `RealtimeClient`'s WebSocket connect call
+  having no `connectTimeout` (the package's own docs: "if connectTimeout is null … the
+  connection process will never time-out") — a stalled TCP handshake could hang for the OS's
+  own timeout (minutes), and the client's retry logic swallowed connection errors rather than
+  surfacing them, leaving the Lobby screen on "Connecting…" indefinitely with no error/retry
+  path. Fixed: `IOWebSocketChannel.connect(..., connectTimeout: 8s)`, connection errors now
+  propagate to listeners, and — per ENG1 §3's own principle — the Lobby screen no longer
+  depends solely on the WebSocket for first paint; it fetches the snapshot over plain HTTP in
+  parallel (whichever resolves first renders the lobby). Also added a `receiveTimeout: 15s`
+  to the shared Dio client (it only had `connectTimeout` before). Verified via a standalone
+  probe (unbounded hang past 12s without the fix; clean 8.0s `TimeoutException` with it) and
+  a full build + real run on a booted iOS Simulator against the real local backend, driven by
+  the project's own `integration_test/e1_test.dart` (real touch injection, no mocks) — passed
+  clean.
+- **ENG1 Slice 2 done** (`milestone-reports/ENG1-SLICE-2-IDEMPOTENT-CREATION.md`): idempotent
+  Vink creation. Client-generated idempotency key (mobile: `core/networking/
+  idempotency_key.dart`, no new pub dependency), server-side replay inside
+  `createVinkCommand`, and migration 0009's `UNIQUE (organizer_user_id,
+  creation_idempotency_key)` index as the actual guard — PostgreSQL uniqueness is the final
+  guard per the hard rule, the application-layer pre-check is only an optimization ahead of
+  it. A genuine concurrent-race test (`Promise.all` double `POST /vinks`, real Postgres)
+  proves the database constraint path, not just the sequential lost-response-retry path.
+  **197 Node/TS tests** (up from 191) **+ 23 Flutter tests** green; re-ran the real
+  `e1_test.dart` against a freshly restarted backend to confirm no regression, then spot-
+  checked the database directly to confirm the real client-generated key (not a server
+  default) made the full round trip. Caught a real environment defect along the way (not new
+  code): a stale `node src/server.ts` process from earlier in the session was still running
+  pre-migration code, which started violating the new NOT NULL column on every insert —
+  killing and restarting it fixed it; flagged as a reminder this environment has no process
+  supervisor to keep a running server and a migration from silently drifting apart.
+
+**ENG1 Slice 3 done** (`milestone-reports/ENG1-SLICE-3-SETUP-RECOVERY.md`): interrupted setup
+recovery. Fixed a real dead end — `/vinks/:vinkId` routed a DRAFT Vink straight into
+`VinkLobbyScreen` (built for OPEN-and-beyond live/funding state), so Home's own "Finish setup"
+button led nowhere useful. A server-persisted DRAFT now resumes at its exact valid step (new
+`/create-vink/resume/:vinkId`, decided from the server snapshot via a pure, unit-tested
+`resumeStepFor` — mirrors `computeAllowedActions`), and the decision is state-driven from two
+independent places (Home's card *and* `VinkLobbyScreen`'s own DRAFT redirect), not tied to
+which button was tapped. An unsaved pre-network local form (Purpose/Total, before any Vink
+exists) is durably persisted (`LocalDraftStore`, reusing `flutter_secure_storage` under its
+own key — no new pub dependency) and offered back as resume-or-discard the next time the user
+starts a Vink, instead of silently vanishing on a kill. **Checked the ratified decision log
+before implementing discard**: G13 is CLOSED (owner, 2026-07-17) — "DRAFT cancellation stays
+unmodeled" — so persisted-draft "discard" deliberately stays exactly what `_confirmLeave()`
+already promised (saved, resumable later), not a fabricated client-only hide. **27 Flutter
+tests** (up from 23), `flutter analyze` unchanged at its documented 7 pre-existing info-level
+issues. Verified with two new real-device integration tests (real touch injection, real local
+backend, no mocks) — including a full add-participant → interrupt-before-split →
+simulated-relaunch → resume-at-Split → finish-and-open cycle, confirmed exactly one Vink ever
+existed. Getting that real-device proof green took much longer than the fix itself, entirely
+from two **local environment** issues unrelated to the product: the Mac's disk hit 98% full
+mid-session (misleading, differently-shaped failures on every retry), and repeated
+`simctl erase` cycles degraded the CoreSimulator daemon until installs themselves started
+failing — fixed by a full `CoreSimulatorService` restart, not just re-erasing the device;
+documented in the report as a lesson for future heavy real-device iOS sessions.
+
+**ENG1 Slice 4 done** (`milestone-reports/ENG1-SLICE-4-RETRY-AND-DUPLICATES.md`): typed retry
+classification and duplicate-action protection. Audited all nine named mutating actions
+against what the backend already guaranteed before touching anything — most (create,
+contribute, split, open) were already solid or only needed better client messaging. Two real
+defects found and fixed: `_cancelVink()` in `vink_lobby_screen.dart` had **zero error
+handling** (any failure, including a harmless double-tap, propagated unhandled); and
+`inviteGuestCommand` had **zero duplicate protection** (a lost-response retry or double-tap
+created a second, genuinely separate guest participant every time — migration `0010` +
+`INVITE_ALREADY_SENT` fixes it, rejecting a detected duplicate rather than replaying it, since
+D14 means the raw guest token can never be recovered for a true replay). New
+`core/errors/failure_classifier.dart` gives every screen the same eight typed categories
+(`retryable`/`conflict`/`expired`/`authenticationRequired`/`alreadyCompleted`/`validation`/
+`terminal`/`unknown`) driving whether a retry shows, whether state refreshes first, and
+whether the user must sign in again — replacing seven screens' worth of ad-hoc
+`ApiException`/`humanErrorMessage` handling. Deliberately never auto-retries — every retry is
+user-triggered, per the brief's own caution against auto-retrying financial mutations without
+a positive idempotency guarantee. Found and fixed a related gap while wiring it: nothing told
+the app's in-memory auth state a session was dead after `ApiClient`'s own refresh-retry
+already failed (new `AuthController.expireSession()`). "Open Vink" now specifically recognizes
+a duplicate-tap-that-actually-succeeded and proceeds to the lobby instead of erroring. **203
+Node/TS tests** (up from 197) **+ 54 Flutter tests** (up from 27), including a genuine
+concurrent-race integration test against real Postgres for the new invite-guest guard.
+Re-verified `e1_test.dart` and the Slice 3 setup-recovery test on a real booted simulator
+after all changes — clean. Same stale-process pattern as ENG0/Slice 2 bit the verification
+pass again (API server on :3000, guest-web's Playwright `webServer` reusing a stale :3100
+build) — not new code, same known recurring friction, same fix (kill and let it restart
+fresh).
+
+**ENG1 timer semantics done** (`milestone-reports/ENG1-TIMER-SEMANTICS.md`): the real defect
+closed was `apps/mobile`'s create-Vink flow computing and sending `now + 24h` as
+`submissionDeadline` — a client-hardcoded product-timing decision, exactly what the ENG1
+brief warns about ("The current 18–23-hour behavior must not remain accidentally hard-coded").
+**Checked first, before changing anything**: `docs/spec/open-questions.md` G9 is still OPEN;
+the Spec's own §14 "Recommended initial timing" (T-15s/T+60s) is a default to implement, not a
+closed decision; no doc anywhere (including the concurrent UX-track's phase-0–10 docs, D36 as
+of this pass) specifies a target open-window duration — no "5–7 minutes" decision exists to
+apply. So values were preserved exactly (`VINK_OPEN_DURATION_SECONDS` defaults to `86400` =
+24h, `VINK_PROCESSING_GRACE_SECONDS` to `60`, `VINK_SWEEP_INTERVAL_SECONDS` to `10` — all
+matching prior hardcoded behavior) while making them real, server-side, Zod-validated config
+(`apps/api/src/config/env.ts`); `CreateVinkInput.submissionDeadline` is now optional
+(`CommandContext.timers` threads config in, defaulting identically when omitted), and the
+Flutter client stopped computing/sending it — the server is now the one source of truth.
+`VINK_CONTRIBUTION_CUTOFF_SECONDS` (named in the brief's own env-var list) was deliberately
+**not** added: the Spec's T-15s soft-close doesn't exist as enforced behavior yet, and a config
+value with nothing behind it would be dead/misleading config, not a decision to guess at
+silently — flagged as an honest gap instead. **237 Node/TS tests** (up from 203) **+ 54
+Flutter tests**, plus a real-device re-run of the full E1 golden path with the client
+genuinely no longer sending a deadline — clean. Verification surfaced (and this milestone
+fixed as a byproduct, since they were blocking it, though **neither is this milestone's own
+defect**) two more flavors of accumulated same-session cruft: 5,616 stale BullMQ repeat-job
+keys in Redis from a full day of `kill`-without-graceful-shutdown server restarts, and Postgres
+rows from earlier restarts colliding with the in-memory mock provider's reset ID counters
+(one poisoned row was aborting the sweep mid-loop before it ever reached healthy newer
+vinks — the actual cause of what first looked like "card provisioning is broken"). Both
+cleaned up; a documented dev-data-reset habit is worth adding if long multi-restart sessions
+keep recurring — this is the third distinct cruft flavor this ENG1 pass alone.
+
+**ENG1 §7 done — already satisfied, no code change**
+(`milestone-reports/ENG1-MERCHANT-PAYMENT-SPLIT.md`): audited whether "organizer contributes
+personal share" and "organizer spends the completed pooled payment" are unambiguous, distinct
+engineering intents. They already are: `authorizeContributionCommand` (organizer's own share
+— the same command every participant uses, PV13's "no shortcut" rule),
+`authorizeMerchantPurchaseCommand` ("RequestMerchantAuthorization"), and
+`settlePurchaseCommand` ("CaptureMerchantPurchase") are three distinctly-named commands with
+no naming or code-path overlap, and both the simulator surface and the PV11 operations
+console call the same two merchant-side commands under the same names. **One real finding,
+flagged to the owner rather than resolved silently**: the brief's own "organizer spends"
+framing implies an organizer-initiated in-app action, but VinkIn's actual design has the
+organizer tap a physical/virtual card at a real register — the *merchant's* terminal (ops
+console, standing in for it during the pilot) triggers authorization/capture, not the
+organizer. Confirmed with the owner: no organizer-facing "spend" trigger needed; the existing
+architecture already correctly reflects this. This closes out ENG1's own numbered list (§1
+Connecting-hang fix, Slice 2 idempotent creation, Slice 3 setup recovery, Slice 4 retry
+classification, timer semantics, §7 merchant-payment split).
+
+Next: per the owner's original ENG0–ENG15 milestone sequence, **ENG2 — Contract Engineering**
+(typed API contracts, command/query endpoint separation audit, interaction event contracts,
+schema validation, API versioning policy) is next in line — awaiting the owner's direction on
+whether to proceed there now. `PV12` (the actual closed pilot) remains an owner/operational
+decision deferred until ENG0–ENG9 close.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

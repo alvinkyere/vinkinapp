@@ -10,7 +10,8 @@ export function ProgressBar({
   fundedAmountMinor: number;
   requiredAmountMinor: number;
 }) {
-  const progress = requiredAmountMinor === 0 ? 0 : Math.min(1, fundedAmountMinor / requiredAmountMinor);
+  const progress =
+    requiredAmountMinor === 0 ? 0 : Math.min(1, fundedAmountMinor / requiredAmountMinor);
   return (
     <div>
       <div

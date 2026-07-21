@@ -21,32 +21,81 @@ GoRouter buildRouter(Ref ref) {
     refreshListenable: _AuthListenable(ref),
     redirect: (context, state) {
       final authState = ref.read(authControllerProvider);
-      final onboardingRoute = {'/welcome', '/login', '/register'}.contains(state.matchedLocation);
-      if (authState is AuthUnknown) return null; // still restoring the session — hold position
+      final onboardingRoute = {
+        '/welcome',
+        '/login',
+        '/register',
+      }.contains(state.matchedLocation);
+      if (authState is AuthUnknown) {
+        return null; // still restoring the session — hold position
+      }
       if (authState is AuthSignedOut && !onboardingRoute) return '/welcome';
       if (authState is AuthSignedIn && onboardingRoute) return '/home';
       return null;
     },
     routes: [
-      GoRoute(path: '/welcome', builder: (context, state) => const WelcomeScreen()),
+      GoRoute(
+        path: '/welcome',
+        builder: (context, state) => const WelcomeScreen(),
+      ),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
-      GoRoute(path: '/register', builder: (context, state) => const RegisterScreen()),
+      GoRoute(
+        path: '/register',
+        builder: (context, state) => const RegisterScreen(),
+      ),
       // Pushed full-screen, above the tab bar — not part of any branch's own stack, since
       // creating/viewing a Vink is a focused task, not a persistent tab destination.
-      GoRoute(path: '/create-vink', builder: (context, state) => const CreateVinkScreen()),
+      GoRoute(
+        path: '/create-vink',
+        builder: (context, state) => const CreateVinkScreen(),
+      ),
+      // ENG1 #5 setup recovery: resumes a server-persisted DRAFT Vink at its exact valid
+      // step, rather than starting a new one. Reached from Home's Active Vinks card and from
+      // VinkLobbyScreen's own DRAFT redirect — never from a "Draft" label alone deciding.
+      GoRoute(
+        path: '/create-vink/resume/:vinkId',
+        builder: (context, state) =>
+            CreateVinkScreen(resumeVinkId: state.pathParameters['vinkId']!),
+      ),
+      // Slice I2B: `?role=participant` (set only by Home's participant-role card tap) tells
+      // the lobby to use the customer-safe participant-view route instead of the
+      // organizer-only snapshot route. Absent for every other caller (deep links, the
+      // post-create redirect, existing organizer navigation) — defaults to today's exact
+      // organizer behavior inside VinkLobbyScreen itself.
       GoRoute(
         path: '/vinks/:vinkId',
-        builder: (context, state) => VinkLobbyScreen(vinkId: state.pathParameters['vinkId']!),
+        builder: (context, state) => VinkLobbyScreen(
+          vinkId: state.pathParameters['vinkId']!,
+          role: state.uri.queryParameters['role'],
+        ),
       ),
       StatefulShellRoute.indexedStack(
-        builder: (context, state, navigationShell) => VinkNavShell(navigationShell: navigationShell),
+        builder: (context, state, navigationShell) =>
+            VinkNavShell(navigationShell: navigationShell),
         branches: [
-          StatefulShellBranch(routes: [GoRoute(path: '/home', builder: (context, state) => const HomeScreen())]),
           StatefulShellBranch(
-            routes: [GoRoute(path: '/activity', builder: (context, state) => const ActivityScreen())],
+            routes: [
+              GoRoute(
+                path: '/home',
+                builder: (context, state) => const HomeScreen(),
+              ),
+            ],
           ),
           StatefulShellBranch(
-            routes: [GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen())],
+            routes: [
+              GoRoute(
+                path: '/activity',
+                builder: (context, state) => const ActivityScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/profile',
+                builder: (context, state) => const ProfileScreen(),
+              ),
+            ],
           ),
         ],
       ),
@@ -58,7 +107,10 @@ GoRouter buildRouter(Ref ref) {
 /// logout immediately re-evaluates `redirect` without the user navigating manually.
 class _AuthListenable extends ChangeNotifier {
   _AuthListenable(this._ref) {
-    _subscription = _ref.listen(authControllerProvider, (_, _) => notifyListeners());
+    _subscription = _ref.listen(
+      authControllerProvider,
+      (_, _) => notifyListeners(),
+    );
   }
 
   final Ref _ref;

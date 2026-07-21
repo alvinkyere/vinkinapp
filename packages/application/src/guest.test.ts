@@ -10,7 +10,12 @@ import {
   openVinkCommand,
   setSplitCommand,
 } from './commands.ts';
-import { getGuestVinkView, getPublicVinkView, guestJoinVinkCommand } from './guest.ts';
+import {
+  getGuestVinkView,
+  getPublicVinkView,
+  guestJoinVinkCommand,
+  inviteGuestCommand,
+} from './guest.ts';
 
 const ORGANIZER = 'organizer-user' as UserId;
 const NOW = new Date('2026-07-18T10:00:00Z');
@@ -133,6 +138,118 @@ describe('guest join (Plan PV4, journey E9)', () => {
     await assert.rejects(
       getGuestVinkView(store, 'unknown-hash', NOW),
       isAppError('GUEST_UNAUTHENTICATED'),
+    );
+  });
+});
+
+describe('organizer invite-guest (ENG1 #4: idempotent invites)', () => {
+  async function draftVink(store: InMemoryVinkStore) {
+    const { vink } = await createVinkCommand(ctx(store), {
+      purchaseCategory: 'GROCERY',
+      subtotalMinor: 12_000,
+      tipMinor: 0,
+      submissionDeadline: DEADLINE,
+      organizerDisplayName: 'Org',
+    });
+    return vink;
+  }
+
+  it('invites a guest, emitting ParticipantJoined', async () => {
+    const store = new InMemoryVinkStore();
+    const vink = await draftVink(store);
+    const result = await inviteGuestCommand(ctx(store), {
+      vinkId: vink.id,
+      displayName: 'Dinner Guest',
+      accessTokenHash: 'hash-1',
+    });
+    assert.equal(result.participant.displayName, 'Dinner Guest');
+    assert.equal(result.participant.guestIdentityId, result.guest.id);
+    assert.equal(store.outbox.at(-1)?.eventType, 'ParticipantJoined');
+    assert.equal(store.outbox.at(-1)?.payload.invitedByOrganizer, true);
+  });
+
+  it('a repeated invitationIdempotencyKey is rejected, not duplicated', async () => {
+    const store = new InMemoryVinkStore();
+    const vink = await draftVink(store);
+    const input = {
+      vinkId: vink.id,
+      displayName: 'Dinner Guest',
+      accessTokenHash: 'hash-1',
+      invitationIdempotencyKey: 'attempt-1',
+    };
+    const first = await inviteGuestCommand(ctx(store), input);
+
+    // The client never saw `first`'s response (the raw guest token/link is gone by design —
+    // D14 — so there is nothing to replay) and retries with the SAME key.
+    await assert.rejects(
+      inviteGuestCommand(ctx(store), { ...input, accessTokenHash: 'hash-2' }),
+      isAppError('INVITE_ALREADY_SENT'),
+    );
+
+    const participants = await store.listParticipants(vink.id);
+    assert.equal(
+      participants.filter((p) => p.displayName === 'Dinner Guest').length,
+      1,
+      'only one guest participant exists for this idempotency key',
+    );
+    assert.equal(first.participant.status, 'JOINED');
+  });
+
+  it('a different key (or omitting it) is a genuinely new invite', async () => {
+    const store = new InMemoryVinkStore();
+    const vink = await draftVink(store);
+    await inviteGuestCommand(ctx(store), {
+      vinkId: vink.id,
+      displayName: 'Guest A',
+      accessTokenHash: 'hash-a',
+      invitationIdempotencyKey: 'key-a',
+    });
+    await inviteGuestCommand(ctx(store), {
+      vinkId: vink.id,
+      displayName: 'Guest B',
+      accessTokenHash: 'hash-b',
+      invitationIdempotencyKey: 'key-b',
+    });
+    // Omitting the key entirely forgoes protection (back-compat) — still two distinct guests.
+    await inviteGuestCommand(ctx(store), {
+      vinkId: vink.id,
+      displayName: 'Guest C',
+      accessTokenHash: 'hash-c',
+    });
+    const participants = await store.listParticipants(vink.id);
+    assert.equal(participants.filter((p) => p.role === 'MEMBER').length, 3);
+  });
+
+  it('a lost race at the store is rejected as already-sent, not thrown as an error', async () => {
+    const store = new InMemoryVinkStore();
+    const vink = await draftVink(store);
+    const input = {
+      vinkId: vink.id,
+      displayName: 'Dinner Guest',
+      accessTokenHash: 'hash-1',
+      invitationIdempotencyKey: 'contested-key',
+    };
+    await inviteGuestCommand(ctx(store), input);
+
+    // Simulate the rarer genuine race: this transaction's own pre-check ran before the
+    // concurrent winner's commit was visible to it, so it proceeded to record the key and
+    // only then discovered — via the unique constraint, not the pre-check — that it lost.
+    const originalFind = store.findGuestInviteIdempotencyKey.bind(store);
+    let findCalls = 0;
+    store.findGuestInviteIdempotencyKey = async (vinkId, key) => {
+      findCalls += 1;
+      return findCalls === 1 ? false : originalFind(vinkId, key);
+    };
+
+    // Note: this only proves the race is DETECTED and rejected, not full atomicity —
+    // InMemoryVinkStore is explicitly not transactional (see its own doc comment), so a
+    // phantom participant row from the losing attempt isn't rolled back here the way the
+    // real Postgres adapter rolls back its whole transaction on any thrown error. The
+    // "exactly one guest, even under a real race" guarantee is proven for real against real
+    // Postgres by `apps/api/src/vinks.integration.test.ts`'s equivalent test.
+    await assert.rejects(
+      inviteGuestCommand(ctx(store), { ...input, accessTokenHash: 'hash-2' }),
+      isAppError('INVITE_ALREADY_SENT'),
     );
   });
 });

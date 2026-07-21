@@ -7,7 +7,7 @@ import {
   type VinkId,
 } from '../../domain/src/index.ts';
 import { InMemoryVinkStore } from './testing/in-memory.ts';
-import { ApplicationError } from './errors.ts';
+import { ApplicationError, CreationIdempotencyRaceError } from './errors.ts';
 import type { CommandContext } from './ports.ts';
 import {
   addParticipantCommand,
@@ -59,6 +59,162 @@ describe('CreateVinkCommand', () => {
       store.outbox.map((event) => event.eventType),
       ['VinkCreated'],
     );
+  });
+
+  it('ENG1 timer semantics: an omitted submissionDeadline defaults to the fallback open duration (24h)', async () => {
+    const store = new InMemoryVinkStore();
+    const { vink } = await createVinkCommand(ctx(store), {
+      purchaseCategory: 'GROCERY',
+      subtotalMinor: 5_000,
+      tipMinor: 0,
+      organizerDisplayName: 'Org',
+      // submissionDeadline deliberately omitted — the app no longer computes this itself.
+    });
+    const now = new Date('2026-07-17T10:00:00Z').getTime();
+    const deadline = new Date(vink.submissionDeadline).getTime();
+    assert.equal(
+      deadline - now,
+      86_400_000,
+      'defaults to exactly 24h, unchanged from prior hardcoded behavior',
+    );
+    const grace = new Date(vink.processingGraceDeadline).getTime();
+    assert.equal(grace - deadline, 60_000, 'processing grace defaults to 60s (Spec §14)');
+  });
+
+  it('ENG1 timer semantics: ctx.timers overrides the fallback for both open duration and grace', async () => {
+    const store = new InMemoryVinkStore();
+    const customCtx: CommandContext = {
+      ...ctx(store),
+      timers: { openDurationSeconds: 300, processingGraceSeconds: 15 },
+    };
+    const { vink } = await createVinkCommand(customCtx, {
+      purchaseCategory: 'GROCERY',
+      subtotalMinor: 5_000,
+      tipMinor: 0,
+      organizerDisplayName: 'Org',
+    });
+    const now = new Date('2026-07-17T10:00:00Z').getTime();
+    const deadline = new Date(vink.submissionDeadline).getTime();
+    assert.equal(deadline - now, 300_000);
+    const grace = new Date(vink.processingGraceDeadline).getTime();
+    assert.equal(grace - deadline, 15_000);
+  });
+
+  it('ENG1 timer semantics: an explicit submissionDeadline still wins over ctx.timers', async () => {
+    const store = new InMemoryVinkStore();
+    const customCtx: CommandContext = {
+      ...ctx(store),
+      timers: { openDurationSeconds: 300, processingGraceSeconds: 15 },
+    };
+    const { vink } = await createVinkCommand(customCtx, {
+      purchaseCategory: 'GROCERY',
+      subtotalMinor: 5_000,
+      tipMinor: 0,
+      submissionDeadline: FUTURE,
+      organizerDisplayName: 'Org',
+    });
+    assert.equal(vink.submissionDeadline, new Date(FUTURE).toISOString());
+    // Grace still derives from ctx.timers even when the deadline itself was explicit.
+    const grace = new Date(vink.processingGraceDeadline).getTime() - new Date(FUTURE).getTime();
+    assert.equal(grace, 15_000);
+  });
+
+  it('ENG1 #4: replays the same Vink for a repeated creation idempotency key', async () => {
+    const store = new InMemoryVinkStore();
+    const input = {
+      purchaseCategory: 'GROCERY' as const,
+      subtotalMinor: 5_000,
+      tipMinor: 0,
+      submissionDeadline: FUTURE,
+      organizerDisplayName: 'Org',
+      creationIdempotencyKey: 'attempt-1',
+    };
+    const first = await createVinkCommand(ctx(store), input);
+    const retry = await createVinkCommand(ctx(store), input);
+
+    assert.equal(retry.vink.id, first.vink.id);
+    assert.equal(retry.participants[0]?.id, first.participants[0]?.id);
+    assert.equal(store.vinks.size, 1, 'only one Vink was ever inserted');
+    assert.deepEqual(
+      store.outbox.map((event) => event.eventType),
+      ['VinkCreated'],
+      'the replay must not emit a second VinkCreated event',
+    );
+  });
+
+  it('ENG1 #4: a different key (or a different organizer) is a genuinely new Vink', async () => {
+    const store = new InMemoryVinkStore();
+    const base = {
+      purchaseCategory: 'GROCERY' as const,
+      subtotalMinor: 5_000,
+      tipMinor: 0,
+      submissionDeadline: FUTURE,
+      organizerDisplayName: 'Org',
+    };
+    const first = await createVinkCommand(ctx(store), { ...base, creationIdempotencyKey: 'key-a' });
+    const second = await createVinkCommand(ctx(store), {
+      ...base,
+      creationIdempotencyKey: 'key-b',
+    });
+    const third = await createVinkCommand(ctx(store, 'other-organizer'), {
+      ...base,
+      creationIdempotencyKey: 'key-a', // same key, different organizer — not a collision
+    });
+
+    assert.notEqual(second.vink.id, first.vink.id);
+    assert.notEqual(third.vink.id, first.vink.id);
+    assert.equal(store.vinks.size, 3);
+  });
+
+  it('ENG1 #4: omitting the key never collides across separate calls (back-compat default)', async () => {
+    const store = new InMemoryVinkStore();
+    const input = {
+      purchaseCategory: 'GROCERY' as const,
+      subtotalMinor: 5_000,
+      tipMinor: 0,
+      submissionDeadline: FUTURE,
+      organizerDisplayName: 'Org',
+    };
+    const first = await createVinkCommand(ctx(store), input);
+    const second = await createVinkCommand(ctx(store), input);
+    assert.notEqual(second.vink.id, first.vink.id);
+    assert.equal(store.vinks.size, 2);
+  });
+
+  it('ENG1 #4: a lost race at the store replays the winner instead of throwing', async () => {
+    const store = new InMemoryVinkStore();
+    const winnerInput = {
+      purchaseCategory: 'GROCERY' as const,
+      subtotalMinor: 5_000,
+      tipMinor: 0,
+      submissionDeadline: FUTURE,
+      organizerDisplayName: 'Org',
+      creationIdempotencyKey: 'contested-key',
+    };
+    const winner = await createVinkCommand(ctx(store), winnerInput);
+
+    // Simulate the rarer genuine race (READ COMMITTED semantics): this transaction's own
+    // pre-check runs before the concurrent winner's commit is visible to it, so it proceeds
+    // to insert and only then discovers — via the unique constraint, not the pre-check —
+    // that it lost. The pre-check "misses" exactly once; after the forced insert failure,
+    // the catch block's fresh lookup sees the now-committed winner normally.
+    const originalFind = store.findVinkByCreationIdempotencyKey.bind(store);
+    let findCalls = 0;
+    store.findVinkByCreationIdempotencyKey = async (organizerUserId, key) => {
+      findCalls += 1;
+      return findCalls === 1 ? null : originalFind(organizerUserId, key);
+    };
+    store.insertVink = async () => {
+      throw new CreationIdempotencyRaceError();
+    };
+
+    const loser = await createVinkCommand(ctx(store), winnerInput);
+    assert.equal(
+      loser.vink.id,
+      winner.vink.id,
+      'the race loser replays the winner instead of erroring',
+    );
+    assert.equal(store.vinks.size, 1);
   });
 
   it('rejects unsupported categories and past deadlines', async () => {
@@ -129,7 +285,9 @@ describe('participants and split', () => {
         userId: 'user-a' as UserId,
         displayName: 'a again',
       }),
-      isAppError('INVALID_COMMAND'),
+      // ENG1 #4: a distinct code from generic INVALID_COMMAND — this is a duplicate-add
+      // ("already done"), not a genuinely invalid command.
+      isAppError('PARTICIPANT_ALREADY_ADDED'),
     );
     await assert.rejects(
       removeParticipantCommand(ctx(store), {
