@@ -332,8 +332,15 @@ describe('real-time channel end-to-end (PostgreSQL + WebSocket)', { skip: !RUN }
       headers: { authorization: `Bearer ${tokens.memberA}` },
       payload: {},
     });
-    const organizerEvent = await waitFor(organizerMessages, (m) => m.eventType !== undefined);
-    const guestEvent = await waitFor(guestMessages, (m) => m.eventType !== undefined);
+    // A specific event type, not "any event with an eventType" — the organizer's OWN
+    // VinkOpened (from opening the vink, before either client connected) and the guest's OWN
+    // ParticipantJoined (from joining, also before connecting) are still legitimately
+    // in-flight through the outbox publisher's poll cycle when the WS clients connect a few
+    // lines above; matching "any eventType" races against that backlog instead of the new
+    // event this action actually triggers, exactly like every other assertion in this file
+    // already does (waitFor(..., m => m.type === 'funding_progress_updated') etc.).
+    const organizerEvent = await waitFor(organizerMessages, (m) => m.type === 'contribution_pending');
+    const guestEvent = await waitFor(guestMessages, (m) => m.type === 'contribution_pending');
     assert.deepEqual(organizerEvent, guestEvent);
 
     organizerClient.close();

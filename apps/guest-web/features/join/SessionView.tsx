@@ -5,11 +5,11 @@ import { useMutation } from '@tanstack/react-query';
 import { authorizeGuestContribution } from '../../lib/api';
 import { ApiError } from '../../lib/api-error';
 import { track } from '../../lib/analytics';
-import { GUEST_CONTRIBUTION_STATUS_UI_ENABLED } from '../../lib/config';
+import { GUEST_CONTRIBUTION_STATUS_UI_ENABLED, SUPPORT_CONTACT_URL } from '../../lib/config';
 import {
   contributionStatusSentence,
   contributionStatusWord,
-  terminalOutcomeSentence,
+  guestTerminalSentence,
 } from '../../lib/guest-copy';
 import { humanErrorMessage } from '../../lib/human-errors';
 import { formatMoney } from '../../lib/money';
@@ -174,9 +174,15 @@ export function SessionView({
 /**
  * Slice I3 (flag-on): D24/D25/D34-correct composition. The contribution action/status is
  * always driven by `view.participant.contributionStatus` (server truth, survives reload) —
- * never local component state. A definitive vink-level outcome (`terminalOutcomeSentence`)
- * replaces the share card entirely once reached; `recovery_required` deliberately does not
- * (§18's continuity rule — the guest's own money is already settled, never re-described).
+ * never local component state. A definitive terminal sentence (`guestTerminalSentence`,
+ * prioritizing the guest's own `contributionStatus` over the vink-level `vinkOutcome` — see
+ * its own doc comment) replaces the share card entirely once reached.
+ *
+ * `recovery_required` (Slice I3A, D37) gets its own stricter treatment on top of the shared
+ * terminal-card branch below: no `StatusBadge` (its `RECOVERY_REQUIRED`/`RECOVERY_PENDING`
+ * label, "Resolving a shortfall," is organizer-facing recovery language, never shown to a
+ * guest) and no `SignupConversion` (promotional content has no place next to "you don't need
+ * to do anything") — both suppressed specifically for this one status, not generally.
  */
 function SessionViewV2({
   view,
@@ -197,17 +203,34 @@ function SessionViewV2({
     participant.allocatedAmountMinor > 0 &&
     (participant.contributionStatus === 'not_started' ||
       participant.contributionStatus === 'declined_retryable');
-  const outcomeSentence = terminalOutcomeSentence(vink.vinkOutcome, vink.purchaseCategory);
-  const showSignupConversion = outcomeSentence !== null || vink.state !== 'OPEN';
+  const isRecoveryRequired = participant.contributionStatus === 'recovery_required';
+  // Slice I3A: none of these three resolve to a clean, celebratory "done" moment — a guest
+  // whose own money is still being returned, was returned, or is tied up in an organizer
+  // recovery obligation is not the right audience for "Liked splitting the bill this way?"
+  // right next to that news. `completed` (a genuine success) is unaffected — conversion
+  // still shows there.
+  const isUnsuccessfulResolution =
+    participant.contributionStatus === 'return_pending' ||
+    participant.contributionStatus === 'returned' ||
+    isRecoveryRequired;
+  const outcomeSentence = guestTerminalSentence(
+    participant.contributionStatus,
+    vink.vinkOutcome,
+    vink.purchaseCategory,
+  );
+  const showSignupConversion =
+    !isUnsuccessfulResolution && (outcomeSentence !== null || vink.state !== 'OPEN');
 
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-6 p-6 font-sans">
       <div className="rounded-[2rem] bg-white p-7 shadow-[0_20px_60px_-15px_rgba(10,10,11,0.15)]">
         <div className="flex items-center justify-between gap-3">
           <h1 className="font-display text-lg font-bold text-ink">Hi, {participant.displayName}</h1>
-          <div aria-live="polite">
-            <StatusBadge state={vink.state} />
-          </div>
+          {isRecoveryRequired ? null : (
+            <div aria-live="polite">
+              <StatusBadge state={vink.state} />
+            </div>
+          )}
         </div>
         <div className="mt-4">
           <ProgressBar
@@ -226,6 +249,14 @@ function SessionViewV2({
           className="rounded-[2rem] bg-white p-7 shadow-[0_1px_2px_rgba(10,10,11,0.04),0_8px_24px_-8px_rgba(10,10,11,0.08)]"
         >
           <p className="font-display text-lg font-bold text-ink">{outcomeSentence}</p>
+          {isRecoveryRequired && SUPPORT_CONTACT_URL !== null ? (
+            <a
+              href={SUPPORT_CONTACT_URL}
+              className="mt-3 inline-block text-sm font-medium text-blue underline"
+            >
+              Contact support
+            </a>
+          ) : null}
         </div>
       ) : (
         <div className="rounded-[2rem] bg-white p-7 shadow-[0_1px_2px_rgba(10,10,11,0.04),0_8px_24px_-8px_rgba(10,10,11,0.08)]">

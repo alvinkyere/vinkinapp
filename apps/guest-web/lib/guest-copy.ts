@@ -58,10 +58,14 @@ export function contributionStatusSentence(
 
 /**
  * §18's individual (D34) money-outcome sentence for the whole vink, keyed by
- * `GuestVinkOutcome`. Returns `null` for `'open'`/`'not_open_yet'` (no terminal outcome yet)
- * and for `'recovery_required'` — per §18's own note, that sentence is shown **only to the
- * organizer**; a participant/guest's own status stays whatever `contributionStatusSentence`
- * already says (never re-described as a distinct state, §8's continuity rule).
+ * `GuestVinkOutcome`. Returns `null` for `'open'`/`'not_open_yet'` (no terminal outcome yet).
+ *
+ * `'recovery_required'` — **D37 (2026-07-21) corrects §16/§18's original "organizer-only"
+ * annotation**: the canonical sentence is now shown to the guest too. See
+ * `docs/spec/decision-log.md` D37 for the full reasoning. Prefer `guestTerminalSentence`
+ * below over calling this directly for a guest's own screen — it additionally prioritizes
+ * the guest's own `contributionStatus` for `return_pending`/`returned`, which this
+ * vink-level function alone cannot distinguish from `expired`/`cancelled`.
  */
 export function terminalOutcomeSentence(
   outcome: GuestVinkOutcome,
@@ -80,9 +84,38 @@ export function terminalOutcomeSentence(
     case 'returned':
       return 'Your payment was returned.';
     case 'recovery_required':
+      return "We're resolving your payment. You don't need to pay again.";
     case 'open':
     case 'not_open_yet':
       return null;
+  }
+}
+
+/**
+ * Slice I3A — the actual composition-selection priority for a guest's own screen: the
+ * guest's own `contributionStatus` takes priority over the vink-level `vinkOutcome`
+ * whenever it is itself `return_pending`/`returned`/`recovery_required`, because those three
+ * describe *this guest's own money* specifically and can genuinely diverge from the vink's
+ * overall outcome — e.g. a guest whose own captured contribution is being refunded
+ * (`return_pending`) typically sits on a vink whose own `vinkOutcome` reads `expired`
+ * (`FUNDING_REVERSAL`/`EXPIRED`); showing `terminalOutcomeSentence('expired', ...)` —
+ * "You weren't charged." — would be factually wrong for a guest who *was* charged and is
+ * now being refunded. Falls back to the vink-level sentence for every other case.
+ */
+export function guestTerminalSentence(
+  contributionStatus: GuestContributionStatus,
+  vinkOutcome: GuestVinkOutcome,
+  purchaseCategory: PurchaseCategory,
+): string | null {
+  switch (contributionStatus) {
+    case 'return_pending':
+      return 'Your payment is being returned.';
+    case 'returned':
+      return 'Your payment was returned.';
+    case 'recovery_required':
+      return "We're resolving your payment. You don't need to pay again.";
+    default:
+      return terminalOutcomeSentence(vinkOutcome, purchaseCategory);
   }
 }
 

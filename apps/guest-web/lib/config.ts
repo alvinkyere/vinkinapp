@@ -16,3 +16,13 @@ export function wsBaseUrl(): string {
  * makes things worse than today, even if the two flags are set inconsistently). */
 export const GUEST_CONTRIBUTION_STATUS_UI_ENABLED =
   process.env.NEXT_PUBLIC_GUEST_CONTRIBUTION_STATUS_UI === '1';
+
+/** Slice I3A — Phase 6 §21's own rule: "No support email address is invented here — the
+ * actual monitored channel is a deployment dependency." `null` (unset) means no real support
+ * channel has been configured yet, and the "Contact support" affordance is withheld entirely
+ * rather than pointing at a fabricated destination. */
+export const SUPPORT_CONTACT_URL: string | null =
+  process.env.NEXT_PUBLIC_SUPPORT_CONTACT_URL === undefined ||
+  process.env.NEXT_PUBLIC_SUPPORT_CONTACT_URL === ''
+    ? null
+    : process.env.NEXT_PUBLIC_SUPPORT_CONTACT_URL;

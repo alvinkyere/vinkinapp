@@ -10,6 +10,7 @@ import {
   contributionStatusSentence,
   contributionStatusWord,
   countdownLabel,
+  guestTerminalSentence,
   terminalOutcomeSentence,
 } from '../lib/guest-copy';
 import type { GuestContributionStatus, GuestVinkOutcome } from '../lib/types';
@@ -72,7 +73,7 @@ test.describe('contributionStatusSentence (Phase 6 §10 — exhaustive)', () => 
   }
 });
 
-test.describe('terminalOutcomeSentence (Phase 6 §18, D34 — exhaustive)', () => {
+test.describe('terminalOutcomeSentence (Phase 6 §18, D34, D37 — exhaustive)', () => {
   const expected: Record<GuestVinkOutcome, string | null> = {
     not_open_yet: null,
     open: null,
@@ -81,15 +82,47 @@ test.describe('terminalOutcomeSentence (Phase 6 §18, D34 — exhaustive)', () =
     cancelled: "The organizer cancelled. You weren't charged.",
     return_pending: 'Your payment is being returned.',
     returned: 'Your payment was returned.',
-    // §18: this sentence is organizer-only; a guest's own view stays whatever
-    // contributionStatusSentence already says (never a distinct terminal sentence here).
-    recovery_required: null,
+    // D37 (2026-07-21, Slice I3A): corrects §16/§18's original "organizer-only" annotation —
+    // this canonical sentence is now shown to the guest too.
+    recovery_required: "We're resolving your payment. You don't need to pay again.",
   };
   for (const outcome of ALL_VINK_OUTCOMES) {
     test(`${outcome} -> ${JSON.stringify(expected[outcome])}`, () => {
       expect(terminalOutcomeSentence(outcome, 'GROCERY')).toBe(expected[outcome]);
     });
   }
+});
+
+test.describe('guestTerminalSentence (Slice I3A — contributionStatus priority over vinkOutcome)', () => {
+  test("a guest's own return_pending wins even when the vink-level outcome reads 'expired'", () => {
+    // The real reachable combination: a captured contribution being refunded while the vink
+    // itself is in FUNDING_REVERSAL/EXPIRED overall — "You weren't charged" would be wrong.
+    expect(guestTerminalSentence('return_pending', 'expired', 'GROCERY')).toBe(
+      'Your payment is being returned.',
+    );
+  });
+
+  test("a guest's own returned status wins even when the vink-level outcome reads 'expired'", () => {
+    expect(guestTerminalSentence('returned', 'expired', 'GROCERY')).toBe(
+      'Your payment was returned.',
+    );
+  });
+
+  test('recovery_required wins regardless of the vink-level outcome value passed', () => {
+    expect(guestTerminalSentence('recovery_required', 'open', 'GROCERY')).toBe(
+      "We're resolving your payment. You don't need to pay again.",
+    );
+  });
+
+  test('falls back to the vink-level sentence for every other contributionStatus', () => {
+    expect(guestTerminalSentence('confirmed', 'completed', 'GROCERY')).toBe(
+      'Payment complete. Your part helped pay Grocery run.',
+    );
+    expect(guestTerminalSentence('not_started', 'cancelled', 'GROCERY')).toBe(
+      "The organizer cancelled. You weren't charged.",
+    );
+    expect(guestTerminalSentence('not_started', 'open', 'GROCERY')).toBe(null);
+  });
 });
 
 test.describe('countdownLabel (Phase 6 §13)', () => {
