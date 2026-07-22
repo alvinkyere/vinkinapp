@@ -12,6 +12,10 @@ export interface PublicUser {
   username: string;
   displayName: string;
   email: string | null;
+  /** Slice I4 (D19/D27) — `users.phone` has existed since migration 0001 (PV1) but was never
+   * wired into any application code until now (verified by reading this whole module before
+   * changing anything, per the I4 prompt's own instruction). */
+  phone: string | null;
   status: string;
 }
 
@@ -29,6 +33,7 @@ interface UserRow {
   username: string;
   display_name: string;
   email: string | null;
+  phone: string | null;
   status: string;
   password_hash: string;
 }
@@ -39,6 +44,7 @@ function toPublicUser(row: UserRow): PublicUser {
     username: row.username,
     displayName: row.display_name,
     email: row.email,
+    phone: row.phone,
     status: row.status,
   };
 }
@@ -58,14 +64,21 @@ async function createSession(
 
 export async function registerUser(
   sql: Sql,
-  input: { username: string; displayName: string; email?: string; password: string },
+  input: {
+    username: string;
+    displayName: string;
+    email?: string;
+    phone?: string;
+    password: string;
+  },
 ): Promise<{ user: PublicUser; sessionId: string; refreshToken: string }> {
   const passwordHash = await hashPassword(input.password);
   const rows = await sql`
-    INSERT INTO users (username, display_name, email, password_hash)
-    VALUES (${input.username}, ${input.displayName}, ${input.email ?? null}, ${passwordHash})
+    INSERT INTO users (username, display_name, email, phone, password_hash)
+    VALUES (${input.username}, ${input.displayName}, ${input.email ?? null},
+            ${input.phone ?? null}, ${passwordHash})
     ON CONFLICT (username) DO NOTHING
-    RETURNING id, username, display_name, email, status, password_hash`;
+    RETURNING id, username, display_name, email, phone, status, password_hash`;
   const row = rows[0] as UserRow | undefined;
   if (row === undefined) throw new AuthError('USERNAME_TAKEN');
   const session = await createSession(sql, row.id, null);
@@ -77,7 +90,7 @@ export async function loginUser(
   input: { username: string; password: string },
 ): Promise<{ user: PublicUser; sessionId: string; refreshToken: string }> {
   const rows = await sql`
-    SELECT id, username, display_name, email, status, password_hash
+    SELECT id, username, display_name, email, phone, status, password_hash
     FROM users WHERE username = ${input.username} AND status = 'ACTIVE'`;
   const row = rows[0] as UserRow | undefined;
   // Uniform failure for unknown user and wrong password — no account enumeration.
@@ -153,8 +166,32 @@ export async function revokeSession(sql: Sql, refreshToken: string): Promise<voi
 
 export async function findUserById(sql: Sql, userId: string): Promise<PublicUser | null> {
   const rows = await sql`
-    SELECT id, username, display_name, email, status, password_hash
+    SELECT id, username, display_name, email, phone, status, password_hash
     FROM users WHERE id = ${userId}`;
   const row = rows[0] as UserRow | undefined;
   return row === undefined ? null : toPublicUser(row);
+}
+
+/** Slice I4 (D19/D27) — lets a user set/change the contact destination automatic invitation
+ * delivery would use, after registration (Register only captures it once, at signup;
+ * Profile is where it's ever revisited). `undefined` on either field leaves that column
+ * unchanged; `null` (an explicit clear) removes it — distinguished at the route layer via
+ * Zod's `.nullable().optional()`, not here. */
+export async function updateContactInfo(
+  sql: Sql,
+  userId: string,
+  input: { email?: string | null; phone?: string | null },
+): Promise<PublicUser> {
+  const rows = await sql`
+    UPDATE users SET
+      email = CASE WHEN ${input.email !== undefined} THEN ${input.email ?? null} ELSE email END,
+      phone = CASE WHEN ${input.phone !== undefined} THEN ${input.phone ?? null} ELSE phone END,
+      updated_at = now()
+    WHERE id = ${userId}
+    RETURNING id, username, display_name, email, phone, status, password_hash`;
+  const row = rows[0] as UserRow | undefined;
+  // Unreachable for a real authenticated caller (their own id came from a verified access
+  // token) — not an AuthError code, since this isn't a credentials problem.
+  if (row === undefined) throw new Error(`updateContactInfo: user ${userId} not found`);
+  return toPublicUser(row);
 }

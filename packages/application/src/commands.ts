@@ -23,6 +23,11 @@ import {
   type VinkId,
 } from '../../domain/src/index.ts';
 import { ApplicationError, CreationIdempotencyRaceError } from './errors.ts';
+import {
+  dispatchMemberInvitation,
+  dispatchMemberInvitationsOnOpen,
+  type DeliveryCommandContext,
+} from './delivery.ts';
 import type { CommandContext, VinkTx } from './ports.ts';
 import { applyVinkTransition } from './support/transition.ts';
 import { loadOwnedVink } from './support/guards.ts';
@@ -269,7 +274,7 @@ export interface AddParticipantInput {
 }
 
 export async function addParticipantCommand(
-  ctx: CommandContext,
+  ctx: DeliveryCommandContext,
   input: AddParticipantInput,
 ): Promise<Participant> {
   return ctx.uow.run(async (tx) => {
@@ -308,6 +313,17 @@ export async function addParticipantCommand(
       aggregateId: vink.id,
       payload: { vinkId: vink.id, participantId: participant.id },
     });
+    // Slice I4 — dispatch-ordering: never before VINK_OPENED. A member added while still
+    // DRAFT is NOT dispatched here (openVinkCommand's own batch dispatch picks them up once
+    // the vink actually opens); a member added once the vink is already OPEN-or-later has
+    // already passed that gate, so their own invite fires immediately — there's no reason to
+    // make them wait for an event that already happened.
+    if (vink.state === 'OPEN') {
+      const organizer = existing.find((row) => row.role === 'ORGANIZER');
+      if (organizer !== undefined) {
+        await dispatchMemberInvitation(ctx, tx, vink, participant, organizer.displayName);
+      }
+    }
     return participant;
   });
 }
@@ -484,7 +500,7 @@ export interface VinkLifecycleInput {
 }
 
 export async function openVinkCommand(
-  ctx: CommandContext,
+  ctx: DeliveryCommandContext,
   input: VinkLifecycleInput,
 ): Promise<Vink> {
   return ctx.uow.run(async (tx) => {
@@ -503,7 +519,7 @@ export async function openVinkCommand(
         `allocations must equal the required amount before opening (${remaining.amountMinor} unallocated)`,
       );
     }
-    return applyVinkTransition(
+    const opened = await applyVinkTransition(
       tx,
       vink,
       'VINK_OPENED',
@@ -511,6 +527,13 @@ export async function openVinkCommand(
       ctx.correlationId,
       ctx.clock.now(),
     );
+    // Slice I4 (D19/D27) — the actual "automatic delivery fires at VINK_OPENED" trigger, for
+    // every member added while the vink was still DRAFT (never dispatched earlier — see
+    // addParticipantCommand's own comment on this exact ordering). Runs after the transition
+    // has succeeded, inside the same unit of work — a delivery failure here never rolls back
+    // or misrepresents the vink's own now-committed OPEN state (Phase 5 §2).
+    await dispatchMemberInvitationsOnOpen(ctx, tx, opened, active);
+    return opened;
   });
 }
 

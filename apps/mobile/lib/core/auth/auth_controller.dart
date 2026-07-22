@@ -32,24 +32,48 @@ class AuthController extends Notifier<AuthState> {
     }
     try {
       final response = await _client.get('/api/v1/me');
-      state = AuthSignedIn(VinkinUser.fromJson(response['user'] as Map<String, dynamic>), token);
+      state = AuthSignedIn(
+        VinkinUser.fromJson(response['user'] as Map<String, dynamic>),
+        token,
+      );
     } catch (_) {
       await _tokenStore.clear();
       state = const AuthSignedOut();
     }
   }
 
-  Future<void> register({required String username, required String displayName, required String password}) async {
+  /// Slice I4 (D19/D27): [email]/[phone] are optional — the contact destination automatic
+  /// invitation delivery would use, captured once here (Profile is the only other place it
+  /// can ever be revisited, `PATCH /api/v1/me`, not yet wired into a screen this pass).
+  Future<void> register({
+    required String username,
+    required String displayName,
+    required String password,
+    String? email,
+    String? phone,
+  }) async {
     final response = await _client.post(
       '/api/v1/auth/register',
-      body: {'username': username, 'displayName': displayName, 'password': password},
+      body: {
+        'username': username,
+        'displayName': displayName,
+        'password': password,
+        if (email != null && email.isNotEmpty) 'email': email,
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
+      },
     );
     await _onAuthenticated(response);
     _analytics.track('organizer_registered', {'username': username});
   }
 
-  Future<void> login({required String username, required String password}) async {
-    final response = await _client.post('/api/v1/auth/login', body: {'username': username, 'password': password});
+  Future<void> login({
+    required String username,
+    required String password,
+  }) async {
+    final response = await _client.post(
+      '/api/v1/auth/login',
+      body: {'username': username, 'password': password},
+    );
     await _onAuthenticated(response);
     _analytics.track('organizer_logged_in', {'username': username});
   }
@@ -59,7 +83,10 @@ class AuthController extends Notifier<AuthState> {
       accessToken: response['accessToken'] as String,
       refreshToken: response['refreshToken'] as String,
     );
-    state = AuthSignedIn(VinkinUser.fromJson(response['user'] as Map<String, dynamic>), response['accessToken'] as String);
+    state = AuthSignedIn(
+      VinkinUser.fromJson(response['user'] as Map<String, dynamic>),
+      response['accessToken'] as String,
+    );
   }
 
   /// ENG1 #3: called when a request's own retry-once-after-refresh already failed
@@ -78,13 +105,21 @@ class AuthController extends Notifier<AuthState> {
     state = const AuthSignedOut();
     if (refreshToken != null) {
       // Best-effort; the app has already forgotten the session locally either way.
-      await _client.post('/api/v1/auth/logout', body: {'refreshToken': refreshToken}).catchError((_) => <String, dynamic>{});
+      await _client
+          .post('/api/v1/auth/logout', body: {'refreshToken': refreshToken})
+          .catchError((_) => <String, dynamic>{});
     }
     _analytics.track('organizer_logged_out');
   }
 }
 
-final tokenStoreProvider = Provider<SecureTokenStore>((ref) => SecureTokenStore());
-final apiClientProvider = Provider<ApiClient>((ref) => ApiClient(tokenStore: ref.read(tokenStoreProvider)));
+final tokenStoreProvider = Provider<SecureTokenStore>(
+  (ref) => SecureTokenStore(),
+);
+final apiClientProvider = Provider<ApiClient>(
+  (ref) => ApiClient(tokenStore: ref.read(tokenStoreProvider)),
+);
 final analyticsProvider = Provider<Analytics>((ref) => HttpAnalytics());
-final authControllerProvider = NotifierProvider<AuthController, AuthState>(AuthController.new);
+final authControllerProvider = NotifierProvider<AuthController, AuthState>(
+  AuthController.new,
+);

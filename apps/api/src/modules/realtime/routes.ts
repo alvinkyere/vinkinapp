@@ -30,9 +30,11 @@ import type { Env } from '../../config/env.ts';
 import type { Sql } from '../../db/client.ts';
 import { verifyAccessToken } from '../../auth/tokens.ts';
 import { GUEST_TOKEN_PREFIX, hashGuestToken } from '../../auth/guest-tokens.ts';
+import { vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
 import type { RealtimeHub } from '../../realtime/hub.ts';
 
+const CLOSE_BAD_REQUEST = 4400;
 const CLOSE_UNAUTHENTICATED = 4401;
 const CLOSE_FORBIDDEN = 4403;
 const CLOSE_NOT_FOUND = 4404;
@@ -46,7 +48,15 @@ export function registerRealtimeRoutes(
   const store = new PostgresVinkStore(sql);
 
   app.get('/api/v1/vinks/:vinkId/live', { websocket: true }, async (socket, request) => {
-    const { vinkId } = request.params as { vinkId: string };
+    // A WS upgrade has no HTTP response to send a 400 on, so this route can't defer to
+    // app.ts's ZodError handler the way plain HTTP routes do — it validates with safeParse
+    // and closes the socket itself, same as every other rejection path below.
+    const paramsResult = vinkIdParams.safeParse(request.params);
+    if (!paramsResult.success) {
+      socket.close(CLOSE_BAD_REQUEST, 'malformed vinkId');
+      return;
+    }
+    const { vinkId } = paramsResult.data;
     const token = (request.query as { token?: string }).token;
     if (token === undefined) {
       socket.close(CLOSE_UNAUTHENTICATED, 'missing token');

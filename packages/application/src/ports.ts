@@ -27,6 +27,35 @@ export interface GuestIdentityRecord {
   accessTokenHash: string;
   expiresAt: string;
   createdAt: string;
+  /** Slice I4 (D19/D27) — where an automatic invitation would be sent, captured at
+   * invite/join time. Both null when the organizer used the anonymous share-link/QR path
+   * instead of naming this guest (manual sharing always stays available regardless). */
+  contactDestination: string | null;
+  contactMethod: 'EMAIL' | 'SMS' | null;
+}
+
+/** A member's own contact info, captured at registration (`users.email`/`users.phone`,
+ * migration 0001) — read-only from the vink-domain store's perspective; profile editing is
+ * the auth module's own concern (Slice I4). */
+export interface UserContactInfo {
+  email: string | null;
+  phone: string | null;
+}
+
+/** Slice I4 — one row per delivery attempt (never a `participants` column: delivery is an
+ * infrastructure concern, not domain state, Phase 10 §6). */
+export interface InvitationDeliveryInput {
+  participantId: Participant['id'];
+  status: 'SENT' | 'FAILED';
+  method: 'EMAIL' | 'SMS';
+  destination: string;
+  providerMessageId?: string;
+  failureReason?: string;
+}
+
+export interface InvitationDeliveryRecord extends InvitationDeliveryInput {
+  id: string;
+  attemptedAt: string;
 }
 
 export interface VinkStateHistoryRow {
@@ -91,6 +120,15 @@ export interface VinkTx {
   /** Plain read — an optimization ahead of the database's own unique constraint, not the
    * guard itself. True if this exact (vink, key) pair was already used for an invite. */
   findGuestInviteIdempotencyKey(vinkId: VinkId, key: string): Promise<boolean>;
+  /** Slice I4 — a member's own captured contact info (`users.email`/`users.phone`), for
+   * automatic-delivery destination resolution. `null` if the user doesn't exist (shouldn't
+   * happen for a real participant, but the dispatch path treats it as "no contact info,"
+   * never throws — manual sharing is always the fallback). */
+  getUserContactInfo(userId: string): Promise<UserContactInfo | null>;
+  /** Slice I4 — one row per delivery attempt; never blocks or rolls back the caller's own
+   * command on failure (Phase 5 §2's locked rule — see `dispatchInvitation` in
+   * `packages/application/src/delivery.ts`). */
+  insertInvitationDelivery(delivery: InvitationDeliveryInput): Promise<void>;
   /** Persist the full row; `vink.version` has already been incremented by the command. */
   updateVink(vink: Vink): Promise<void>;
   insertParticipant(participant: Participant): Promise<void>;
@@ -145,6 +183,9 @@ export interface VinkReader {
     accessTokenHash: string,
     now: Date,
   ): Promise<{ participant: Participant; guest: GuestIdentityRecord } | null>;
+  /** Slice I4 — every delivery attempt for one participant, newest first (organizer-facing
+   * "Sent" / "Couldn't send" row status, Phase 6 §9; supports "Send again" showing history). */
+  listInvitationDeliveries(participantId: Participant['id']): Promise<InvitationDeliveryRecord[]>;
 }
 
 export interface UnitOfWork {

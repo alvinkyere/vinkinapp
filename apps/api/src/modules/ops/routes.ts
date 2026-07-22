@@ -29,6 +29,7 @@ import type { Env } from '../../config/env.ts';
 import type { Sql } from '../../db/client.ts';
 import { simulatorRoutesPermitted } from '../../config/simulator-guard.ts';
 import { signOperatorToken, verifyOperatorToken } from '../../auth/operator-tokens.ts';
+import { authorizationIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
 import { getVinkDetail, insertAuditEntry, listAuditLog, searchVinks } from './store.ts';
 import { getFunnelSummary } from './analytics.ts';
@@ -146,7 +147,7 @@ export function registerOpsRoutes(
 
   app.get('/internal/ops/vinks/:vinkId', async (request, reply) => {
     if ((await requireOperator(request, reply, env)) === null) return;
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     const detail = await getVinkDetail(sql, vinkId);
     if (detail.vink === null) return reply.code(404).send({ error: 'VINK_NOT_FOUND' });
     return reply.send(detail);
@@ -173,7 +174,7 @@ export function registerOpsRoutes(
   app.post('/internal/ops/vinks/:vinkId/merchant-authorizations', async (request, reply) => {
     const operator = await requireOperator(request, reply, env);
     if (operator === null) return;
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     const body = merchantSchema.parse(request.body ?? {});
     return handle(reply, 201, async () => {
       const card = await store.getCardByVink(vinkId as VinkId);
@@ -222,7 +223,7 @@ export function registerOpsRoutes(
   app.post('/internal/ops/authorizations/:authorizationId/capture', async (request, reply) => {
     const operator = await requireOperator(request, reply, env);
     if (operator === null) return;
-    const { authorizationId } = request.params as { authorizationId: string };
+    const { authorizationId } = authorizationIdParams.parse(request.params);
     const body = captureSchema.parse(request.body);
     return handle(reply, 200, async () => {
       if (provider instanceof MockFinancialProvider && body.providerAuthorizationId !== undefined) {

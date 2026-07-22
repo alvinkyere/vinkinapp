@@ -28,6 +28,7 @@ import {
 import type { Env } from '../../config/env.ts';
 import type { Sql } from '../../db/client.ts';
 import { simulatorRoutesPermitted } from '../../config/simulator-guard.ts';
+import { authorizationIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
 
 const merchantSchema = z.object({
@@ -84,7 +85,7 @@ export function registerPurchaseRoutes(
 
   // Provision the temporary card once a Vink is FUNDED.
   app.post('/internal/simulator/vinks/:vinkId/provision-card', async (request, reply) => {
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     return handle(reply, 201, async () => {
       const card = await provisionCardCommand(contextFor(String(request.id)), {
         vinkId: vinkId as VinkId,
@@ -102,7 +103,7 @@ export function registerPurchaseRoutes(
 
   // A merchant swipes the card: provider-side auth (mock) → VinkIn §17 decision (engine).
   app.post('/internal/simulator/vinks/:vinkId/merchant-authorizations', async (request, reply) => {
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     const body = merchantSchema.parse(request.body ?? {});
     return handle(reply, 201, async () => {
       const card = await store.getCardByVink(vinkId as VinkId);
@@ -141,7 +142,7 @@ export function registerPurchaseRoutes(
   app.post(
     '/internal/simulator/authorizations/:authorizationId/reverse',
     async (request, reply) => {
-      const { authorizationId } = request.params as { authorizationId: string };
+      const { authorizationId } = authorizationIdParams.parse(request.params);
       const body = z.object({ vinkId: z.uuid() }).parse(request.body);
       return handle(reply, 200, async () => {
         const vink = await reverseAuthorizationCommand(contextFor(String(request.id)), {
@@ -157,7 +158,7 @@ export function registerPurchaseRoutes(
   app.post(
     '/internal/simulator/authorizations/:authorizationId/capture',
     async (request, reply) => {
-      const { authorizationId } = request.params as { authorizationId: string };
+      const { authorizationId } = authorizationIdParams.parse(request.params);
       const body = z
         .object({
           vinkId: z.uuid(),

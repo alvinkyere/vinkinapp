@@ -20,9 +20,12 @@ import type {
   ActivityEntry,
   ContributionStatusHistoryRow,
   GuestIdentityRecord,
+  InvitationDeliveryInput,
+  InvitationDeliveryRecord,
   LedgerPostingInput,
   OutboxEventInput,
   UnitOfWork,
+  UserContactInfo,
   VinkReader,
   VinkStateHistoryRow,
   VinkTx,
@@ -41,6 +44,12 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
   readonly recoveryObligations = new Map<string, RecoveryObligation>();
   readonly history: VinkStateHistoryRow[] = [];
   readonly outbox: OutboxEventInput[] = [];
+  /** Slice I4 — a minimal stand-in for the `users` table's contact columns; tests seed it
+   * directly (`store.users.set(userId, {email, phone})`), matching this store's existing
+   * convention (`store.contributions`, `store.ledgerPostings`, etc. are all seeded/read the
+   * same way). */
+  readonly users = new Map<string, UserContactInfo>();
+  readonly invitationDeliveries: InvitationDeliveryRecord[] = [];
 
   async run<T>(fn: (tx: VinkTx) => Promise<T>): Promise<T> {
     return fn(this);
@@ -104,6 +113,26 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
 
   async findGuestInviteIdempotencyKey(vinkId: VinkId, key: string): Promise<boolean> {
     return this.guestInviteIdempotencyKeys.has(`${vinkId}:${key}`);
+  }
+
+  async getUserContactInfo(userId: string): Promise<UserContactInfo | null> {
+    return this.users.get(userId) ?? null;
+  }
+
+  async insertInvitationDelivery(delivery: InvitationDeliveryInput): Promise<void> {
+    this.invitationDeliveries.push({
+      ...delivery,
+      id: `delivery-${this.invitationDeliveries.length + 1}`,
+      attemptedAt: new Date().toISOString(),
+    });
+  }
+
+  async listInvitationDeliveries(
+    participantId: Participant['id'],
+  ): Promise<InvitationDeliveryRecord[]> {
+    return this.invitationDeliveries
+      .filter((row) => row.participantId === participantId)
+      .sort((a, b) => b.attemptedAt.localeCompare(a.attemptedAt));
   }
 
   async findGuestParticipant(

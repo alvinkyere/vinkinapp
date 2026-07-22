@@ -23,6 +23,7 @@ import { registerOpsRoutes } from './modules/ops/routes.ts';
 import { registerAnalyticsRoutes } from './modules/analytics/routes.ts';
 import { InProcessRealtimeHub, type RealtimeHub } from './realtime/hub.ts';
 import type { FinancialProvider } from '../../../packages/payment-provider/src/index.ts';
+import type { DeliveryProvider } from '../../../packages/delivery/src/index.ts';
 
 export interface AppDeps extends HealthChecks {
   env: Env;
@@ -30,6 +31,12 @@ export interface AppDeps extends HealthChecks {
   sql: Sql | null;
   /** Financial provider behind the neutral interface; contribution routes need it. */
   provider?: FinancialProvider;
+  /** Slice I4 (D19/D27) — invitation-delivery provider behind the neutral interface; the
+   * member-only automatic-dispatch path (`addParticipantCommand`/`openVinkCommand`) needs
+   * it. Optional, exactly like `provider` above — most tests never set it, and
+   * `VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED` staying off is what actually keeps
+   * dispatch a no-op even when this IS provided (see `registerVinkRoutes`). */
+  deliveryProvider?: DeliveryProvider;
   /** Test override for the public-surface rate limits. */
   publicRateLimits?: PublicRateLimits;
   /** Shared with the outbox publisher (server.ts) so published events reach live sockets. */
@@ -88,7 +95,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerHealthRoutes(app, { checkDb: deps.checkDb, checkRedis: deps.checkRedis });
   if (deps.sql !== null) {
     registerAuthRoutes(app, deps.env, deps.sql);
-    registerVinkRoutes(app, deps.env, deps.sql);
+    registerVinkRoutes(app, deps.env, deps.sql, deps.deliveryProvider);
     registerSharingRoutes(app, deps.env, deps.sql, deps.publicRateLimits);
     registerAnalyticsRoutes(app, deps.sql);
     if (deps.provider !== undefined) {

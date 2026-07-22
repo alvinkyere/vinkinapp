@@ -130,4 +130,77 @@ describe('auth end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     assert.equal(response.statusCode, 400);
     assert.equal(response.json().error, 'VALIDATION_FAILED');
   });
+
+  it('Slice I4: registration captures phone (users.phone existed since PV1 but was never wired)', async () => {
+    const phoneUsername = `it_phone_${Date.now()}`;
+    const registered = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        username: phoneUsername,
+        displayName: 'Phone User',
+        phone: '+1 555-0100',
+        password: 'integration-password-1',
+      },
+    });
+    assert.equal(registered.statusCode, 201);
+    assert.equal(registered.json().user.phone, '+1 555-0100');
+
+    const dbRow = await db.sql`SELECT phone FROM users WHERE username = ${phoneUsername}`;
+    assert.equal((dbRow[0] as { phone: string }).phone, '+1 555-0100');
+  });
+
+  it('Slice I4: PATCH /api/v1/me lets a signed-in user set/change/clear their contact info', async () => {
+    const patchUsername = `it_patch_${Date.now()}`;
+    const registered = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        username: patchUsername,
+        displayName: 'Patch User',
+        password: 'integration-password-1',
+      },
+    });
+    const { accessToken } = registered.json();
+    assert.equal(registered.json().user.email, null);
+
+    const setEmail = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/me',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { email: 'patch-user@example.com' },
+    });
+    assert.equal(setEmail.statusCode, 200);
+    assert.equal(setEmail.json().user.email, 'patch-user@example.com');
+    // Omitted field (phone) is left unchanged, not wiped to null.
+    assert.equal(setEmail.json().user.phone, null);
+
+    const setPhone = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/me',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { phone: '+1 555-0199' },
+    });
+    assert.equal(setPhone.statusCode, 200);
+    assert.equal(setPhone.json().user.phone, '+1 555-0199');
+    // The earlier email set is still there — this PATCH only touched phone.
+    assert.equal(setPhone.json().user.email, 'patch-user@example.com');
+
+    const clearEmail = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/me',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { email: null },
+    });
+    assert.equal(clearEmail.statusCode, 200);
+    assert.equal(clearEmail.json().user.email, null);
+    assert.equal(clearEmail.json().user.phone, '+1 555-0199');
+
+    const unauthenticated = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/me',
+      payload: { email: 'nope@example.com' },
+    });
+    assert.equal(unauthenticated.statusCode, 401);
+  });
 });

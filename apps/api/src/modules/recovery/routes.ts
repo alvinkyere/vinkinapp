@@ -25,6 +25,7 @@ import type { FinancialProvider } from '../../../../../packages/payment-provider
 import type { Env } from '../../config/env.ts';
 import type { Sql } from '../../db/client.ts';
 import { simulatorRoutesPermitted } from '../../config/simulator-guard.ts';
+import { vinkAndContributionIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
 
 const scenarioSchema = z.enum(['SUCCESS', 'DECLINE']).optional();
@@ -75,7 +76,7 @@ export function registerRecoveryRoutes(
   }
 
   app.post('/internal/simulator/vinks/:vinkId/recovery/start', async (request, reply) => {
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     const body = z.object({ scenario: scenarioSchema }).parse(request.body ?? {});
     return handle(reply, 200, async () => {
       const result = await startRecoveryCommand(recoveryCtx(String(request.id)), {
@@ -92,7 +93,7 @@ export function registerRecoveryRoutes(
   });
 
   app.post('/internal/simulator/vinks/:vinkId/recovery/retry', async (request, reply) => {
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     const body = z.object({ scenario: scenarioSchema }).parse(request.body ?? {});
     return handle(reply, 200, async () => {
       const result = await retryRecoveryCommand(recoveryCtx(String(request.id)), {
@@ -108,7 +109,7 @@ export function registerRecoveryRoutes(
   });
 
   app.post('/internal/simulator/vinks/:vinkId/refund-failed-session', async (request, reply) => {
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     return handle(reply, 200, () =>
       refundFailedSessionCommand(refundCtx(String(request.id)), { vinkId: vinkId as VinkId }),
     );
@@ -117,7 +118,7 @@ export function registerRecoveryRoutes(
   app.post(
     '/internal/simulator/vinks/:vinkId/contributions/:contributionId/retry-refund',
     async (request, reply) => {
-      const params = request.params as { vinkId: string; contributionId: string };
+      const params = vinkAndContributionIdParams.parse(request.params);
       return handle(reply, 200, async () => {
         const contribution = await retryRefundCommand(refundCtx(String(request.id)), {
           vinkId: params.vinkId as VinkId,

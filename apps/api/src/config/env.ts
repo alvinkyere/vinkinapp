@@ -71,6 +71,15 @@ const envSchema = z.object({
    * (apps/api/src/jobs/sweeps.ts). Default (10) matches the previous hardcoded
    * `SWEEP_INTERVAL_MS` — an operational cadence, not product timing. */
   VINK_SWEEP_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
+  /** Slice I4 (D19/D27) — gates automatic invitation delivery (member path only this pass;
+   * see `packages/application/src/delivery.ts`'s own doc comment for why guest dispatch is
+   * separately deferred). Default off. Unlike the other static flags above, this one is
+   * boot-refused outside `development`/`test` (enforced in `loadEnv` below, not just
+   * documented) — no real delivery provider has been selected (§4, external dependency), so
+   * enabling this anywhere real traffic could reach it would either silently no-op (the mock
+   * adapter is the only one that exists) or, worse, look like a real send capability that
+   * isn't there. Manual sharing is always available regardless of this flag. */
+  VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED: z.enum(['0', '1']).default('0'),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -88,6 +97,16 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   if (env.VINKIN_ENV === 'demo' && env.OPERATOR_PASSWORD === DEV_OPERATOR_PASSWORD) {
     throw new Error(
       'OPERATOR_PASSWORD must be explicitly set in demo — the development default is refused',
+    );
+  }
+  if (
+    env.VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED === '1' &&
+    env.VINKIN_ENV !== 'development' &&
+    env.VINKIN_ENV !== 'test'
+  ) {
+    throw new Error(
+      'VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED must stay off outside development/test ' +
+        '— no real delivery provider is selected yet (§4)',
     );
   }
   return env;

@@ -224,6 +224,11 @@ export async function guestJoinVinkCommand(
       accessTokenHash: input.accessTokenHash,
       expiresAt: new Date(now.getTime() + GUEST_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString(),
       createdAt: now.toISOString(),
+      // Slice I4: a self-joined guest already has the link in hand (that's how they got
+      // here) — there is nothing to automatically deliver, unlike an organizer-initiated
+      // named invite (`inviteGuestCommand` below), which can capture a destination.
+      contactDestination: null,
+      contactMethod: null,
     };
     const participant: Participant = {
       id: newParticipantId(),
@@ -261,6 +266,21 @@ export async function guestJoinVinkCommand(
 // mirrors addParticipantCommand's own DRAFT-or-OPEN precondition (commands.ts) rather than
 // guestJoinVinkCommand's public isJoinable check, since the organizer controls timing here,
 // not an anonymous visitor hitting a public link.
+//
+// Slice I4 (D19/D27) — a real architectural finding, not a scope choice: this command
+// deliberately never dispatches an automatic invitation itself, even though it's the exact
+// moment a contact destination becomes available. The raw guest token is minted by the
+// TRANSPORT (`newGuestToken()` in `apps/api/src/modules/vinks/routes.ts`) and only its hash
+// ever reaches this command (D14, hard rule) — the join link a delivery message needs
+// literally cannot be assembled here. Automatic dispatch for a guest invite can only happen
+// in the same transport request that mints the token, while the raw value is still in scope;
+// it can never be deferred to a later moment (e.g. batched at `VINK_OPENED`) the way a
+// member's plain, non-secret invite link safely can (see `openVinkCommand`,
+// `commands.ts`) — there is no way to "resend" a guest invite later without minting a new
+// token, which is out of this slice's scope. This command only captures and stores the
+// contact destination; the transport-layer dispatch call site is deferred (flagged in the
+// I4 milestone report, not silently dropped) because `vinks/routes.ts` was under active,
+// unrelated concurrent edit for this entire pass.
 // ---------------------------------------------------------------------------
 
 export interface InviteGuestInput {
@@ -276,6 +296,12 @@ export interface InviteGuestInput {
    * rather than replayed: the raw guest token/join link from the original attempt is gone by
    * design (D14 — only its hash is ever stored), so there is nothing to hand back. */
   invitationIdempotencyKey?: string;
+  /** Slice I4 (D19/D27) — optional; captured and stored on the guest identity for later
+   * automatic delivery. Deliberately NOT dispatched from inside this command — see the
+   * doc comment above `inviteGuestCommand` for why (D14: the raw join link can only be
+   * assembled where the raw token exists, which is the transport layer, never here). */
+  contactDestination?: string;
+  contactMethod?: 'EMAIL' | 'SMS';
 }
 
 export interface InviteGuestResult {
@@ -319,6 +345,8 @@ export async function inviteGuestCommand(
           now.getTime() + GUEST_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
         ).toISOString(),
         createdAt: now.toISOString(),
+        contactDestination: input.contactDestination ?? null,
+        contactMethod: input.contactMethod ?? null,
       };
       const participant: Participant = {
         id: newParticipantId(),

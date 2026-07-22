@@ -391,10 +391,34 @@ architecture already correctly reflects this. This closes out ENG1's own numbere
 Connecting-hang fix, Slice 2 idempotent creation, Slice 3 setup recovery, Slice 4 retry
 classification, timer semantics, §7 merchant-payment split).
 
-Next: per the owner's original ENG0–ENG15 milestone sequence, **ENG2 — Contract Engineering**
-(typed API contracts, command/query endpoint separation audit, interaction event contracts,
-schema validation, API versioning policy) is next in line — awaiting the owner's direction on
-whether to proceed there now. `PV12` (the actual closed pilot) remains an owner/operational
+**ENG2 Slice A done** (`milestone-reports/ENG2-SLICE-A-BOUNDARY-VALIDATION.md`, owner-approved
+scope: "the 3 concrete gaps"): every one of the 28 blind `request.params as {...}` casts across
+`vinks`/`contributions`/`purchases`/`recovery`/`realtime`/`sharing` routes replaced with real
+Zod validation (`apps/api/src/middleware/params.ts` — `z.uuid()` for every domain id, all
+confirmed `randomUUID()`-backed; a deliberately loose schema for the public join surface's
+`publicCode`, since a strict-format 400 would leak the valid code shape to an anonymous prober
+where today's uniform 404 doesn't). Malformed params now get `400 VALIDATION_FAILED` for real
+HTTP routes (reusing `app.ts`'s existing global `ZodError` handler — no new response-shaping
+code needed) or a dedicated `4400` WebSocket close code for the one route that can't send an
+HTTP body (`GET /api/v1/vinks/:vinkId/live`). `POST /api/v1/vinks/:vinkId/{share-links,qr}` →
+`GET`, matching the handler's own long-standing "this is a query, not a command" comment;
+confirmed zero client impact first (no app in this repo called either route yet). New:
+`docs/architecture/api-versioning-policy.md` — additive-vs-breaking rules for `/api/v1/*`,
+explicit non-versioning of the two internal-only surfaces, a deprecation process sized to
+VinkIn's actual three-first-party-caller reality. New tests for both the HTTP 400 path and the
+WebSocket close-code path; `pnpm typecheck/lint/format:check/guard` clean repo-wide, `apps/api`
+84/84 tests green (including the UX-track's own Slice I4 automatic-invitation-delivery tests,
+which landed mid-milestone in the same route file this slice was editing — merged with no
+conflict, re-verified after). The only failures anywhere in the repo-wide suite are 8
+pre-existing `apps/guest-web` Slice I3/I3A terminal-copy tests from that same concurrent
+session's own just-landed, not-yet-green work — confirmed via `git log` as already-committed,
+untouched by this slice.
+
+Next: ENG2's own remaining scope — typed per-screen API contracts (§1) and interaction event
+contracts (§3) — stays deferred pending alignment with the UX-track's own Button Interaction
+Contracts work (the owner's explicit scoping decision when Slice A was approved). Otherwise,
+per the owner's original ENG0–ENG15 milestone sequence, ENG3+ is next in line — awaiting the
+owner's direction on which one. `PV12` (the actual closed pilot) remains an owner/operational
 decision deferred until ENG0–ENG9 close.
 
 ## Hard rules (from the Spec — never relax to make something pass)

@@ -612,4 +612,46 @@ describe('vink lifecycle end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     });
     assert.equal(missing.statusCode, 404);
   });
+
+  it('ENG2: a malformed path parameter is rejected with 400, not a blind cast', async () => {
+    // Every domain id is a UUID (packages/domain/src/ids.ts); a non-UUID vinkId/participantId
+    // must fail validation at the boundary rather than reach the store as an opaque string.
+    const badVinkId = await app.inject({
+      method: 'GET',
+      url: '/api/v1/vinks/not-a-uuid',
+      headers: authed(tokens.organizer!),
+    });
+    assert.equal(badVinkId.statusCode, 400);
+    assert.equal(badVinkId.json().error, 'VALIDATION_FAILED');
+
+    const badPatch = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/vinks/also-not-a-uuid',
+      headers: authed(tokens.organizer!),
+      payload: {},
+    });
+    assert.equal(badPatch.statusCode, 400);
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: authed(tokens.organizer!),
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 5_000,
+        tipMinor: 0,
+        submissionDeadline: FUTURE,
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const vinkId = created.json().vink.id as string;
+
+    const badParticipantId = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/vinks/${vinkId}/participants/not-a-uuid`,
+      headers: authed(tokens.organizer!),
+    });
+    assert.equal(badParticipantId.statusCode, 400);
+    assert.equal(badParticipantId.json().error, 'VALIDATION_FAILED');
+  });
 });

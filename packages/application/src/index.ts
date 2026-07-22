@@ -8,6 +8,7 @@ export * from './ports.ts';
 export * from './commands.ts';
 export * from './queries.ts';
 export * from './guest.ts';
+export * from './delivery.ts';
 export * from './contributions.ts';
 export * from './purchases.ts';
 export * from './recovery.ts';

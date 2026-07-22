@@ -234,10 +234,42 @@ class PostgresVinkTx implements VinkTx {
   }
 
   async insertGuestIdentity(guest: GuestIdentityRecord): Promise<void> {
-    await this
-      .#sql`INSERT INTO guest_identities (id, display_name, access_token_hash, expires_at, created_at)
-      VALUES (${guest.id}, ${guest.displayName}, ${guest.accessTokenHash}, ${guest.expiresAt},
-              ${guest.createdAt})`;
+    await this.#sql`INSERT INTO guest_identities (
+        id, display_name, access_token_hash, expires_at, created_at,
+        contact_destination, contact_method
+      ) VALUES (
+        ${guest.id}, ${guest.displayName}, ${guest.accessTokenHash}, ${guest.expiresAt},
+        ${guest.createdAt}, ${guest.contactDestination}, ${guest.contactMethod}
+      )`;
+  }
+
+  /** Slice I4 — a member's own `users.email`/`users.phone` (migration 0001), for automatic-
+   * delivery destination resolution. Reads outside the vink-domain tables this store
+   * otherwise touches, same precedent as the existing username lookup in
+   * `apps/api/src/modules/vinks/routes.ts` (also a direct `users` read via the shared `sql`
+   * connection, not routed through a separate port). */
+  async getUserContactInfo(
+    userId: string,
+  ): Promise<{ email: string | null; phone: string | null } | null> {
+    const rows = await this.#sql`SELECT email, phone FROM users WHERE id = ${userId}`;
+    const row = rows[0] as { email: string | null; phone: string | null } | undefined;
+    return row === undefined ? null : { email: row.email, phone: row.phone };
+  }
+
+  async insertInvitationDelivery(delivery: {
+    participantId: Participant['id'];
+    status: 'SENT' | 'FAILED';
+    method: 'EMAIL' | 'SMS';
+    destination: string;
+    providerMessageId?: string;
+    failureReason?: string;
+  }): Promise<void> {
+    await this.#sql`INSERT INTO invitation_deliveries (
+      participant_id, status, method, destination, provider_message_id, failure_reason
+    ) VALUES (
+      ${delivery.participantId}, ${delivery.status}, ${delivery.method}, ${delivery.destination},
+      ${delivery.providerMessageId ?? null}, ${delivery.failureReason ?? null}
+    )`;
   }
 
   async recordGuestInviteIdempotencyKey(
@@ -516,7 +548,8 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
     const rows = await this.#sql`
       SELECT p.*, g.id AS g_id, g.display_name AS g_display_name,
              g.access_token_hash AS g_hash, g.expires_at AS g_expires_at,
-             g.created_at AS g_created_at
+             g.created_at AS g_created_at, g.contact_destination AS g_contact_destination,
+             g.contact_method AS g_contact_method
       FROM guest_identities g
       JOIN participants p ON p.guest_identity_id = g.id
       WHERE g.access_token_hash = ${accessTokenHash} AND g.expires_at > ${now.toISOString()}`;
@@ -530,6 +563,8 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
         accessTokenHash: row.g_hash as string,
         expiresAt: toIso(row.g_expires_at),
         createdAt: toIso(row.g_created_at),
+        contactDestination: (row.g_contact_destination as string | null) ?? null,
+        contactMethod: (row.g_contact_method as GuestIdentityRecord['contactMethod']) ?? null,
       },
     };
   }
@@ -559,6 +594,38 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
     const rows = await this.#sql`SELECT * FROM contributions
       WHERE vink_id = ${vinkId} ORDER BY created_at, id`;
     return rows.map((row) => rowToContribution(row as Row));
+  }
+
+  /** Slice I4 — newest first (organizer-facing "Sent" / "Couldn't send" row status). */
+  async listInvitationDeliveries(participantId: Participant['id']): Promise<
+    Array<{
+      id: string;
+      participantId: Participant['id'];
+      status: 'SENT' | 'FAILED';
+      method: 'EMAIL' | 'SMS';
+      destination: string;
+      providerMessageId?: string;
+      failureReason?: string;
+      attemptedAt: string;
+    }>
+  > {
+    const rows = await this.#sql`SELECT * FROM invitation_deliveries
+      WHERE participant_id = ${participantId} ORDER BY attempted_at DESC`;
+    return rows.map((raw) => {
+      const row = raw as Row;
+      return {
+        id: row.id as string,
+        participantId: row.participant_id as Participant['id'],
+        status: row.status as 'SENT' | 'FAILED',
+        method: row.method as 'EMAIL' | 'SMS',
+        destination: row.destination as string,
+        ...(row.provider_message_id !== null && {
+          providerMessageId: row.provider_message_id as string,
+        }),
+        ...(row.failure_reason !== null && { failureReason: row.failure_reason as string }),
+        attemptedAt: toIso(row.attempted_at),
+      };
+    });
   }
 
   async listActivity(vinkId: VinkId): Promise<ActivityEntry[]> {

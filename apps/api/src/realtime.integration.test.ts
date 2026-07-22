@@ -263,6 +263,11 @@ describe('real-time channel end-to-end (PostgreSQL + WebSocket)', { skip: !RUN }
 
     const unknownVink = await connect(liveUrl('00000000-0000-4000-8000-000000000000'));
     assert.equal((await waitForClose(unknownVink)).code, 4404);
+
+    // ENG2: a WS upgrade can't carry an HTTP 400 body, so a malformed vinkId gets its own
+    // close code instead of throwing (there's no reply to send a 400 through).
+    const malformedVink = await connect(liveUrl('not-a-uuid'));
+    assert.equal((await waitForClose(malformedVink)).code, 4400);
   });
 
   it('a guest (vgt_ token, PV10) gets a guest-scoped snapshot and the same live events as the organizer', async () => {

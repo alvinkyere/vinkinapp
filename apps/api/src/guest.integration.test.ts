@@ -100,9 +100,10 @@ describe('guest join & sharing end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     });
     assert.equal(opened.statusCode, 200);
 
-    // Organizer mints the share link and the QR payload (auth required).
+    // Organizer mints the share link and the QR payload (auth required). ENG2: GET, not
+    // POST — minting the code has no side effect, it's a query over the existing publicCode.
     const link = await app.inject({
-      method: 'POST',
+      method: 'GET',
       url: `/api/v1/vinks/${vinkId}/share-links`,
       headers: { authorization: `Bearer ${organizerToken}` },
     });
@@ -110,14 +111,14 @@ describe('guest join & sharing end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     const publicCode = link.json().publicCode as string;
     assert.match(link.json().url, new RegExp(`/join/${publicCode}$`));
     const qr = await app.inject({
-      method: 'POST',
+      method: 'GET',
       url: `/api/v1/vinks/${vinkId}/qr`,
       headers: { authorization: `Bearer ${organizerToken}` },
     });
     assert.equal(qr.json().format, 'vinkin.join.v1');
     assert.equal(qr.json().publicCode, publicCode);
     const unauthedShare = await app.inject({
-      method: 'POST',
+      method: 'GET',
       url: `/api/v1/vinks/${vinkId}/share-links`,
     });
     assert.equal(unauthedShare.statusCode, 401);

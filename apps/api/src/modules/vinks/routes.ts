@@ -22,8 +22,9 @@ import {
   openVinkCommand,
   removeParticipantCommand,
   setSplitCommand,
-  type CommandContext,
+  type DeliveryCommandContext,
 } from '../../../../../packages/application/src/index.ts';
+import type { DeliveryProvider } from '../../../../../packages/delivery/src/index.ts';
 import { newGuestToken } from '../../auth/guest-tokens.ts';
 import {
   DomainError,
@@ -35,6 +36,7 @@ import {
 import type { Env } from '../../config/env.ts';
 import type { Sql } from '../../db/client.ts';
 import { requireUser } from '../../auth/http.ts';
+import { vinkAndParticipantIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from './store.ts';
 
 const PURCHASE_CATEGORIES = [
@@ -135,10 +137,15 @@ function errorStatus(error: unknown): { status: number; body: Record<string, unk
   return null;
 }
 
-export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): void {
+export function registerVinkRoutes(
+  app: FastifyInstance,
+  env: Env,
+  sql: Sql,
+  deliveryProvider?: DeliveryProvider,
+): void {
   const store = new PostgresVinkStore(sql);
 
-  function contextFor(request: FastifyRequest, actorUserId: string): CommandContext {
+  function contextFor(request: FastifyRequest, actorUserId: string): DeliveryCommandContext {
     return {
       uow: store,
       clock: { now: () => new Date() },
@@ -148,6 +155,16 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
         openDurationSeconds: env.VINK_OPEN_DURATION_SECONDS,
         processingGraceSeconds: env.VINK_PROCESSING_GRACE_SECONDS,
       },
+      // Slice I4 — member-only automatic dispatch (see packages/application/src/delivery.ts
+      // for why guest dispatch isn't wired here). `enabled` is the actual gate; a provider
+      // being present doesn't matter if the flag is off (boot-refused outside dev/test
+      // anyway, apps/api/src/config/env.ts).
+      ...(deliveryProvider !== undefined && {
+        delivery: {
+          provider: deliveryProvider,
+          enabled: env.VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED === '1',
+        },
+      }),
     };
   }
 
@@ -199,7 +216,7 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
   app.get('/api/v1/vinks/:vinkId', async (request, reply) => {
     const claims = await requireUser(request, reply, env);
     if (claims === null) return;
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     return handle(reply, 200, () => getVinkSnapshot(store, vinkId as VinkId, claims.userId));
   });
 
@@ -215,7 +232,7 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
     if (env.VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL !== '1') {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
     }
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     return handle(reply, 200, () =>
       getParticipantVinkView(store, vinkId as VinkId, claims.userId, new Date()),
     );
@@ -224,7 +241,7 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
   app.patch('/api/v1/vinks/:vinkId', async (request, reply) => {
     const claims = await requireUser(request, reply, env);
     if (claims === null) return;
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     const body = configureSchema.parse(request.body);
     return handle(reply, 200, () =>
       configureVinkCommand(contextFor(request, claims.userId), {
@@ -242,7 +259,7 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
     app.post(`/api/v1/vinks/:vinkId/${path}`, async (request, reply) => {
       const claims = await requireUser(request, reply, env);
       if (claims === null) return;
-      const { vinkId } = request.params as { vinkId: string };
+      const { vinkId } = vinkIdParams.parse(request.params);
       const body = lifecycleSchema.parse(request.body ?? {});
       return handle(reply, 200, () =>
         command(contextFor(request, claims.userId), { ...body, vinkId: vinkId as VinkId }),
@@ -253,7 +270,7 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
   app.post('/api/v1/vinks/:vinkId/participants', async (request, reply) => {
     const claims = await requireUser(request, reply, env);
     if (claims === null) return;
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     const body = addParticipantSchema.parse(request.body);
     const users = await sql`SELECT id, display_name FROM users
       WHERE username = ${body.username} AND status = 'ACTIVE'`;
@@ -279,7 +296,7 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
   app.post('/api/v1/vinks/:vinkId/guests', async (request, reply) => {
     const claims = await requireUser(request, reply, env);
     if (claims === null) return;
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     const body = inviteGuestSchema.parse(request.body);
     const { token, tokenHash } = newGuestToken();
     return handle(reply, 201, async () => {
@@ -308,7 +325,7 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
   app.delete('/api/v1/vinks/:vinkId/participants/:participantId', async (request, reply) => {
     const claims = await requireUser(request, reply, env);
     if (claims === null) return;
-    const params = request.params as { vinkId: string; participantId: string };
+    const params = vinkAndParticipantIdParams.parse(request.params);
     return handle(reply, 200, () =>
       removeParticipantCommand(contextFor(request, claims.userId), {
         vinkId: params.vinkId as VinkId,
@@ -320,7 +337,7 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
   app.put('/api/v1/vinks/:vinkId/split', async (request, reply) => {
     const claims = await requireUser(request, reply, env);
     if (claims === null) return;
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     const body = splitSchema.parse(request.body);
     return handle(reply, 200, () =>
       setSplitCommand(contextFor(request, claims.userId), {
@@ -350,7 +367,7 @@ export function registerVinkRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
   app.get('/api/v1/vinks/:vinkId/activity', async (request, reply) => {
     const claims = await requireUser(request, reply, env);
     if (claims === null) return;
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     return handle(reply, 200, () => getVinkActivity(store, vinkId as VinkId, claims.userId));
   });
 }

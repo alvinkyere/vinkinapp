@@ -1,0 +1,20 @@
+{
+  "name": "@vinkin/delivery",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Provider-neutral invitation-delivery interface (Slice I4, D19/D27) + MockDeliveryProvider",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}

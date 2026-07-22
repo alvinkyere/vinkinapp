@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Sql } from '../../db/client.ts';
 import type { Env } from '../../config/env.ts';
+import { requireUser } from '../../auth/http.ts';
 import { signAccessToken, verifyAccessToken } from '../../auth/tokens.ts';
 import {
   AuthError,
@@ -15,7 +16,18 @@ import {
   refreshSession,
   registerUser,
   revokeSession,
+  updateContactInfo,
 } from './service.ts';
+
+// Slice I4 (D19/D27): a US-only, digits-and-punctuation-tolerant phone check — deliberately
+// loose (no carrier/format validation, that's a provider/legal-dependent concern, §27/§29 of
+// the copy system, out of this slice's scope). Phase 6 §20's own field-level error copy
+// ("That doesn't look like a valid phone number") is the route's job to surface, not this
+// schema's.
+const phoneSchema = z
+  .string()
+  .trim()
+  .regex(/^\+?[0-9()\-.\s]{7,20}$/);
 
 const registerSchema = z.object({
   username: z
@@ -25,7 +37,15 @@ const registerSchema = z.object({
     .regex(/^[a-z0-9_]+$/i),
   displayName: z.string().min(1).max(80),
   email: z.email().optional(),
+  phone: phoneSchema.optional(),
   password: z.string().min(10).max(200),
+});
+
+// Slice I4: every field optional/nullable — Profile only ever changes what the user actually
+// edits (Register already captured whatever was provided at signup).
+const updateContactSchema = z.object({
+  email: z.union([z.email(), z.null()]).optional(),
+  phone: z.union([phoneSchema, z.null()]).optional(),
 });
 
 const loginSchema = z.object({
@@ -100,6 +120,16 @@ export function registerAuthRoutes(app: FastifyInstance, env: Env, sql: Sql): vo
     if (user === null || user.status !== 'ACTIVE') {
       return reply.code(401).send({ error: 'UNAUTHENTICATED' });
     }
+    return reply.send({ user });
+  });
+
+  // Slice I4 (D19/D27) — Profile's own contact-editing surface. No PATCH /profile route
+  // existed anywhere before this; verified by reading this module in full first.
+  app.patch('/api/v1/me', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    const body = updateContactSchema.parse(request.body);
+    const user = await updateContactInfo(sql, claims.userId, body);
     return reply.send({ user });
   });
 }

@@ -19,6 +19,7 @@ import type { Sql } from '../../db/client.ts';
 import { requireUser } from '../../auth/http.ts';
 import { GUEST_TOKEN_PREFIX, hashGuestToken, newGuestToken } from '../../auth/guest-tokens.ts';
 import { makeRateLimiter, type RateLimitConfig } from '../../middleware/rate-limit.ts';
+import { publicCodeParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
 
 export interface PublicRateLimits {
@@ -66,11 +67,14 @@ export function registerSharingRoutes(
 
   // --- Organizer sharing surface (authenticated) ---------------------------
 
+  // ENG2: these were POST — the handler's own comment already said "this is a query, not a
+  // command"; no client calls either route yet, so correcting the verb to GET has zero
+  // client impact.
   for (const path of ['share-links', 'qr'] as const) {
-    app.post(`/api/v1/vinks/:vinkId/${path}`, async (request, reply) => {
+    app.get(`/api/v1/vinks/:vinkId/${path}`, async (request, reply) => {
       const claims = await requireUser(request, reply, env);
       if (claims === null) return;
-      const { vinkId } = request.params as { vinkId: string };
+      const { vinkId } = vinkIdParams.parse(request.params);
       try {
         // Snapshot re-checks ownership; sharing needs no state change (the code is minted
         // at creation), so this is a query, not a command.
@@ -100,7 +104,7 @@ export function registerSharingRoutes(
   // --- Public surface (anonymous, rate-limited) ----------------------------
 
   app.get('/api/v1/join/:publicCode', { preHandler: viewLimiter }, async (request, reply) => {
-    const { publicCode } = request.params as { publicCode: string };
+    const { publicCode } = publicCodeParams.parse(request.params);
     try {
       // D23 (Slice I1) — the DRAFT-gate is opt-in behind the flag; additive fields
       // (contributionProgress/vinkOutcome) are always present regardless.
@@ -120,7 +124,7 @@ export function registerSharingRoutes(
     '/api/v1/public/vinks/:publicCode/participants',
     { preHandler: joinLimiter },
     async (request, reply) => {
-      const { publicCode } = request.params as { publicCode: string };
+      const { publicCode } = publicCodeParams.parse(request.params);
       const body = joinSchema.parse(request.body);
       const { token, tokenHash } = newGuestToken();
       try {

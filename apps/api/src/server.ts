@@ -7,6 +7,7 @@ import { startSweepScheduler } from './jobs/sweeps.ts';
 import { startOutboxPublisher } from './realtime/outbox-publisher.ts';
 import { RedisRealtimeHub } from './realtime/redis-hub.ts';
 import { MockFinancialProvider } from '../../../packages/payment-provider/src/index.ts';
+import { MockDeliveryProvider } from '../../../packages/delivery/src/index.ts';
 
 const env = loadEnv();
 const stopOtel = await startOtel(env);
@@ -14,6 +15,10 @@ const sql = createDb(env);
 const redis = createRedis(env);
 // The only provider until the M0 gate admits a real adapter (master plan §28).
 const provider = new MockFinancialProvider();
+// Slice I4 — the only delivery provider until a real one is selected (§4); threaded through
+// regardless of VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED — that flag (env-boot-refused
+// outside development/test) is the actual gate, not whether this exists.
+const deliveryProvider = new MockDeliveryProvider();
 // Redis-backed (D16): shared with the outbox publisher below, and correct across multiple
 // API instances. A dedicated connection for SUBSCRIBE — ioredis locks a connection into
 // subscriber-only mode the moment .subscribe() is first called.
@@ -25,6 +30,7 @@ const app = await buildApp({
   env,
   sql,
   provider,
+  deliveryProvider,
   hub,
   checkDb: async () => {
     await sql`SELECT 1`;

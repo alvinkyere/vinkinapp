@@ -30,6 +30,11 @@ import type { Env } from '../../config/env.ts';
 import type { Sql } from '../../db/client.ts';
 import { simulatorRoutesPermitted } from '../../config/simulator-guard.ts';
 import { requireUser } from '../../auth/http.ts';
+import {
+  contributionIdParams,
+  vinkAndContributionIdParams,
+  vinkIdParams,
+} from '../../middleware/params.ts';
 import { GUEST_TOKEN_PREFIX, hashGuestToken } from '../../auth/guest-tokens.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
 
@@ -118,7 +123,7 @@ export function registerContributionRoutes(
   app.post('/api/v1/vinks/:vinkId/contributions/authorize', async (request, reply) => {
     const claims = await requireUser(request, reply, env);
     if (claims === null) return;
-    const { vinkId } = request.params as { vinkId: string };
+    const { vinkId } = vinkIdParams.parse(request.params);
     const body = authorizeSchema.parse(request.body ?? {});
     if (!guardScenario(body.scenario, reply)) return;
     const requester: ContributionRequester = { kind: 'user', userId: claims.userId };
@@ -170,7 +175,7 @@ export function registerContributionRoutes(
     async (request, reply) => {
       const claims = await requireUser(request, reply, env);
       if (claims === null) return;
-      const params = request.params as { vinkId: string; contributionId: string };
+      const params = vinkAndContributionIdParams.parse(request.params);
       const body = resolveSchema.parse(request.body ?? {});
       if (!guardScenario(body.scenario, reply)) return;
       return handle(reply, async () => {
@@ -190,7 +195,7 @@ export function registerContributionRoutes(
     // Runs the deadline jobs for one vink. `nowOverride` exists so tests can cross the
     // processing-grace boundary without waiting a minute; production never registers this.
     app.post('/internal/simulator/vinks/:vinkId/run-deadlines', async (request, reply) => {
-      const { vinkId } = request.params as { vinkId: string };
+      const { vinkId } = vinkIdParams.parse(request.params);
       const body = z.object({ nowOverride: z.iso.datetime().optional() }).parse(request.body ?? {});
       const now = body.nowOverride !== undefined ? new Date(body.nowOverride) : new Date();
       return handle(reply, async () => {
@@ -211,7 +216,7 @@ export function registerContributionRoutes(
       app.post(
         '/internal/simulator/contributions/:contributionId/resolve-pending',
         async (request, reply) => {
-          const { contributionId } = request.params as { contributionId: string };
+          const { contributionId } = contributionIdParams.parse(request.params);
           const body = z
             .object({ vinkId: z.uuid(), outcome: z.enum(['AUTHORIZED', 'DECLINED']) })
             .parse(request.body);
