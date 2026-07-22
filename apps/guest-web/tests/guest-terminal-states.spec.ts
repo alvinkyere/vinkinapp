@@ -110,17 +110,14 @@ async function assertAccessibleHeadingOrder(page: Page, terminalMessage: string)
   await expect(h1).toHaveText(/^Hi, /);
   const message = page.getByText(terminalMessage);
   await expect(message).toBeVisible();
-  const order = await h1.evaluate(
-    (h1Node, text) => {
-      const messageNode = Array.from(document.querySelectorAll('body *')).find(
-        (el) => el.textContent?.trim() === text && el.children.length === 0,
-      );
-      if (messageNode === undefined) return null;
-      // DOCUMENT_POSITION_FOLLOWING (4): h1 precedes the message node in the DOM.
-      return Boolean(h1Node.compareDocumentPosition(messageNode) & Node.DOCUMENT_POSITION_FOLLOWING);
-    },
-    terminalMessage,
-  );
+  const order = await h1.evaluate((h1Node, text) => {
+    const messageNode = Array.from(document.querySelectorAll('body *')).find(
+      (el) => el.textContent?.trim() === text && el.children.length === 0,
+    );
+    if (messageNode === undefined) return null;
+    // DOCUMENT_POSITION_FOLLOWING (4): h1 precedes the message node in the DOM.
+    return Boolean(h1Node.compareDocumentPosition(messageNode) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }, terminalMessage);
   expect(order).toBe(true);
 }
 
@@ -210,7 +207,10 @@ test.describe('Slice I3A — guest terminal-state closure (deterministic, fixtur
   test('recovery_required: support link appears once a real support channel IS configured', async ({
     page,
   }) => {
-    test.skip(!SUPPORT_URL_BAKED_IN, 'run against a build with NEXT_PUBLIC_SUPPORT_CONTACT_URL set');
+    test.skip(
+      !SUPPORT_URL_BAKED_IN,
+      'run against a build with NEXT_PUBLIC_SUPPORT_CONTACT_URL set',
+    );
     await gotoWithFixture(
       page,
       baseView({

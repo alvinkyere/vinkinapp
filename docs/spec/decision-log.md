@@ -8,6 +8,43 @@ contract.
 
 ---
 
+## D37 — `recovery_required`'s canonical sentence is shown to the guest, not organizer-only
+
+- **Decision:** the sentence "We're resolving your payment. You don't need to pay again." is
+  now the guest-facing composition for `recovery_required`, correcting
+  `docs/design/phase-6-copy-system.md` §16's "Recovery required" row and §18's own table,
+  both of which originally annotated this sentence as "(organizer-only, §11; never shown as a
+  participant/guest error)." This also corrects Slice I3's own interpretation of §18's
+  continuity rule, which had `terminalOutcomeSentence('recovery_required', …)` return `null`
+  on the theory that a guest's own status should never be re-described once confirmed. The
+  composition still honors the *spirit* of the continuity rule everywhere else: no
+  contribution action, no retry, no promotional content, and no raw
+  provider/recovery/ledger/state-machine terminology (specifically: the `StatusBadge`'s own
+  `RECOVERY_REQUIRED`/`RECOVERY_PENDING` label, "Resolving a shortfall," is suppressed for
+  this composition — that phrase describes the organizer's situation, not the guest's, and
+  is withheld even though the rest of the screen now speaks about resolution).
+- **Date:** 2026-07-21
+- **Status:** ACCEPTED (owner-directed correction, Slice I3A)
+- **Reason:** a guest whose own payment shows no status at all during an organizer-side
+  recovery event is a worse experience than a guest told, plainly and without alarm, that
+  something is being resolved and they don't owe anything further — silence isn't actually
+  more reassuring than a calm, accurate statement.
+- **Alternatives considered:** leave `recovery_required` silent (guest sees whatever the
+  vink's raw state produces elsewhere) — rejected, this is the status quo being corrected;
+  invent a guest-specific paraphrase distinct from the organizer's own sentence — rejected,
+  the owner's instruction supplied the exact canonical text verbatim, and a second, subtly
+  different sentence for the same fact risks the two drifting apart later.
+- **Affected modules:** `packages/application/src/guest.ts`'s own doc comments describing
+  the continuity rule are unaffected (backend fields — `contributionStatus`,
+  `vinkOutcome` — are unchanged; this is a client copy/composition decision only, no API
+  change); `apps/guest-web/lib/guest-copy.ts` (`terminalOutcomeSentence`, new
+  `guestTerminalSentence`), `apps/guest-web/features/join/SessionView.tsx`;
+  `docs/design/phase-6-copy-system.md` §16, §18 amended in place.
+- **Revisit trigger:** none anticipated — this is the copy layer's final word on
+  `recovery_required` pending a future product decision to change the sentence itself.
+
+---
+
 ## D36 — Contrast approval is semantic-role-specific and tool-verified
 
 - **Decision:** no color pairing is "universally accessible" because one usage of it passes
