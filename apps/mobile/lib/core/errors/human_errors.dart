@@ -22,6 +22,8 @@ String humanErrorMessage(ApiException error) {
     'RATE_LIMITED' => "That's a lot of tries — wait a moment and try again.",
     'GUEST_UNAUTHENTICATED' => "Your session expired. Open the link again to continue.",
     'INVALID_AMOUNT' => 'Enter an amount greater than zero.',
+    'APP_VERSION_UNSUPPORTED' =>
+      'This version of VinkIn is no longer supported. Please update the app.',
     _ => "Something went wrong. Nothing was charged — try again.",
   };
 }

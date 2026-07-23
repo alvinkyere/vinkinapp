@@ -54,7 +54,7 @@ already-broken UI code.
 | D24 `contributionProgress` | D24 | **Backend shipped (I1, 2026-07-20)** — `VinkSnapshot.contributionProgress` (unconditional/additive) and the same shape on the guest views; clients still read `fundedAmountMinor` (I7/I8's job) | `packages/application/src/queries.ts` (`computeContributionProgress`, exported), `guest.ts` | Shipped | Consume, replace linear bar — I7 | Consume, replace bar — I8 | Contract tests across split/state combinations: `queries.test.ts` (8/8), `guest-projections.test.ts` (§12) | Low — additive, old field untouched during rollout | I1 done, I7/I8 pending |
 | Guest viewer-specific `contributionStatus` | D24 | **Shipped end-to-end (I1 + I3)** — `SessionView.tsx` now gates the "Approve" action on `participant.contributionStatus` (server truth) instead of local component state, closing P0-2's reload-reoffer defect. | `packages/application/src/guest.ts`, `apps/guest-web/features/join/SessionView.tsx`, `use-guest-realtime.ts` (new `refetch`), `lib/guest-copy.ts` (`contributionStatusWord`/`contributionStatusSentence`, Phase 6 §10, exhaustive) | Shipped | n/a | Shipped | `guest-projections.test.ts`; `tests/guest-copy.spec.ts` (16/16 exhaustive copy); Playwright `e9.spec.ts` "I3 reload-safety" (real reload, real browser, proves the actual regression fix) | High priority (safety-critical: D25's never-re-offer guarantee) | I1 + I3 done |
 | D25 differentiated guest terminal outcomes | D25 | **Shipped end-to-end, all six outcomes (I1 + I3 + I3A, 2026-07-21)** — the 8-value `GuestVinkOutcome`/`GuestContributionStatus` enums drive `SessionViewV2`'s composition via the new `guestTerminalSentence` (prioritizes the guest's own `contributionStatus` over the vink-level `vinkOutcome` for `return_pending`/`returned`/`recovery_required` — a real correctness gap I3A found and fixed: a guest whose captured contribution is being refunded typically sits on a vink whose own `vinkOutcome` reads `expired`, and the vink-level sentence alone — "You weren't charged." — would be factually wrong for them). `recovery_required` now shows the canonical sentence to the guest too (**D37** corrects §16/§18's original organizer-only annotation and I3's own prior "stays null" interpretation), with its own stricter treatment: no `StatusBadge` (its raw-state label "Resolving a shortfall" is organizer-facing recovery language), no `SignupConversion` (extended to `return_pending`/`returned` too — none of the three are a "done, go tell your friends" moment), and a conditionally-rendered "Contact support" link gated on a real `NEXT_PUBLIC_SUPPORT_CONTACT_URL` being configured (unset by default — no invented destination, Phase 6 §21's own rule). | `packages/application/src/guest.ts`, `apps/guest-web/lib/guest-copy.ts` (`guestTerminalSentence`), `apps/guest-web/lib/config.ts` (`SUPPORT_CONTACT_URL`), `features/join/SessionView.tsx` | Shipped | n/a | Shipped | `guest-projections.test.ts`; `tests/guest-copy.spec.ts` exhaustive (all 8 outcomes × all 8 statuses + `guestTerminalSentence`'s priority logic); Playwright: `e9.spec.ts` proves `completed`/`cancelled`/`expired` live against a real backend; new `tests/guest-terminal-states.spec.ts` proves `return_pending`/`returned`/`recovery_required` deterministically via fixture interception (real browser, real DOM, no real backend needed for these three, per I3A's own explicit instruction not to build new financial workflows to manufacture them) — copy exactness, absence of contribution controls, absence of promotional content, absence of raw terminology, and accessible heading/reading order all asserted per state; plus the support-link on/off pair (2 builds) | High priority — trust-critical | I1 + I3 + I3A done — all six D25 outcomes now verified, five of six through some form of real-browser Playwright proof |
-| Participant-inclusive Home retrieval | Phase 3 §1 | **Shipped end-to-end (I2A+I2B, 2026-07-21)** — `listMyVinksWithRole` (I2A) backs a flag-gated `GET /api/v1/vinks` (`VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL`) returning the organizer∪participant union with an additive per-entry `role`; Home's `myVinksProvider`/`activeVinksProvider` consume it, routing a participant-role card to a new customer-safe `GET /api/v1/vinks/:vinkId/participant-view` (new `getParticipantVinkView`, guest-view-shaped, own-contribution-only) instead of the organizer-only snapshot route, which would 403 for a mere participant. RESTRICTED is deliberately not filtered out of Home's Active Vinks list for a participant-role entry (unlike for the organizer) so it stays reachable, per this slice's own explicit requirement. **Known gap, flagged not silently assumed**: the participant lobby view is HTTP-only, no realtime channel — `GET /api/v1/vinks/:vinkId/live` also resolves non-guest tokens via the organizer-only `getVinkSnapshot` (`apps/api/src/modules/realtime/routes.ts`), so it would 403 for a participant exactly like the REST route did before this slice; wiring participant realtime is out of I2B's scope. | `packages/application/src/guest.ts` (`getParticipantVinkView`), `apps/api/src/config/env.ts`, `apps/api/src/modules/vinks/routes.ts`, `apps/mobile/lib/core/models/vink.dart` (`role`, `ParticipantVinkView`), `apps/mobile/lib/features/home/home_providers.dart`, `home_screen.dart`, `apps/mobile/lib/app/router.dart`, `apps/mobile/lib/features/vink_lobby/vink_lobby_screen.dart` (`_ParticipantLobbyBody`) | Shipped | Shipped | n/a | Contract: `participant-view.test.ts` (6/6); real-Postgres transport contract: `participant-inclusive-transport.integration.test.ts` (10/10, incl. the named E2E regression); Flutter: `vink_role_test.dart`, `home_screen_test.dart`, `activity_screen_test.dart` (10/10) | Low — additive, both flag-off paths byte-identical to pre-I2B | I2 done |
+| Participant-inclusive Home retrieval | Phase 3 §1 | **Shipped end-to-end (I2A+I2B, 2026-07-21)** — `listMyVinksWithRole` (I2A) backs a flag-gated `GET /api/v1/vinks` (`VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL`) returning the organizer∪participant union with an additive per-entry `role`; Home's `myVinksProvider`/`activeVinksProvider` consume it, routing a participant-role card to a new customer-safe `GET /api/v1/vinks/:vinkId/participant-view` (new `getParticipantVinkView`, guest-view-shaped, own-contribution-only) instead of the organizer-only snapshot route, which would 403 for a mere participant. RESTRICTED is deliberately not filtered out of Home's Active Vinks list for a participant-role entry (unlike for the organizer) so it stays reachable, per this slice's own explicit requirement. **Known gap, closed by Slice I2C (D41, 2026-07-23)**: the participant lobby view was HTTP-only, no realtime channel — `GET /api/v1/vinks/:vinkId/live` resolved non-guest tokens only via the organizer-only `getVinkSnapshot` (`apps/api/src/modules/realtime/routes.ts`), so it 403'd a participant exactly like the REST route did before I2B. I2C added a `getParticipantVinkView` fallback to that same route (same flag gate) and wired the Flutter Lobby screen's participant branch to actually use it — see `milestone-reports/I2C.md`. | `packages/application/src/guest.ts` (`getParticipantVinkView`), `apps/api/src/config/env.ts`, `apps/api/src/modules/vinks/routes.ts`, `apps/mobile/lib/core/models/vink.dart` (`role`, `ParticipantVinkView`), `apps/mobile/lib/features/home/home_providers.dart`, `home_screen.dart`, `apps/mobile/lib/app/router.dart`, `apps/mobile/lib/features/vink_lobby/vink_lobby_screen.dart` (`_ParticipantLobbyBody`) | Shipped | Shipped | n/a | Contract: `participant-view.test.ts` (6/6); real-Postgres transport contract: `participant-inclusive-transport.integration.test.ts` (10/10, incl. the named E2E regression); Flutter: `vink_role_test.dart`, `home_screen_test.dart`, `activity_screen_test.dart` (10/10) | Low — additive, both flag-off paths byte-identical to pre-I2B | I2 done |
 | Participant-inclusive Activity retrieval | Phase 3 §4 | **Partially shipped (I2B, 2026-07-21)** — Activity's underlying vink list is participant-inclusive same as Home's, and the screen renders without regression under the new response shape (`activity_screen_test.dart`). **Known gap, flagged**: `recentActivityProvider`'s per-vink `GET /api/v1/vinks/:vinkId/activity` fetch (`getVinkActivity`) is organizer-only in the domain (`loadOwnedVinkForRead`) — a participant-role vink's own events don't appear in "Recent activity" yet; building a customer-safe activity feed for a mere participant is a genuinely new read surface (filtering which events are safe to show a non-organizer), judged out of I2B's "smallest client changes" scope. | Same as Home row above, plus `apps/mobile/lib/features/activity/activity_providers.dart` (unchanged — the gap is exactly that it's unchanged) | Not built (organizer-only) | Screen renders without crashing; feed content still organizer-only | n/a | `activity_screen_test.dart` | Low | Vink list union done; per-participant activity feed still open — candidate for I3/I6 |
 | D26 in-place reauthentication | D26 | Not built — `isAuthError` defined, unconsumed | `apps/mobile/lib/core/networking/api_client.dart`, `auth_controller.dart`, Create/Lobby state preservation | n/a (client-only) | New global listener + overlay + state preservation | n/a (Guest Web has its own separate token-expiry gap, tracked in I3) | Widget tests: no action replay, state preserved | Medium — touches app-wide session handling, needs security review | I9 |
 | D30 two-screen Create flow | D30 | Not built — five-step wizard today | `apps/mobile/lib/features/create_vink/*` | n/a | Full screen restructure | n/a | Widget tests: idempotent Open Vink, split validation retained | Medium — user-facing flow restructure of a well-tested screen | I5 |
@@ -440,6 +440,17 @@ independently-testable unit of the real dependency graph.
 - **Work explicitly excluded:** **no invitation inbox** (explicit instruction) — this slice
   is a retrieval-query change, not a new notification surface.
 
+**Implementation note (Slice I2C, D41, 2026-07-23):** I2A/I2B (2026-07-21) shipped
+participant-inclusive Home/Activity retrieval but explicitly flagged the realtime `/live`
+channel as out of scope — a participant's own Lobby view was HTTP-only, no live updates. I2C
+closes that specific gap: the WS route now falls back to `getParticipantVinkView` for a
+non-organizer JWT (flag-gated identically to the REST route it mirrors), and the Flutter Lobby
+screen's participant branch now opens the same `RealtimeClient` connection the organizer branch
+already used, updating live on any domain event instead of only on next manual navigation. The
+Activity-feed gap noted in the traceability-matrix row above this note remains open and
+unaffected — out of scope for I2C, still a candidate for I3/I6. Full details:
+`docs/architecture/milestone-reports/I2C.md`.
+
 ### I3 — Guest Web correctness before visual redesign
 
 - **User value:** a guest can trust what the screen tells them about their own money, every
@@ -555,6 +566,21 @@ independently-testable unit of the real dependency graph.
 - **Work explicitly excluded:** carrier/consent/regulatory copy (external, §4); contacts
   sync (explicitly excluded); any delivery-guarantee claim in copy or behavior.
 
+**Implementation note (Slice I4B, D38, 2026-07-22):** I4 itself shipped the member-only half
+of this slice (contact capture, the delivery-provider abstraction, `VINK_OPENED`-triggered
+dispatch for members) and explicitly deferred guest dispatch — D14 (the raw guest token never
+reaches `packages/application`) meant the token minted at invite time could never be recovered
+later to build a delivery message. I4B closes that gap by deferring the mint itself to dispatch
+time (see D38) rather than working around D14: `deliveryMode: 'SMS' | 'EMAIL'` guests store no
+token until a transport request can immediately use and discard one; `deliveryMode: 'MANUAL'`
+is unchanged from I4. This slice's own `deliveryChoice` field is now real (`inviteGuestSchema`'s
+`deliveryMode: 'sms' | 'email' | 'manual'`, `apps/api/src/modules/vinks/routes.ts`), and a
+`POST /vinks/:vinkId/participants/:participantId/resend` endpoint (not originally scoped here)
+exists for SMS/EMAIL guests, cooldown-throttled via the new `GUEST_RESEND_COOLDOWN_SECONDS`
+env var. `apps/mobile`'s own delivery-choice UI (Add-Participant sheet, Phase 4 §5b/Phase 5
+§8) remains unbuilt — the brief explicitly scoped I4B to the application/transport contract,
+deferring client UI to I5+.
+
 ### I5 — Canonical Create flow
 
 - **User value:** creating a Vink takes two screens and a confirmation, not five pages.
@@ -611,6 +637,22 @@ independently-testable unit of the real dependency graph.
 - **Dependencies:** I4 (soft — for delivery-choice integration only).
 - **Work explicitly excluded:** deleting the five-step wizard's code (a later cleanup, not
   this slice); any change to split math, category policy, or idempotency semantics.
+
+**Implementation note (Slice I5B, D39/D40, 2026-07-22):** I5 itself shipped the two-screen
+navigation, delivery-mode capture, and confirmation sheet, but left two real gaps: the domain
+had no freeform Vink purpose/name field at all (the same gap PV13 and ENG2 had already
+flagged, unresolved until now), and the collapsed two-screen flow — with no standalone Review
+page — gave the organizer no way to correct a mistyped guest destination or an accidentally-
+added person short of abandoning the draft. I5B closes both, owner-scoped: D39 adds a nullable
+`purpose` column (migration 0013), optional at the API layer (the five-step wizard is
+unaffected) but required by the canonical screen's own client-side validation, visible on the
+same Purpose+Total screen alongside category and total. D40 adds draft-only participant
+correction — guest display name/destination/delivery-mode editing via a new `PATCH
+.../participants/:id/guest` route, and removal via the existing (unmodified)
+`removeParticipantCommand`/`DELETE` route — with Equal recalculating live and Custom requiring
+re-reconciliation after any change, never auto-rebalanced. No participant mutation is exposed
+once the Vink leaves `DRAFT`, matching this slice's own explicit scope boundary. Full details:
+`docs/architecture/milestone-reports/I5B.md`.
 
 ### I6 — Home, Activity, and Vink Details
 

@@ -20,18 +20,45 @@ import type {
 } from '../../domain/src/index.ts';
 import type { LedgerEntryInput } from '../../ledger/src/index.ts';
 
-/** Guest identity record (identity boundary, Plan §6.1) — token stored hashed, never raw. */
+/** Slice I4B (D38) — the organizer's explicit delivery choice for a named guest invite.
+ * Never inferred (e.g. from provider availability) — `MANUAL` is a deliberate opt-out, not a
+ * fallback. `guestJoinVinkCommand`'s anonymous self-join always stores `MANUAL`: a guest who
+ * already has the link they used to join has nothing left to automatically deliver. */
+export type GuestDeliveryMode = 'SMS' | 'EMAIL' | 'MANUAL';
+
+/** Guest identity record (identity boundary, Plan §6.1) — token stored hashed, never raw.
+ * Slice I4B (D38): `accessTokenHash`/`expiresAt` are null until a token actually exists —
+ * true for the lifetime of an SMS/EMAIL-mode guest between invite and dispatch (D14 forbids
+ * minting the raw token before the transport request that can immediately use and discard
+ * it; MANUAL mode still mints synchronously at invite time, exactly as I4 did, so its hash is
+ * never null). */
 export interface GuestIdentityRecord {
   id: GuestIdentityId;
   displayName: string;
-  accessTokenHash: string;
-  expiresAt: string;
+  accessTokenHash: string | null;
+  expiresAt: string | null;
   createdAt: string;
   /** Slice I4 (D19/D27) — where an automatic invitation would be sent, captured at
    * invite/join time. Both null when the organizer used the anonymous share-link/QR path
    * instead of naming this guest (manual sharing always stays available regardless). */
   contactDestination: string | null;
   contactMethod: 'EMAIL' | 'SMS' | null;
+  /** Slice I4B (D38). */
+  deliveryMode: GuestDeliveryMode;
+}
+
+/** Slice I4B (D38) — one row `listPendingGuestDeliveries` returns: a guest invited with
+ * automatic delivery (SMS/EMAIL) whose token has not been minted yet, i.e. either invited
+ * while the vink was still DRAFT (waiting for VINK_OPENED) or a dispatch attempt that never
+ * successfully claimed a slot. `contactDestination`/`contactMethod` are guaranteed non-null
+ * here — `inviteGuestCommand` refuses to store an SMS/EMAIL-mode guest without them. */
+export interface PendingGuestDelivery {
+  participantId: Participant['id'];
+  guestIdentityId: GuestIdentityId;
+  displayName: string;
+  contactDestination: string;
+  contactMethod: 'EMAIL' | 'SMS';
+  allocatedAmountMinor: number;
 }
 
 /** A member's own contact info, captured at registration (`users.email`/`users.phone`,
@@ -120,6 +147,39 @@ export interface VinkTx {
   /** Plain read — an optimization ahead of the database's own unique constraint, not the
    * guard itself. True if this exact (vink, key) pair was already used for an invite. */
   findGuestInviteIdempotencyKey(vinkId: VinkId, key: string): Promise<boolean>;
+  /** Slice I4B (D38) — a single guest identity by id, for the resend command's own lookup of
+   * its current `deliveryMode`/contact fields. Plain read within the transaction. */
+  getGuestIdentity(id: GuestIdentityId): Promise<GuestIdentityRecord | null>;
+  /** Slice I4B (D38) — the deferred-mint claim: sets the hash/expiry ONLY if none exists yet
+   * (`WHERE access_token_hash IS NULL`), returning whether this call won the claim. Guards
+   * against dispatching the same guest twice (e.g. a defensive re-invocation of the
+   * VINK_OPENED dispatch loop) without relying solely on the state machine's own one-time
+   * `VINK_OPENED` transition to prevent it. */
+  claimGuestDeliveryToken(
+    guestIdentityId: GuestIdentityId,
+    tokenHash: string,
+    expiresAt: string,
+  ): Promise<boolean>;
+  /** Slice I4B (D38) — resend's unconditional overwrite: mints and stores a fresh hash
+   * regardless of whether one already exists, deliberately invalidating any prior token
+   * (single-slot binding, migration 0002/0003 — there is no way to hold two valid tokens for
+   * one guest at once). */
+  setGuestDeliveryToken(
+    guestIdentityId: GuestIdentityId,
+    tokenHash: string,
+    expiresAt: string,
+  ): Promise<void>;
+  /** Slice I5B (D40) — clears a previously-minted token back to null (mode changing away
+   * from MANUAL, which is the only mode that ever mints synchronously): the guest becomes
+   * inert/unauthenticatable again, exactly the same state a fresh SMS/EMAIL invite starts in
+   * (I4B), until a future dispatch or resend mints a new one. */
+  clearGuestDeliveryToken(guestIdentityId: GuestIdentityId): Promise<void>;
+  /** Slice I5B (D40) — draft-only guest-identity edit: display name, contact destination,
+   * contact method, and delivery mode. Deliberately never touches `accessTokenHash`/
+   * `expiresAt` — those stay exclusively managed by `claimGuestDeliveryToken`/
+   * `setGuestDeliveryToken`/`clearGuestDeliveryToken`, so a display-name-only edit can never
+   * accidentally clobber or reveal anything about the token. */
+  updateGuestIdentity(guest: GuestIdentityRecord): Promise<void>;
   /** Slice I4 — a member's own captured contact info (`users.email`/`users.phone`), for
    * automatic-delivery destination resolution. `null` if the user doesn't exist (shouldn't
    * happen for a real participant, but the dispatch path treats it as "no contact info,"
@@ -186,6 +246,10 @@ export interface VinkReader {
   /** Slice I4 — every delivery attempt for one participant, newest first (organizer-facing
    * "Sent" / "Couldn't send" row status, Phase 6 §9; supports "Send again" showing history). */
   listInvitationDeliveries(participantId: Participant['id']): Promise<InvitationDeliveryRecord[]>;
+  /** Slice I4B (D38) — every guest of this vink invited with automatic delivery (SMS/EMAIL)
+   * whose token hasn't been minted yet. The VINK_OPENED transport handler dispatches exactly
+   * this list; a guest invited while the vink was still DRAFT sits here until then (D23). */
+  listPendingGuestDeliveries(vinkId: VinkId): Promise<PendingGuestDelivery[]>;
 }
 
 export interface UnitOfWork {

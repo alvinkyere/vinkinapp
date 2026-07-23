@@ -59,6 +59,25 @@ async function waitFor(
   throw new Error(`timed out waiting for a matching message; saw: ${JSON.stringify(messages)}`);
 }
 
+/** Like `waitFor`, but for asserting a specific *count* of matches — `waitFor` alone can't
+ * distinguish "the second pong arrived" from "the first pong is still there", since it just
+ * returns the first match in the whole cumulative message list. */
+async function waitForCount(
+  messages: readonly Message[],
+  predicate: (message: Message) => boolean,
+  count: number,
+  timeoutMs = 4_000,
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (messages.filter(predicate).length >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(
+    `timed out waiting for ${count} matching messages; saw: ${JSON.stringify(messages)}`,
+  );
+}
+
 describe('real-time channel end-to-end (PostgreSQL + WebSocket)', { skip: !RUN }, () => {
   let db: IsolatedTestDb;
   let app: Awaited<ReturnType<typeof buildApp>>;
@@ -353,6 +372,143 @@ describe('real-time channel end-to-end (PostgreSQL + WebSocket)', { skip: !RUN }
 
     organizerClient.close();
     guestClient.close();
+  });
+
+  it('Slice I2C: a participant (non-organizer JWT, flag on) gets a participant-scoped snapshot and the same live events as the organizer', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 4_000,
+        tipMinor: 0,
+        submissionDeadline: new Date(Date.now() + 3_600_000).toISOString(),
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const vinkId = created.json().vink.id as string;
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/participants`,
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: { username: users.memberA },
+    });
+    await app.inject({
+      method: 'PUT',
+      url: `/api/v1/vinks/${vinkId}/split`,
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: { method: 'EQUAL' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/open`,
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: {},
+    });
+
+    db.env.VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL = '1';
+    try {
+      const organizerClient = await connect(liveUrl(vinkId));
+      const participantClient = await connect(liveUrl(vinkId, 'memberA'));
+      const organizerMessages = collector(organizerClient);
+      const participantMessages = collector(participantClient);
+
+      const participantSnapshot = await waitFor(participantMessages, (m) => m.type === 'snapshot');
+      // ParticipantVinkView (Slice I2B): own contribution only, never the organizer's full
+      // participant list or card data — same customer-safe boundary as the guest branch above,
+      // just resolved from a signed-in actor instead of a guest token.
+      const snapshotBody = participantSnapshot.snapshot as {
+        vink: { state: string };
+        participant: { displayName: string };
+      };
+      assert.equal(snapshotBody.vink.state, 'OPEN');
+      assert.equal(snapshotBody.participant.displayName, users.memberA);
+      assert.equal('participants' in (participantSnapshot.snapshot as object), false);
+      assert.equal('card' in (participantSnapshot.snapshot as object), false);
+
+      // The same domain event reaches both — one event stream, no requester-specific
+      // payload branching (identical principle to the guest test above).
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/vinks/${vinkId}/contributions/authorize`,
+        headers: { authorization: `Bearer ${tokens.organizer}` },
+        payload: {},
+      });
+      const organizerEvent = await waitFor(
+        organizerMessages,
+        (m) => m.type === 'contribution_pending',
+      );
+      const participantEvent = await waitFor(
+        participantMessages,
+        (m) => m.type === 'contribution_pending',
+      );
+      assert.deepEqual(organizerEvent, participantEvent);
+
+      organizerClient.close();
+      participantClient.close();
+    } finally {
+      db.env.VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL = '0';
+    }
+  });
+
+  it('Slice I2C: flag off — a participant still gets 4403, exactly like before this slice (rollback proof)', async () => {
+    db.env.VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL = '0';
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 1_000,
+        tipMinor: 0,
+        submissionDeadline: new Date(Date.now() + 3_600_000).toISOString(),
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const vinkId = created.json().vink.id as string;
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/participants`,
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: { username: users.memberA },
+    });
+
+    const participantClient = await connect(liveUrl(vinkId, 'memberA'));
+    assert.equal((await waitForClose(participantClient)).code, 4403);
+  });
+
+  it('ENG3: answers an application-level {type:"ping"} with {type:"pong"} for client heartbeats', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/vinks',
+      headers: { authorization: `Bearer ${tokens.organizer}` },
+      payload: {
+        purchaseCategory: 'GROCERY',
+        subtotalMinor: 1_000,
+        tipMinor: 0,
+        submissionDeadline: new Date(Date.now() + 3_600_000).toISOString(),
+        organizerDisplayName: 'Organizer',
+      },
+    });
+    const vinkId = created.json().vink.id as string;
+
+    const client = await connect(liveUrl(vinkId));
+    const messages = collector(client);
+    await waitFor(messages, (m) => m.type === 'snapshot');
+
+    client.send(JSON.stringify({ type: 'ping' }));
+    await waitForCount(messages, (m) => m.type === 'pong', 1);
+
+    // A malformed/non-JSON message must never crash the connection or the server process —
+    // the socket stays open and a subsequent real ping still gets answered.
+    client.send('not json at all');
+    client.send(JSON.stringify({ type: 'not_a_ping' }));
+    client.send(JSON.stringify({ type: 'ping' }));
+    await waitForCount(messages, (m) => m.type === 'pong', 2);
+
+    assert.equal(client.readyState, WebSocket.OPEN);
+    client.close();
   });
 
   it('a guest token is rejected on a vink it never joined, and an invalid guest token is unauthenticated', async () => {

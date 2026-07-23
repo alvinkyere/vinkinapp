@@ -80,6 +80,17 @@ const envSchema = z.object({
    * adapter is the only one that exists) or, worse, look like a real send capability that
    * isn't there. Manual sharing is always available regardless of this flag. */
   VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED: z.enum(['0', '1']).default('0'),
+  /** Slice I4B (D38) — abuse-prevention cooldown between guest-invitation resend attempts,
+   * per participant (`apps/api/src/modules/vinks/routes.ts`'s resend route). Same "real
+   * config, not a hardcoded constant" pattern ENG1 established for the timer values below —
+   * a test needs to shrink this to exercise "resend accepted" without an actual 60s sleep. */
+  GUEST_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().nonnegative().default(60),
+  /** ENG3 ("app-version enforcement") — unset by default, meaning no enforcement at all
+   * (the exact current behavior byte-for-byte, same convention as every other static flag
+   * above). When set (`major.minor.patch`, e.g. `"1.0.0"`), `app.ts`'s `onRequest` hook
+   * rejects a request whose `x-app-version` header is below it with `426 Upgrade Required` —
+   * see `app-version.ts` for the (fail-open on anything malformed) comparison. */
+  VINKIN_MINIMUM_APP_VERSION: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

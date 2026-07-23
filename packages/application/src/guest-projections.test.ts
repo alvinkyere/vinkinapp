@@ -85,6 +85,7 @@ describe('D23 pre-open guest access (Slice I1)', () => {
     const invited = await inviteGuestCommand(organizerCtx(store), {
       vinkId: vink.id,
       displayName: 'Early Guest',
+      deliveryMode: 'MANUAL',
       accessTokenHash: 'hash-early-guest',
     });
     assert.equal(invited.participant.status, 'JOINED'); // invites are allowed pre-open (commands.ts)
@@ -108,6 +109,7 @@ describe('D23 pre-open guest access (Slice I1)', () => {
     await inviteGuestCommand(organizerCtx(store), {
       vinkId: vink.id,
       displayName: 'Early Guest',
+      deliveryMode: 'MANUAL',
       accessTokenHash: 'hash-early-guest',
     });
     await addParticipantCommand(organizerCtx(store), {
@@ -153,11 +155,13 @@ describe('D24/D25 guest contributionStatus and vinkOutcome (Slice I1)', () => {
     const guestX = await inviteGuestCommand(organizerCtx(store), {
       vinkId: vink.id,
       displayName: 'Guest X',
+      deliveryMode: 'MANUAL',
       accessTokenHash: 'hash-x',
     });
     const guestY = await inviteGuestCommand(organizerCtx(store), {
       vinkId: vink.id,
       displayName: 'Guest Y',
+      deliveryMode: 'MANUAL',
       accessTokenHash: 'hash-y',
     });
     await setSplitCommand(organizerCtx(store), {
@@ -371,6 +375,7 @@ describe('D24/D25 guest contributionStatus and vinkOutcome (Slice I1)', () => {
     const guest = await inviteGuestCommand(organizerCtx(store), {
       vinkId: vink.id,
       displayName: 'Guest',
+      deliveryMode: 'MANUAL',
       accessTokenHash: 'hash-recovery',
     });
     await setSplitCommand(organizerCtx(store), {

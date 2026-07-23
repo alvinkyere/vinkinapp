@@ -414,12 +414,141 @@ pre-existing `apps/guest-web` Slice I3/I3A terminal-copy tests from that same co
 session's own just-landed, not-yet-green work — confirmed via `git log` as already-committed,
 untouched by this slice.
 
-Next: ENG2's own remaining scope — typed per-screen API contracts (§1) and interaction event
-contracts (§3) — stays deferred pending alignment with the UX-track's own Button Interaction
-Contracts work (the owner's explicit scoping decision when Slice A was approved). Otherwise,
-per the owner's original ENG0–ENG15 milestone sequence, ENG3+ is next in line — awaiting the
-owner's direction on which one. `PV12` (the actual closed pilot) remains an owner/operational
-decision deferred until ENG0–ENG9 close.
+**ENG2 closed** (`milestone-reports/ENG2-CLOSURE-TYPED-CONTRACTS.md`): the UX-track's Phase 5
+(Button and Interaction Contracts, `docs/design/phase-5-button-interaction-contracts.md`)
+landed and unblocked ENG2's deferred remainder — typed screen/view-model contracts and typed
+interaction-event contracts, owner-directed with "ground every type and event in the approved
+Phase 4/Phase 5 contracts, do not invent screens, actions, analytics events, or payloads."
+New package `packages/client-contracts`: 17 screen/view-model contracts tracing to Phase 4's
+14 sections (§5 expanded to §5a–c, §6 split into its organizer/member branches — four of the
+17 are bare type aliases to real `packages/application` types, compile-time-proven never to
+drift via `Expect<Equal<...>>`); a 46-distinct-name analytics event vocabulary tracing to
+Phase 5's 31 `Analytics:`-bearing contracts out of 45 (the other 14 verifiably carry none);
+ownership/privacy rules (`client-contracts-ownership-and-privacy.md`); a versioning policy
+relating to, not duplicating, ENG2 Slice A's `api-versioning-policy.md`
+(`client-contracts-versioning-policy.md`); a traceability map mechanically cross-checked
+against the code (`client-contracts-traceability.md`); 14 tests (12 compile-time/contract
+tests in the new package, 2 in `apps/api` Zod-parsing real event literals against the actual
+wire schema). Two real gaps surfaced and flagged rather than silently resolved: the domain
+`Vink` has no freeform purpose/name field at all (Phase 4 requires one visibly on four
+screens — same gap PV13 already flagged), and today's shipped analytics event names
+(PV9/PV12-prep) predate Phase 5 and don't match its vocabulary (documented as a known-drift
+table, not silently renamed, since `apps/operations-console`'s PV12-prep dashboard may already
+key on the old names). Explicitly does not rewire `apps/mobile`/`apps/guest-web` to consume
+these types — that's implementation work, out of scope by the owner's own "stop after ENG2,
+do not begin ENG3" instruction. `pnpm typecheck/lint/format:check/guard` clean across all 10
+packages; `apps/api` 97/97, `packages/client-contracts` 12/12,
+`apps/operations-console` 2/2 (server up with the documented CORS env vars); the 10 `apps/
+guest-web` failures under the same run are the concurrent UX-track session's own pre-existing,
+not-yet-green Slice I3/I3A work — confirmed unrelated via `git log`/`git status`.
+
+**ENG2 is fully closed.**
+
+**ENG3 in progress** (the owner supplied ENG3's full original brief this session — "Client
+Reliability Architecture," covering `apps/mobile`, `apps/guest-web`, and the realtime layer,
+without making visual/UX decisions). Before writing any code, three audits (two backgrounded
+`Explore` agents, one done directly) checked ENG3's ~30-item checklist against real code; the
+owner chose a 6-slice execution order via `AskUserQuestion`.
+
+**ENG3 Slice 1 done** (`milestone-reports/ENG3-SLICE-1-REALTIME-BACKBONE.md`): realtime
+backbone hardening — reconnect backoff+jitter (replacing a flat 2s retry on both
+`apps/mobile`'s `RealtimeClient` and `apps/guest-web`'s `useGuestRealtime`), an
+application-level ping/pong heartbeat (browsers/Dart don't expose the WebSocket protocol's own
+ping/pong to app code, so a new `apps/api/src/modules/realtime/routes.ts` message handler
+answers one built at the app layer instead), and lifecycle-aware reconnection (a Flutter
+`AppLifecycleListener` embedded directly in `RealtimeClient` pauses retries while backgrounded
+and reconnects on resume; a guest-web `visibilitychange` listener does the same on tab
+return). **Caught and fixed a real bug the audit surfaced**: guest-web's per-live-message
+session refetch had no request-sequence guard, so an older-issued request that resolved later
+could overwrite fresher state with stale data — the exact bug class `vink_lobby_screen.dart`'s
+`_snapshotRequestId` already guarded against on the organizer side (PV13-SCREENSHOTS.md), never
+applied to guest-web until now. The regression test for this fix was verified to actually catch
+the bug (reverted the fix, confirmed the test fails; restored it, confirmed it passes). Also
+surfaced and resolved (environment, not product): the exact "poisoned dev database" cruft
+`milestone-reports/ENG1-TIMER-SEMANTICS.md` already documented once, this time compounded by a
+stale server process silently squatting on port 3000 across a "restart" — fixed by actually
+killing it and resetting the local dev DB/Redis. **98/98 `apps/api`, 111/111 `apps/mobile`
+(flutter analyze clean), 41 passed/8 pre-existing-failed `apps/guest-web`, 2/2
+`apps/operations-console`**, `pnpm typecheck/lint/format:check/guard` clean across all 10
+packages. One known gap flagged, not fixed (another session's in-flight work, out of scope):
+`e1_test.dart`'s real-device Register flow now mismatches `register_screen.dart`'s 5-field
+layout (a D19/D27 contact-capture addition), blocking a full real-device Lobby re-run for this
+slice specifically — Flutter changes were instead verified via `flutter analyze` + the full
+`flutter test` suite.
+
+**ENG3 Slice 2 done** (`milestone-reports/ENG3-SLICE-2-TYPED-REPOSITORY.md`): Flutter typed
+repository + command-state layer — addressed the audit's "no repository files exist anywhere
+under `lib/`" and "three separate ad hoc `bool _busy` + `String? _error` pairs on
+`vink_lobby_screen.dart` alone" findings. New `lib/core/commands/command_state.dart`
+(`CommandState<T>`/`CommandRunner<T>`, a typed idle/in-progress/success/failure lifecycle
+replacing ad hoc bool+String pairs, with two deliberate design choices preserving exact
+pre-existing per-call-site behavior: `onFailure` can suppress a failure to idle — reproducing
+cancel's refresh-and-suppress-on-conflict rule — and `onSuccess` is awaited *before* `state`
+becomes `Success`, matching handlers that kept their spinner on through a follow-up refetch)
+and `lib/core/repositories/vink_repository.dart` (typed methods over `ApiClient`, scoped to
+exactly what Home/Activity/Lobby call today, not a speculative full REST client). Migrated
+`home_providers.dart`, `activity_providers.dart`, and `vink_lobby_screen.dart` (its three
+command flows now use `CommandRunner`; its read paths call the repository; the presentational
+`_LobbyBody`/`_ParticipantLobbyBody` widgets untouched via backward-compatible getters).
+**Deliberately did not migrate Create Vink** (legacy or canonical) — both are actively being
+extended by the concurrent UX-track session this same day (new "Slice I5B (D40)" tests
+appeared mid-session); touching them risked a real conflict with in-flight work, so that
+migration is flagged as follow-up, not silently skipped. One intentional, flagged behavior
+change: `CommandRunner` catches `Object`, not narrowly `ApiException` (two original handlers
+did), closing a latent gap `classifyFailure` was already designed to handle gracefully. **7 new
+tests** for `CommandRunner` (including a dedicated test proving `onSuccess` is genuinely
+awaited before success, not fire-and-forget) — `flutter analyze` clean (same 11 pre-existing
+info-level issues), `flutter test` 127/128 (the one failure is a confirmed pre-existing,
+non-deterministic flake in an untracked, concurrent-session-owned test file that fails even
+run alone with nothing else involved — every test this slice's own files are exercised by
+passes consistently).
+
+**ENG3 Slice 3 done** (`milestone-reports/ENG3-SLICE-3-RESILIENCE-PRIMITIVES.md`): Flutter
+resilience primitives — request cancellation, network reachability handling, app-version
+enforcement, the three Flutter checklist items the original audit found entirely Missing.
+`ApiClient` gained an optional `CancelToken` on every method (additive) plus
+`ApiException.isCancelled`; wired into the Lobby's read paths (cancelled on `dispose()`),
+deliberately not the mutating commands (a sent financial command should complete server-side
+regardless of screen lifetime). New `ConnectivityService`/`isOnlineProvider` (new
+`connectivity_plus` dependency) — deliberately not wired into any screen's visual "you're
+offline" presentation (out of scope, no visual/UX decisions per ENG3's own brief), but
+`RealtimeClient` now reconnects immediately (bypassing backoff) on a genuine offline→online
+transition, the connectivity half of ENG3's "Wi-Fi to cellular" exit-gate scenario. App-version
+enforcement end-to-end: a new `VINKIN_MINIMUM_APP_VERSION` env var (unset by default, fail-open
+on anything malformed) gates a new `app.ts` `onRequest` hook returning `426` for a client below
+it; `ApiClient` now sends `x-app-version` on every request (new `package_info_plus`
+dependency); `APP_VERSION_UNSUPPORTED` reuses the existing `terminal` failure category and
+`human_errors.dart`'s table — no new UI screen invented. One required fix, not scope creep:
+adding `CancelToken` broke override-compatibility for the shared `FakeApiClient` test double,
+fixed as a direct consequence of the signature change. **38 new tests** across six files (4
+`ApiClient`, 9 `ConnectivityService`, 5 `RealtimeClient`, 1 `failure_classifier`, 19
+`app-version.ts` + `app.ts`) — `flutter analyze` clean (same 11 pre-existing issues), `flutter
+test` 148/148, `apps/api` 131/131, `pnpm typecheck/lint/format:check/guard` clean across all 10
+packages.
+
+**ENG3 Slice 4 done** (`milestone-reports/ENG3-SLICE-4-DEEP-LINK-ROUTING.md`): deterministic
+deep-link routing — but corrected the original audit's own framing first. `/g/:token` is
+`apps/guest-web`'s route (Phase 4 §13), never the organizer app's — guests don't use
+`apps/mobile` at all (Phase 0 §1); building guest-token handling into the organizer app would
+have been inventing scope, not fixing the flagged gap. The actually-meaningful target is
+`/vinks/:vinkId`, the existing Lobby route, reachable now via a new custom URL scheme
+(`vinkin://vinks/:vinkId`, new `app_links` dependency) — deliberately not Universal Links/App
+Links, which need a real owned domain + Apple Developer Team ID that don't exist until ENG4
+stands them up; guessing at that infrastructure now was explicitly avoided. New
+`lib/app/deep_links.dart` (`deepLinkRouteFor`, a pure top-level function, same pattern as
+Slice 1/3's `reconnectDelay`/`shouldReconnectOnConnectivityChange`) and
+`lib/app/deep_link_listener.dart` (`DeepLinkListener`, injectable functions not the `AppLinks`
+class itself, mirroring Slice 3's `ConnectivityService` pattern — no platform-channel mocking
+needed in its tests). No UI change — no existing "share with a co-organizer" feature exists to
+attach a button to; this is capability-only infrastructure, the same "built, not yet consumed
+by a screen" pattern as Slice 2's repository layer and Slice 3's `isOnlineProvider`. **10 new
+tests** across two files — `flutter analyze` clean (same 11 pre-existing issues), `flutter
+test` 158/158, re-verified twice including once after a concurrent-session change landed on
+`vink_lobby_screen.dart` mid-slice (Slice I2C, participant realtime support) — merged cleanly.
+
+Next: ENG3 Slice 5 (guest-web hardening — server-rendered invite context, tab-resume handling,
+token-expiry consistency) is next in the owner-approved order, pending go-ahead. `PV12` (the
+actual closed pilot) remains an owner/operational decision deferred until ENG0–ENG9 close.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

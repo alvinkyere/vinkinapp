@@ -55,6 +55,23 @@ dependencies:
   share_plus: ^10.1.4
   qr_flutter: ^4.1.0
 
+  # ENG3 Slice 3 ("network reachability handling," "app-version enforcement"): the audit
+  # found no proactive offline detection anywhere (only reactive, via a failed request's own
+  # error) and no mechanism for the app to know its own running version at all — no existing
+  # zero-dependency way to cover either without raw platform-channel code, so both are new,
+  # narrowly-scoped dependencies rather than a build-it-ourselves shim.
+  connectivity_plus: ^7.3.0
+  package_info_plus: ^9.0.1
+
+  # ENG3 Slice 4 ("deterministic deep-link routing"): a custom URL scheme (vinkin://), not
+  # Universal Links/App Links — those need a real, owned domain serving a signed
+  # apple-app-site-association file plus a real Apple Developer Team ID, none of which exist
+  # yet (ENG4 "Hosted Pilot Infrastructure" is the milestone that stands up real domains; doing
+  # Universal Links now would mean guessing at infrastructure that doesn't exist). A custom
+  # scheme needs no external infrastructure at all — just this package plus an Info.plist
+  # registration (see ios/Runner/Info.plist).
+  app_links: ^7.2.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

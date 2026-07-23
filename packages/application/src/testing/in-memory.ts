@@ -6,6 +6,7 @@
 
 import type {
   Contribution,
+  GuestIdentityId,
   Participant,
   PurchaseAuthorization,
   RecoveryObligation,
@@ -24,6 +25,7 @@ import type {
   InvitationDeliveryRecord,
   LedgerPostingInput,
   OutboxEventInput,
+  PendingGuestDelivery,
   UnitOfWork,
   UserContactInfo,
   VinkReader,
@@ -99,6 +101,73 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
     this.guests.set(guest.id, guest);
   }
 
+  /** Slice I4B (D38). */
+  async getGuestIdentity(id: GuestIdentityId): Promise<GuestIdentityRecord | null> {
+    return this.guests.get(id) ?? null;
+  }
+
+  async claimGuestDeliveryToken(
+    guestIdentityId: GuestIdentityId,
+    tokenHash: string,
+    expiresAt: string,
+  ): Promise<boolean> {
+    const guest = this.guests.get(guestIdentityId);
+    if (guest === undefined || guest.accessTokenHash !== null) return false;
+    this.guests.set(guestIdentityId, { ...guest, accessTokenHash: tokenHash, expiresAt });
+    return true;
+  }
+
+  async setGuestDeliveryToken(
+    guestIdentityId: GuestIdentityId,
+    tokenHash: string,
+    expiresAt: string,
+  ): Promise<void> {
+    const guest = this.guests.get(guestIdentityId);
+    if (guest === undefined) return;
+    this.guests.set(guestIdentityId, { ...guest, accessTokenHash: tokenHash, expiresAt });
+  }
+
+  /** Slice I5B (D40). */
+  async clearGuestDeliveryToken(guestIdentityId: GuestIdentityId): Promise<void> {
+    const guest = this.guests.get(guestIdentityId);
+    if (guest === undefined) return;
+    this.guests.set(guestIdentityId, { ...guest, accessTokenHash: null, expiresAt: null });
+  }
+
+  /** Slice I5B (D40). */
+  async updateGuestIdentity(guest: GuestIdentityRecord): Promise<void> {
+    const existing = this.guests.get(guest.id);
+    if (existing === undefined) return;
+    this.guests.set(guest.id, {
+      ...existing,
+      displayName: guest.displayName,
+      contactDestination: guest.contactDestination,
+      contactMethod: guest.contactMethod,
+      deliveryMode: guest.deliveryMode,
+    });
+  }
+
+  /** Slice I4B (D38). */
+  async listPendingGuestDeliveries(vinkId: VinkId): Promise<PendingGuestDelivery[]> {
+    const pending: PendingGuestDelivery[] = [];
+    for (const participant of this.participants.values()) {
+      if (participant.vinkId !== vinkId || participant.status === 'REMOVED') continue;
+      if (participant.guestIdentityId === null) continue;
+      const guest = this.guests.get(participant.guestIdentityId);
+      if (guest === undefined) continue;
+      if (guest.deliveryMode === 'MANUAL' || guest.accessTokenHash !== null) continue;
+      pending.push({
+        participantId: participant.id,
+        guestIdentityId: guest.id,
+        displayName: guest.displayName,
+        contactDestination: guest.contactDestination ?? '',
+        contactMethod: (guest.contactMethod ?? 'EMAIL') as 'EMAIL' | 'SMS',
+        allocatedAmountMinor: participant.allocatedAmount.amountMinor,
+      });
+    }
+    return pending;
+  }
+
   readonly guestInviteIdempotencyKeys = new Map<string, Participant['id']>();
 
   async recordGuestInviteIdempotencyKey(
@@ -141,9 +210,13 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
   ): Promise<{ participant: Participant; guest: GuestIdentityRecord } | null> {
     for (const guest of this.guests.values()) {
       if (guest.accessTokenHash !== accessTokenHash) continue;
-      if (new Date(guest.expiresAt).getTime() <= now.getTime()) return null;
+      // A matched hash is never null (an unminted guest's hash is null and can never equal a
+      // real token's hash), so `expiresAt` is guaranteed set alongside it.
+      if (new Date(guest.expiresAt as string).getTime() <= now.getTime()) return null;
       for (const participant of this.participants.values()) {
-        if (participant.guestIdentityId === guest.id) return { participant, guest };
+        if (participant.guestIdentityId === guest.id && participant.status !== 'REMOVED') {
+          return { participant, guest };
+        }
       }
     }
     return null;

@@ -71,10 +71,16 @@ class Vink {
     required this.organizerUserId,
     this.submissionDeadline,
     this.role,
+    this.purpose,
   });
 
   final String id;
   final String publicCode;
+
+  /// Slice I5B (D39) — human-readable payment context; null for a Vink that never had one
+  /// (every pre-I5B Vink, and every Vink the five-step wizard still creates). Callers apply
+  /// their own customer-safe fallback (e.g. [purchaseCategory]'s own label) when null.
+  final String? purpose;
   final String purchaseCategory;
   final String state;
   final int requiredAmountMinor;
@@ -108,6 +114,7 @@ class Vink {
         ? null
         : DateTime.parse(json['submissionDeadline'] as String),
     role: json['role'] as String?,
+    purpose: json['purpose'] as String?,
   );
 }
 

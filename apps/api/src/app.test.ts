@@ -53,4 +53,83 @@ describe('app (no infrastructure required)', () => {
     assert.equal(response.statusCode, 404);
     await app.close();
   });
+
+  describe('ENG3 app-version enforcement', () => {
+    it('VINKIN_MINIMUM_APP_VERSION unset (the default): never enforced, any header value passes', async () => {
+      const app = await buildApp({ env, sql: null, checkDb: healthy, checkRedis: healthy });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health/live',
+        headers: { 'x-app-version': '0.0.1' },
+      });
+      assert.equal(response.statusCode, 200);
+      await app.close();
+    });
+
+    it('a request with no x-app-version header is never enforced, even with a minimum configured', async () => {
+      const gated = loadEnv({
+        VINKIN_ENV: 'test',
+        LOG_LEVEL: 'error',
+        VINKIN_MINIMUM_APP_VERSION: '1.2.0',
+      });
+      const app = await buildApp({ env: gated, sql: null, checkDb: healthy, checkRedis: healthy });
+      const response = await app.inject({ method: 'GET', url: '/health/live' });
+      assert.equal(response.statusCode, 200);
+      await app.close();
+    });
+
+    it('a client below the configured minimum gets 426, never reaching the route handler', async () => {
+      const gated = loadEnv({
+        VINKIN_ENV: 'test',
+        LOG_LEVEL: 'error',
+        VINKIN_MINIMUM_APP_VERSION: '1.2.0',
+      });
+      const app = await buildApp({ env: gated, sql: null, checkDb: healthy, checkRedis: healthy });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health/live',
+        headers: { 'x-app-version': '1.1.9' },
+      });
+      assert.equal(response.statusCode, 426);
+      assert.deepEqual(response.json(), {
+        error: 'APP_VERSION_UNSUPPORTED',
+        message: 'This version of VinkIn is no longer supported. Please update the app.',
+      });
+      await app.close();
+    });
+
+    it('a client at or above the configured minimum passes through', async () => {
+      const gated = loadEnv({
+        VINKIN_ENV: 'test',
+        LOG_LEVEL: 'error',
+        VINKIN_MINIMUM_APP_VERSION: '1.2.0',
+      });
+      const app = await buildApp({ env: gated, sql: null, checkDb: healthy, checkRedis: healthy });
+      for (const version of ['1.2.0', '1.2.1', '2.0.0']) {
+        const response = await app.inject({
+          method: 'GET',
+          url: '/health/live',
+          headers: { 'x-app-version': version },
+        });
+        assert.equal(response.statusCode, 200, `expected ${version} to pass`);
+      }
+      await app.close();
+    });
+
+    it('a malformed x-app-version header fails open rather than blocking the request', async () => {
+      const gated = loadEnv({
+        VINKIN_ENV: 'test',
+        LOG_LEVEL: 'error',
+        VINKIN_MINIMUM_APP_VERSION: '1.2.0',
+      });
+      const app = await buildApp({ env: gated, sql: null, checkDb: healthy, checkRedis: healthy });
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health/live',
+        headers: { 'x-app-version': 'not-a-real-version' },
+      });
+      assert.equal(response.statusCode, 200);
+      await app.close();
+    });
+  });
 });

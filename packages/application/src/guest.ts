@@ -17,6 +17,7 @@ import {
 import { ApplicationError, InviteIdempotencyRaceError } from './errors.ts';
 import type {
   CommandContext,
+  GuestDeliveryMode,
   GuestIdentityRecord,
   PublicCommandContext,
   VinkReader,
@@ -159,6 +160,11 @@ export interface NotOpenYetView {
 /** What an anonymous visitor (or joined guest) may see — no internal ids beyond the code. */
 export interface PublicVinkSummary {
   publicCode: string;
+  /** Slice I5B (D39) — human-readable payment context; null for a Vink that never had one
+   * (every pre-I5B Vink, and every Vink the five-step wizard still creates). Consumers apply
+   * their own customer-safe fallback (e.g. the category's own display label) when null —
+   * this projection passes the raw value through, it does not invent one. */
+  purpose: string | null;
   purchaseCategory: Vink['purchaseCategory'];
   state: Vink['state'];
   requiredAmountMinor: number;
@@ -175,6 +181,7 @@ function isJoinable(vink: Vink, now: Date): boolean {
 function toPublicSummary(vink: Vink, participantCount: number, now: Date): PublicVinkSummary {
   return {
     publicCode: vink.publicCode,
+    purpose: vink.purpose,
     purchaseCategory: vink.purchaseCategory,
     state: vink.state,
     requiredAmountMinor: vink.requiredAmount.amountMinor,
@@ -229,6 +236,8 @@ export async function guestJoinVinkCommand(
       // named invite (`inviteGuestCommand` below), which can capture a destination.
       contactDestination: null,
       contactMethod: null,
+      // Slice I4B (D38): always MANUAL — never a candidate for automatic dispatch.
+      deliveryMode: 'MANUAL',
     };
     const participant: Participant = {
       id: newParticipantId(),
@@ -267,46 +276,97 @@ export async function guestJoinVinkCommand(
 // guestJoinVinkCommand's public isJoinable check, since the organizer controls timing here,
 // not an anonymous visitor hitting a public link.
 //
-// Slice I4 (D19/D27) — a real architectural finding, not a scope choice: this command
-// deliberately never dispatches an automatic invitation itself, even though it's the exact
-// moment a contact destination becomes available. The raw guest token is minted by the
-// TRANSPORT (`newGuestToken()` in `apps/api/src/modules/vinks/routes.ts`) and only its hash
-// ever reaches this command (D14, hard rule) — the join link a delivery message needs
-// literally cannot be assembled here. Automatic dispatch for a guest invite can only happen
-// in the same transport request that mints the token, while the raw value is still in scope;
-// it can never be deferred to a later moment (e.g. batched at `VINK_OPENED`) the way a
-// member's plain, non-secret invite link safely can (see `openVinkCommand`,
-// `commands.ts`) — there is no way to "resend" a guest invite later without minting a new
-// token, which is out of this slice's scope. This command only captures and stores the
-// contact destination; the transport-layer dispatch call site is deferred (flagged in the
-// I4 milestone report, not silently dropped) because `vinks/routes.ts` was under active,
-// unrelated concurrent edit for this entire pass.
+// Slice I4B (D38) — closes the I4 architectural gap this comment used to describe. The raw
+// guest token is still minted by the TRANSPORT (`newGuestToken()`,
+// `apps/api/src/modules/vinks/routes.ts`) and only its hash ever reaches this command (D14,
+// hard rule) — that constraint hasn't changed. What changed is WHEN the token is minted:
+//
+//  - `deliveryMode: 'MANUAL'` mints synchronously, exactly like I4 did — the organizer needs
+//    the raw link back in this same response to copy/share it, so `accessTokenHash` is
+//    required and stored immediately.
+//  - `deliveryMode: 'SMS' | 'EMAIL'` mints NOTHING here. `accessTokenHash` must be omitted;
+//    the guest identity is stored with a null hash (migration 0012) and sits inert —
+//    unreachable by any token, since no hash can ever equal null — until the transport
+//    mints one at the moment it can actually dispatch: immediately, in this same request, if
+//    the vink is already OPEN (mirrors `addParticipantCommand`'s member-dispatch ordering),
+//    or later, batched at VINK_OPENED (`openVinkCommand`'s transport wrapper), if the vink is
+//    still DRAFT (D23). This is what makes "resend" possible at all for automatic delivery —
+//    I4 couldn't offer it because the one-time raw token was gone forever after the invite
+//    response; now a fresh one can always be minted on demand (`resendGuestInvitationCommand`
+//    below), at the cost of invalidating whichever token came before it (single-slot binding
+//    — see that command's own doc comment).
 // ---------------------------------------------------------------------------
 
 export interface InviteGuestInput {
   vinkId: Vink['id'];
   expectedVersion?: number;
   displayName: string;
-  /** SHA-256 hash of the transport-minted guest token — same handling rule as
-   * GuestJoinInput above: the application layer never sees the raw secret. */
-  accessTokenHash: string;
+  /** Slice I4B (D38) — explicit, never inferred from provider availability (§ brief). */
+  deliveryMode: GuestDeliveryMode;
+  /** SHA-256 hash of the transport-minted guest token. Required (and transport always
+   * supplies it) for `deliveryMode: 'MANUAL'` only — see the doc comment above. Must be
+   * omitted for `SMS`/`EMAIL`; providing one there is a caller bug (`INVALID_COMMAND`). */
+  accessTokenHash?: string;
   /** ENG1 #4: client-generated, stable across retries of the same "add as guest" attempt.
    * Optional — a caller that omits it just forgoes duplicate protection. Unlike
    * `CreateVinkInput.creationIdempotencyKey` (Slice 2), a detected repeat here is REJECTED
-   * rather than replayed: the raw guest token/join link from the original attempt is gone by
-   * design (D14 — only its hash is ever stored), so there is nothing to hand back. */
+   * rather than replayed: for MANUAL mode the raw join link from the original attempt is
+   * gone by design (D14); for SMS/EMAIL mode a replay would either duplicate a pending
+   * dispatch or reissue a fresh token for no reason — in both cases refusing is correct. */
   invitationIdempotencyKey?: string;
-  /** Slice I4 (D19/D27) — optional; captured and stored on the guest identity for later
-   * automatic delivery. Deliberately NOT dispatched from inside this command — see the
-   * doc comment above `inviteGuestCommand` for why (D14: the raw join link can only be
-   * assembled where the raw token exists, which is the transport layer, never here). */
+  /** Required for `deliveryMode: 'SMS' | 'EMAIL'` (the phone/email the invitation will be
+   * sent to); must be omitted for `MANUAL`, where there is nothing to automatically send —
+   * display name stays a separate concept from destination in every mode. */
   contactDestination?: string;
-  contactMethod?: 'EMAIL' | 'SMS';
 }
 
 export interface InviteGuestResult {
   participant: Participant;
   guest: GuestIdentityRecord;
+  /** Slice I4B — the transport dispatch call site needs the vink's own state (was this
+   * invite created into an already-OPEN vink, meaning dispatch should fire now rather than
+   * waiting for a future VINK_OPENED?) without a second read. */
+  vink: Vink;
+}
+
+function contactMethodFor(mode: GuestDeliveryMode): 'EMAIL' | 'SMS' | null {
+  return mode === 'MANUAL' ? null : mode;
+}
+
+/** Slice I4B (D38) — the delivery-mode contract itself: SMS needs a phone-shaped
+ * destination, EMAIL needs an email-shaped one, MANUAL needs neither and must not receive
+ * one (deliberately rejected, not silently ignored, so a caller doesn't believe a destination
+ * they supplied will ever be used). Loose format checks only — real deliverability is the
+ * provider's own concern; this just catches an obviously wrong pairing. */
+function assertDeliveryModeContract(
+  mode: GuestDeliveryMode,
+  accessTokenHash: string | undefined,
+  contactDestination: string | undefined,
+): void {
+  if (mode === 'MANUAL') {
+    if (accessTokenHash === undefined) {
+      throw new ApplicationError('INVALID_COMMAND', 'manual delivery requires a minted token');
+    }
+    if (contactDestination !== undefined) {
+      throw new ApplicationError(
+        'INVALID_COMMAND',
+        'manual delivery must not carry a contact destination — it is never automatically sent',
+      );
+    }
+    return;
+  }
+  if (accessTokenHash !== undefined) {
+    throw new ApplicationError(
+      'INVALID_COMMAND',
+      `${mode} delivery mints its own token at dispatch time — a caller must not pre-mint one`,
+    );
+  }
+  if (contactDestination === undefined || contactDestination.trim().length === 0) {
+    throw new ApplicationError(
+      'INVALID_COMMAND',
+      `${mode} delivery requires a contact destination`,
+    );
+  }
 }
 
 async function assertInviteNotAlreadySent(
@@ -328,6 +388,7 @@ export async function inviteGuestCommand(
   input: InviteGuestInput,
 ): Promise<InviteGuestResult> {
   const key = input.invitationIdempotencyKey;
+  assertDeliveryModeContract(input.deliveryMode, input.accessTokenHash, input.contactDestination);
   try {
     return await ctx.uow.run(async (tx) => {
       const vink = await loadOwnedVink(tx, input.vinkId, ctx.actorUserId, input.expectedVersion);
@@ -337,16 +398,18 @@ export async function inviteGuestCommand(
       if (key !== undefined) await assertInviteNotAlreadySent(tx, vink.id, key);
 
       const now = ctx.clock.now();
+      const mintedNow = input.accessTokenHash !== undefined;
       const guest: GuestIdentityRecord = {
         id: newGuestIdentityId(),
         displayName: input.displayName,
-        accessTokenHash: input.accessTokenHash,
-        expiresAt: new Date(
-          now.getTime() + GUEST_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
-        ).toISOString(),
+        accessTokenHash: input.accessTokenHash ?? null,
+        expiresAt: mintedNow
+          ? new Date(now.getTime() + GUEST_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString()
+          : null,
         createdAt: now.toISOString(),
         contactDestination: input.contactDestination ?? null,
-        contactMethod: input.contactMethod ?? null,
+        contactMethod: contactMethodFor(input.deliveryMode),
+        deliveryMode: input.deliveryMode,
       };
       const participant: Participant = {
         id: newParticipantId(),
@@ -375,7 +438,7 @@ export async function inviteGuestCommand(
           invitedByOrganizer: true,
         },
       });
-      return { participant, guest };
+      return { participant, guest, vink };
     });
   } catch (error) {
     if (!(error instanceof InviteIdempotencyRaceError)) throw error;
@@ -387,6 +450,197 @@ export async function inviteGuestCommand(
       'this invitation was already sent — refresh to see the guest who was added',
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// ResendGuestInvitationCommand — Slice I4B (D38). Scoped to SMS/EMAIL-mode guests only: a
+// MANUAL-mode guest was never automatically dispatched in the first place (the organizer's
+// own copy of the link from the invite response is the only "resend" that mode has, and
+// re-minting one here would silently invalidate whatever they already copied — worse, not
+// better). Cooldown/throttling is enforced by the TRANSPORT (`vinks/routes.ts`, reading
+// `VinkReader.listInvitationDeliveries`' own `attemptedAt` before ever calling this command) —
+// this command's own job is narrower: verify the resend is legitimate (organizer owns the
+// vink, the vink is open-or-later, the participant is a live SMS/EMAIL guest) and claim a
+// fresh token slot. It does not call the delivery provider itself — same D14 reason
+// `inviteGuestCommand` never has: the raw token this command mints must stay in the
+// transport's hands to build the join URL and dispatch it, then be discarded.
+// ---------------------------------------------------------------------------
+
+export interface ResendGuestInvitationInput {
+  vinkId: Vink['id'];
+  participantId: Participant['id'];
+  /** SHA-256 hash of a token the transport just minted for this resend. */
+  tokenHash: string;
+  expiresAt: string;
+}
+
+export interface ResendGuestInvitationResult {
+  vink: Vink;
+  participant: Participant;
+  guest: GuestIdentityRecord;
+}
+
+export async function resendGuestInvitationCommand(
+  ctx: CommandContext,
+  input: ResendGuestInvitationInput,
+): Promise<ResendGuestInvitationResult> {
+  return ctx.uow.run(async (tx) => {
+    const vink = await loadOwnedVink(tx, input.vinkId, ctx.actorUserId);
+    if (vink.state === 'DRAFT') {
+      throw new ApplicationError(
+        'INVALID_COMMAND',
+        'cannot resend before the vink is open — nothing has been dispatched yet',
+      );
+    }
+    const participants = await tx.listParticipants(vink.id);
+    const participant = participants.find(
+      (row) => row.id === input.participantId && row.status !== 'REMOVED',
+    );
+    if (participant === undefined || participant.guestIdentityId === null) {
+      throw new ApplicationError(
+        'PARTICIPANT_NOT_FOUND',
+        `no active guest participant ${input.participantId}`,
+      );
+    }
+    const guest = await tx.getGuestIdentity(participant.guestIdentityId);
+    if (guest === null) {
+      throw new ApplicationError('PARTICIPANT_NOT_FOUND', 'guest identity missing');
+    }
+    if (guest.deliveryMode === 'MANUAL') {
+      throw new ApplicationError(
+        'INVALID_COMMAND',
+        'resend is only available for automatic (sms/email) delivery — this guest was invited with manual sharing',
+      );
+    }
+    await tx.setGuestDeliveryToken(guest.id, input.tokenHash, input.expiresAt);
+    return {
+      vink,
+      participant,
+      guest: { ...guest, accessTokenHash: input.tokenHash, expiresAt: input.expiresAt },
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// EditGuestParticipantCommand — Slice I5B (D40). Draft-only correction of a guest's display
+// name, delivery mode, and contact destination — the same I4B contract `inviteGuestCommand`
+// enforces (`assertDeliveryModeContract`), applied to the participant's resulting state
+// instead of a brand-new one. Every field is resent on every call (not a sparse patch) —
+// matching `inviteGuestSchema`'s own shape exactly removes any ambiguity about whether an
+// omitted `contactDestination` means "unchanged" or "not applicable for this mode."
+//
+// The only case that ever touches the token is a transition into or out of MANUAL: MANUAL is
+// the one mode that mints synchronously (I4B), so entering it needs a fresh mint (the raw
+// token, once again, only ever exists in the transport — D14) and leaving it must clear the
+// old one rather than let a since-abandoned manual link keep working silently.
+// ---------------------------------------------------------------------------
+
+export interface EditGuestParticipantInput {
+  vinkId: Vink['id'];
+  participantId: Participant['id'];
+  expectedVersion?: number;
+  displayName: string;
+  deliveryMode: GuestDeliveryMode;
+  contactDestination?: string;
+  /** Transport-minted token hash — present only when this edit results in MANUAL mode and
+   * the guest wasn't already MANUAL (a fresh mint is actually needed). Ignored otherwise,
+   * exactly like `inviteGuestCommand`'s own `accessTokenHash` for every non-manual mode. */
+  mintedAccessTokenHash?: string;
+}
+
+export interface EditGuestParticipantResult {
+  participant: Participant;
+  guest: GuestIdentityRecord;
+  /** True only when this edit minted a genuinely new manual token — tells the transport
+   * whether to return the corresponding raw joinUrl (D14: returned exactly once). */
+  mintedNewManualToken: boolean;
+}
+
+export async function editGuestParticipantCommand(
+  ctx: CommandContext,
+  input: EditGuestParticipantInput,
+): Promise<EditGuestParticipantResult> {
+  return ctx.uow.run(async (tx) => {
+    const vink = await loadOwnedVink(tx, input.vinkId, ctx.actorUserId, input.expectedVersion);
+    if (vink.state !== 'DRAFT') {
+      throw new ApplicationError(
+        'INVALID_COMMAND',
+        'participants can only be edited while the vink is still DRAFT',
+      );
+    }
+    const participants = await tx.listParticipants(vink.id);
+    const participant = participants.find(
+      (row) => row.id === input.participantId && row.status !== 'REMOVED',
+    );
+    if (participant === undefined || participant.guestIdentityId === null) {
+      throw new ApplicationError(
+        'PARTICIPANT_NOT_FOUND',
+        `no active guest participant ${input.participantId}`,
+      );
+    }
+    const guest = await tx.getGuestIdentity(participant.guestIdentityId);
+    if (guest === null) {
+      throw new ApplicationError('PARTICIPANT_NOT_FOUND', 'guest identity missing');
+    }
+
+    const mintingManualNow = input.deliveryMode === 'MANUAL' && guest.deliveryMode !== 'MANUAL';
+    const clearingManual = input.deliveryMode !== 'MANUAL' && guest.deliveryMode === 'MANUAL';
+
+    assertDeliveryModeContract(
+      input.deliveryMode,
+      input.deliveryMode === 'MANUAL'
+        ? mintingManualNow
+          ? input.mintedAccessTokenHash
+          : (guest.accessTokenHash ?? undefined)
+        : undefined,
+      input.contactDestination,
+    );
+
+    const updatedGuest: GuestIdentityRecord = {
+      ...guest,
+      displayName: input.displayName,
+      deliveryMode: input.deliveryMode,
+      contactDestination:
+        input.deliveryMode === 'MANUAL' ? null : (input.contactDestination ?? null),
+      contactMethod: contactMethodFor(input.deliveryMode),
+    };
+    await tx.updateGuestIdentity(updatedGuest);
+    if (input.displayName !== participant.displayName) {
+      await tx.updateParticipant({
+        ...participant,
+        displayName: input.displayName,
+        updatedAt: ctx.clock.now().toISOString(),
+      });
+    }
+
+    let mintedNewManualToken = false;
+    let finalHash = guest.accessTokenHash;
+    let finalExpiresAt = guest.expiresAt;
+    if (mintingManualNow) {
+      if (input.mintedAccessTokenHash === undefined) {
+        throw new ApplicationError(
+          'INVALID_COMMAND',
+          'switching to manual delivery requires a minted token',
+        );
+      }
+      finalExpiresAt = new Date(
+        ctx.clock.now().getTime() + GUEST_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      await tx.setGuestDeliveryToken(guest.id, input.mintedAccessTokenHash, finalExpiresAt);
+      finalHash = input.mintedAccessTokenHash;
+      mintedNewManualToken = true;
+    } else if (clearingManual) {
+      await tx.clearGuestDeliveryToken(guest.id);
+      finalHash = null;
+      finalExpiresAt = null;
+    }
+
+    return {
+      participant: { ...participant, displayName: input.displayName },
+      guest: { ...updatedGuest, accessTokenHash: finalHash, expiresAt: finalExpiresAt },
+      mintedNewManualToken,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

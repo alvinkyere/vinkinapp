@@ -10,6 +10,12 @@ class ApiException implements Exception {
 
   bool get isAuthError => statusCode == 401;
 
+  /// ENG3: true for a request this app cancelled itself (screen disposed, superseded by a
+  /// newer request) — never a server or network failure. A caller that still has a reference
+  /// to the exception should skip error-state handling for it entirely rather than showing a
+  /// message for something nobody is around to see.
+  bool get isCancelled => code == 'REQUEST_CANCELLED';
+
   @override
   String toString() => message ?? code;
 }

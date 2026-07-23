@@ -83,6 +83,11 @@ export function unallocatedAmount(vink: Vink, participants: Participant[]): Mone
 
 export interface CreateVinkInput {
   purchaseCategory: PurchaseCategory;
+  /** Slice I5B (D39) — optional here (the five-step wizard, and any other pre-I5B caller,
+   * never sends one), even though the canonical Flutter screen requires it client-side
+   * before Continue enables. Trimmed defensively; empty-after-trim is treated as absent
+   * (never stored as `''`) so a blank string and an omitted field mean the same thing. */
+  purpose?: string;
   subtotalMinor: number;
   tipMinor: number;
   /** ISO-8601. ENG1 timer semantics: optional — the real client no longer computes and sends
@@ -142,6 +147,7 @@ export async function createVinkCommand(
     organizerUserId: ctx.actorUserId as UserId,
     publicCode: newPublicCode(),
     currency: 'USD',
+    purpose: input.purpose?.trim() ? input.purpose.trim() : null,
     purchaseCategory: input.purchaseCategory,
     paymentPolicy: policy.policyType,
     subtotalAmount: subtotal,

@@ -13,6 +13,7 @@ import {
   type GuestIdentityRecord,
   type LedgerPostingInput,
   type OutboxEventInput,
+  type PendingGuestDelivery,
   type UnitOfWork,
   type VinkReader,
   type VinkStateHistoryRow,
@@ -21,6 +22,7 @@ import {
 import type {
   Contribution,
   CurrencyCode,
+  GuestIdentityId,
   Participant,
   PurchaseAuthorization,
   RecoveryObligation,
@@ -51,6 +53,7 @@ function rowToVink(row: Row): Vink {
     organizerUserId: row.organizer_user_id as Vink['organizerUserId'],
     publicCode: row.public_code as string,
     currency,
+    purpose: (row.purpose as string | null) ?? null,
     purchaseCategory: row.purchase_category as Vink['purchaseCategory'],
     paymentPolicy: row.payment_policy as Vink['paymentPolicy'],
     subtotalAmount: { amountMinor: asMinor(row.subtotal_amount_minor, 'subtotal'), currency },
@@ -163,6 +166,20 @@ function rowToSettlement(row: Row): Settlement {
   };
 }
 
+function rowToGuestIdentity(row: Row): GuestIdentityRecord {
+  return {
+    id: row.g_id as GuestIdentityRecord['id'],
+    displayName: row.g_display_name as string,
+    accessTokenHash: (row.g_hash as string | null) ?? null,
+    expiresAt:
+      row.g_expires_at === null || row.g_expires_at === undefined ? null : toIso(row.g_expires_at),
+    createdAt: toIso(row.g_created_at),
+    contactDestination: (row.g_contact_destination as string | null) ?? null,
+    contactMethod: (row.g_contact_method as GuestIdentityRecord['contactMethod']) ?? null,
+    deliveryMode: row.g_delivery_mode as GuestIdentityRecord['deliveryMode'],
+  };
+}
+
 function rowToRecovery(row: Row): RecoveryObligation {
   const currency: CurrencyCode = 'USD';
   return {
@@ -190,12 +207,12 @@ class PostgresVinkTx implements VinkTx {
   async insertVink(vink: Vink): Promise<void> {
     try {
       await this.#sql`INSERT INTO vinks (
-        id, organizer_user_id, public_code, currency, purchase_category, payment_policy,
+        id, organizer_user_id, public_code, currency, purpose, purchase_category, payment_policy,
         subtotal_amount_minor, tip_amount_minor, maximum_amount_minor, required_amount_minor,
         funded_amount_minor, state, submission_deadline, processing_grace_deadline,
         merchant_lock_status, version, creation_idempotency_key, created_at, updated_at
       ) VALUES (
-        ${vink.id}, ${vink.organizerUserId}, ${vink.publicCode}, ${vink.currency},
+        ${vink.id}, ${vink.organizerUserId}, ${vink.publicCode}, ${vink.currency}, ${vink.purpose},
         ${vink.purchaseCategory}, ${vink.paymentPolicy}, ${vink.subtotalAmount.amountMinor},
         ${vink.tipAmount.amountMinor}, ${vink.maximumAmount.amountMinor},
         ${vink.requiredAmount.amountMinor}, ${vink.fundedAmount.amountMinor}, ${vink.state},
@@ -236,11 +253,68 @@ class PostgresVinkTx implements VinkTx {
   async insertGuestIdentity(guest: GuestIdentityRecord): Promise<void> {
     await this.#sql`INSERT INTO guest_identities (
         id, display_name, access_token_hash, expires_at, created_at,
-        contact_destination, contact_method
+        contact_destination, contact_method, delivery_mode
       ) VALUES (
         ${guest.id}, ${guest.displayName}, ${guest.accessTokenHash}, ${guest.expiresAt},
-        ${guest.createdAt}, ${guest.contactDestination}, ${guest.contactMethod}
+        ${guest.createdAt}, ${guest.contactDestination}, ${guest.contactMethod},
+        ${guest.deliveryMode}
       )`;
+  }
+
+  /** Slice I4B (D38). */
+  async getGuestIdentity(id: GuestIdentityId): Promise<GuestIdentityRecord | null> {
+    const rows = await this.#sql`
+      SELECT id AS g_id, display_name AS g_display_name, access_token_hash AS g_hash,
+             expires_at AS g_expires_at, created_at AS g_created_at,
+             contact_destination AS g_contact_destination, contact_method AS g_contact_method,
+             delivery_mode AS g_delivery_mode
+      FROM guest_identities WHERE id = ${id}`;
+    const row = rows[0] as Row | undefined;
+    return row === undefined ? null : rowToGuestIdentity(row);
+  }
+
+  /** Slice I4B (D38) — conditional claim; `RETURNING id` is empty when the WHERE clause
+   * excludes every row (already claimed), so `rows.length > 0` is the actual "did I win"
+   * signal, not just "did the statement execute." */
+  async claimGuestDeliveryToken(
+    guestIdentityId: GuestIdentityId,
+    tokenHash: string,
+    expiresAt: string,
+  ): Promise<boolean> {
+    const rows = await this.#sql`
+      UPDATE guest_identities SET access_token_hash = ${tokenHash}, expires_at = ${expiresAt}
+      WHERE id = ${guestIdentityId} AND access_token_hash IS NULL
+      RETURNING id`;
+    return rows.length > 0;
+  }
+
+  /** Slice I4B (D38) — resend's unconditional overwrite. */
+  async setGuestDeliveryToken(
+    guestIdentityId: GuestIdentityId,
+    tokenHash: string,
+    expiresAt: string,
+  ): Promise<void> {
+    await this.#sql`
+      UPDATE guest_identities SET access_token_hash = ${tokenHash}, expires_at = ${expiresAt}
+      WHERE id = ${guestIdentityId}`;
+  }
+
+  /** Slice I5B (D40). */
+  async clearGuestDeliveryToken(guestIdentityId: GuestIdentityId): Promise<void> {
+    await this.#sql`
+      UPDATE guest_identities SET access_token_hash = NULL, expires_at = NULL
+      WHERE id = ${guestIdentityId}`;
+  }
+
+  /** Slice I5B (D40) — never touches access_token_hash/expires_at, see the port doc comment. */
+  async updateGuestIdentity(guest: GuestIdentityRecord): Promise<void> {
+    await this.#sql`
+      UPDATE guest_identities SET
+        display_name = ${guest.displayName},
+        contact_destination = ${guest.contactDestination},
+        contact_method = ${guest.contactMethod},
+        delivery_mode = ${guest.deliveryMode}
+      WHERE id = ${guest.id}`;
   }
 
   /** Slice I4 — a member's own `users.email`/`users.phone` (migration 0001), for automatic-
@@ -549,24 +623,37 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
       SELECT p.*, g.id AS g_id, g.display_name AS g_display_name,
              g.access_token_hash AS g_hash, g.expires_at AS g_expires_at,
              g.created_at AS g_created_at, g.contact_destination AS g_contact_destination,
-             g.contact_method AS g_contact_method
+             g.contact_method AS g_contact_method, g.delivery_mode AS g_delivery_mode
       FROM guest_identities g
       JOIN participants p ON p.guest_identity_id = g.id
-      WHERE g.access_token_hash = ${accessTokenHash} AND g.expires_at > ${now.toISOString()}`;
+      WHERE g.access_token_hash = ${accessTokenHash} AND g.expires_at > ${now.toISOString()}
+        AND p.status != 'REMOVED'`;
     const row = rows[0] as Row | undefined;
     if (row === undefined) return null;
-    return {
-      participant: rowToParticipant(row),
-      guest: {
-        id: row.g_id as GuestIdentityRecord['id'],
-        displayName: row.g_display_name as string,
-        accessTokenHash: row.g_hash as string,
-        expiresAt: toIso(row.g_expires_at),
-        createdAt: toIso(row.g_created_at),
-        contactDestination: (row.g_contact_destination as string | null) ?? null,
-        contactMethod: (row.g_contact_method as GuestIdentityRecord['contactMethod']) ?? null,
-      },
-    };
+    return { participant: rowToParticipant(row), guest: rowToGuestIdentity(row) };
+  }
+
+  /** Slice I4B (D38) — every SMS/EMAIL-mode guest of this vink still awaiting a token mint. */
+  async listPendingGuestDeliveries(vinkId: VinkId): Promise<PendingGuestDelivery[]> {
+    const rows = await this.#sql`
+      SELECT p.id AS participant_id, g.id AS guest_id, g.display_name,
+             g.contact_destination, g.contact_method, p.allocated_amount_minor
+      FROM guest_identities g
+      JOIN participants p ON p.guest_identity_id = g.id
+      WHERE p.vink_id = ${vinkId} AND p.status != 'REMOVED'
+        AND g.delivery_mode IN ('SMS', 'EMAIL') AND g.access_token_hash IS NULL
+      ORDER BY p.joined_at, p.id`;
+    return rows.map((raw) => {
+      const row = raw as Row;
+      return {
+        participantId: row.participant_id as Participant['id'],
+        guestIdentityId: row.guest_id as PendingGuestDelivery['guestIdentityId'],
+        displayName: row.display_name as string,
+        contactDestination: row.contact_destination as string,
+        contactMethod: row.contact_method as 'EMAIL' | 'SMS',
+        allocatedAmountMinor: asMinor(row.allocated_amount_minor, 'allocated'),
+      };
+    });
   }
 
   async listParticipants(vinkId: VinkId): Promise<Participant[]> {

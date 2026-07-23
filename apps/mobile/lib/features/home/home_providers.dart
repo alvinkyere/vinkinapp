@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/auth/auth_controller.dart';
 import '../../core/models/vink.dart';
+import '../../core/repositories/vink_repository.dart';
 
 /// Organizer-owned vinks, and — once the server's `VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL`
 /// flag is on (Slice I2B) — vinks this signed-in user merely participates in too, each
@@ -9,11 +9,7 @@ import '../../core/models/vink.dart';
 /// exact organizer-only behavior with no client-side flag of its own (Phase 10 §12 — no
 /// second feature-flag system).
 final myVinksProvider = FutureProvider.autoDispose<List<Vink>>((ref) async {
-  final client = ref.read(apiClientProvider);
-  final response = await client.get('/api/v1/vinks');
-  return (response['vinks'] as List<dynamic>)
-      .map((entry) => Vink.fromJson(entry as Map<String, dynamic>))
-      .toList();
+  return ref.read(vinkRepositoryProvider).listMyVinks();
 });
 
 /// The D11 states that still need attention, in the Home screen's sense of "active" —
@@ -47,20 +43,16 @@ typedef ActiveVink = ({Vink vink, int participantCount});
 final activeVinksProvider = FutureProvider.autoDispose<List<ActiveVink>>((
   ref,
 ) async {
-  final client = ref.read(apiClientProvider);
+  final repository = ref.read(vinkRepositoryProvider);
   final vinks = await ref.watch(myVinksProvider.future);
   final active = vinks.where(_isActive).toList();
   final results = <ActiveVink>[];
   for (final vink in active) {
     if (vink.isOrganizerRole) {
-      final response = await client.get('/api/v1/vinks/${vink.id}');
-      final participants = response['participants'] as List<dynamic>;
-      results.add((vink: vink, participantCount: participants.length));
+      final snapshot = await repository.getSnapshot(vink.id);
+      results.add((vink: vink, participantCount: snapshot.participants.length));
     } else {
-      final response = await client.get(
-        '/api/v1/vinks/${vink.id}/participant-view',
-      );
-      final view = ParticipantVinkView.fromJson(response);
+      final view = await repository.getParticipantView(vink.id);
       results.add((
         vink: vink,
         participantCount: view.vink.totalParticipantCount,

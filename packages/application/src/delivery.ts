@@ -1,25 +1,30 @@
 /**
- * Slice I4 (D19/D27) — automatic invitation delivery, member path only.
+ * Slice I4 (D19/D27) — automatic invitation delivery, member path; Slice I4B (D38) extends
+ * it to guests.
  *
- * MEMBERS ONLY: a member participant's contact info lives on their own `users` row
- * (captured once, at registration) and the invite is a plain, non-secret "open the app" link
- * — nothing here is ever secret, so dispatch can safely be deferred to a later moment
- * (batched at `VINK_OPENED`) or retried, with no security concern.
+ * MEMBERS: a member participant's contact info lives on their own `users` row (captured once,
+ * at registration) and the invite is a plain, non-secret "open the app" link — nothing here
+ * is ever secret, so dispatch can safely be deferred to a later moment (batched at
+ * `VINK_OPENED`) or retried, with no security concern. `dispatchMemberInvitation`/
+ * `dispatchMemberInvitationsOnOpen` below call `ctx.delivery.provider.send()` directly since
+ * there is no secret in scope to protect.
  *
- * GUESTS ARE DELIBERATELY NOT HANDLED HERE. A guest's join link contains the raw guest
- * token, minted once by the transport (`newGuestToken()`,
- * `apps/api/src/modules/vinks/routes.ts`) — the application layer only ever sees its hash
- * (D14, hard rule). Automatic guest-invite dispatch can only happen in the same transport
- * request that mints the token, and is deferred (not built this pass — flagged in the I4
- * milestone report) because that route file was under active, unrelated concurrent edit for
- * this entire pass. `inviteGuestCommand` (`guest.ts`) still captures and stores the contact
- * destination now, so the transport-layer dispatch call site has something to read once it's
- * safe to wire it in.
+ * GUESTS ARE DELIBERATELY NOT FULLY HANDLED HERE — only the two narrow, secret-free
+ * primitives (`claimGuestDeliverySlot`/`recordGuestInvitationDeliveryResult`) live in this
+ * file. A guest's join link contains the raw guest token, minted once by the transport
+ * (`newGuestToken()`, `apps/api/src/modules/vinks/routes.ts`) — the application layer only
+ * ever sees its hash (D14, hard rule), so the actual `provider.send()` call for a guest (the
+ * one step that needs the plaintext URL) has to happen in the transport, not here. This file
+ * only offers the transport two atomic, hash-only building blocks: "claim the right to
+ * dispatch this guest" (before minting is wasted on a losing race) and "record what
+ * happened" (after the transport's own `provider.send()` call returns) — see
+ * `dispatchGuestInvitation` in `apps/api/src/modules/vinks/routes.ts` for how the transport
+ * sequences these around its own token mint + provider call.
  */
 
 import type { DeliveryProvider } from '../../delivery/src/index.ts';
-import type { Participant, Vink } from '../../domain/src/index.ts';
-import type { CommandContext, VinkTx } from './ports.ts';
+import type { GuestIdentityId, Participant, Vink } from '../../domain/src/index.ts';
+import type { CommandContext, InvitationDeliveryInput, VinkTx } from './ports.ts';
 
 export interface DeliveryCommandContext extends CommandContext {
   /** Omitted (as almost every existing caller/test does) is equivalent to `enabled: false`
@@ -69,7 +74,10 @@ export async function dispatchMemberInvitation(
     template: {
       kind: 'member_invite',
       organizerName: organizerDisplayName,
-      purpose: vink.purchaseCategory,
+      // Slice I5B (D39): the real, organizer-written purpose once one exists, falling back
+      // to the raw category for every Vink that doesn't have one (pre-I5B, or the five-step
+      // wizard) — never a broken/empty message for those.
+      purpose: vink.purpose ?? vink.purchaseCategory,
       yourShareMinor: participant.allocatedAmount.amountMinor,
       deadline: vink.submissionDeadline,
     },
@@ -103,4 +111,34 @@ export async function dispatchMemberInvitationsOnOpen(
   for (const member of members) {
     await dispatchMemberInvitation(ctx, tx, vink, member, organizer.displayName);
   }
+}
+
+/**
+ * Slice I4B (D38) — the transport-facing claim primitive. Never sees the raw token, only its
+ * hash: `tx.claimGuestDeliveryToken` sets it via a conditional `WHERE access_token_hash IS
+ * NULL` update and reports whether this call won. The transport must call this BEFORE
+ * calling `provider.send()` — a lost claim means someone else already dispatched (or is
+ * dispatching) this guest, so the freshly-minted-but-unclaimed token is simply discarded,
+ * never sent anywhere.
+ */
+export async function claimGuestDeliverySlot(
+  ctx: CommandContext,
+  guestIdentityId: GuestIdentityId,
+  tokenHash: string,
+  expiresAt: string,
+): Promise<boolean> {
+  return ctx.uow.run((tx) => tx.claimGuestDeliveryToken(guestIdentityId, tokenHash, expiresAt));
+}
+
+/**
+ * Slice I4B (D38) — records a guest dispatch attempt the transport already carried out
+ * (`provider.send()`, called with the plaintext URL this file never touches). Same audit
+ * shape and same locked rule as the member path (`insertInvitationDelivery`, Phase 5 §2): a
+ * failed send is recorded, never thrown, never blocks anything else.
+ */
+export async function recordGuestInvitationDeliveryResult(
+  ctx: CommandContext,
+  input: InvitationDeliveryInput,
+): Promise<void> {
+  await ctx.uow.run((tx) => tx.insertInvitationDelivery(input));
 }

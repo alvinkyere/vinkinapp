@@ -31,6 +31,15 @@ Future<String> _login(Dio dio, String username, String password) async {
   return response.data['accessToken'] as String;
 }
 
+/// Slice I5B — a semantic finder, by the field's own `VinkTextField` label, instead of a
+/// positional `find.byType(TextField).at(n)`. Register screen's field ORDER/COUNT is not
+/// this test's concern and has already drifted once (Slice I4 inserted two optional contact
+/// fields between username and password, silently invalidating the old positional indices —
+/// this test would have failed the moment anyone actually ran it on a device again). A label
+/// match survives any future reordering/insertion the same way.
+Finder _fieldByLabel(String label) =>
+    find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.labelText == label);
+
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -50,10 +59,9 @@ void main() {
     await tester.tap(find.text('CREATE AN ACCOUNT'));
     await tester.pumpAndSettle();
 
-    final registerFields = find.byType(TextField);
-    await tester.enterText(registerFields.at(0), 'Organizer');
-    await tester.enterText(registerFields.at(1), username);
-    await tester.enterText(registerFields.at(2), 'integration-test-password-1');
+    await tester.enterText(_fieldByLabel('Your name'), 'Organizer');
+    await tester.enterText(_fieldByLabel('Username'), username);
+    await tester.enterText(_fieldByLabel('Password (10+ characters)'), 'integration-test-password-1');
     await tester.tap(find.text('CREATE ACCOUNT'));
     await tester.pumpAndSettle();
 

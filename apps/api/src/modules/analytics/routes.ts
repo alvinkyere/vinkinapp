@@ -14,14 +14,17 @@ import { insertAnalyticsEvents } from './store.ts';
 
 const DEFAULT_LIMIT: RateLimitConfig = { windowMs: 60_000, max: 120 };
 
-const eventSchema = z.object({
+// Exported so ENG2's client-contract tests (apps/api/src/analytics-contract.test.ts) can
+// Zod-parse real @vinkin/client-contracts event literals against this exact wire schema —
+// the same schema this route enforces, not a hand-mirrored copy that could drift.
+export const eventSchema = z.object({
   eventName: z.string().min(1).max(120),
   vinkId: z.uuid().optional(),
   properties: z.record(z.string(), z.unknown()).default({}),
   occurredAt: z.iso.datetime(),
 });
 
-const batchSchema = z.object({
+export const batchSchema = z.object({
   clientId: z.string().min(1).max(120),
   app: z.enum(['organizer_mobile', 'guest_web']),
   events: z.array(eventSchema).min(1).max(50),

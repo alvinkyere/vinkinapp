@@ -8,6 +8,164 @@ contract.
 
 ---
 
+## D41 — Participant WS transport reuses `getParticipantVinkView` verbatim; no wire-envelope discriminator
+
+- **Decision:** `GET /api/v1/vinks/:vinkId/live`'s JWT branch now falls back to
+  `getParticipantVinkView` (Slice I2B's existing customer-safe read, already used by
+  `GET /vinks/:vinkId/participant-view`) when `getVinkSnapshot` throws `FORBIDDEN` — gated on
+  the same `VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL` flag that REST route already requires, so a
+  flag-off deployment is byte-identical to pre-D41 (still an unconditional 403 for anyone but
+  the organizer). No new field is added to the WS envelope to say which shape a `snapshot`
+  message carries: the client already knows statically, from which role/URL it connected with,
+  whether to expect `VinkSnapshot` or `ParticipantVinkView` — exactly how the guest branch
+  already relies on the client knowing its own connection used a `vgt_` token. The outbox
+  publisher and `RealtimeHub` are untouched: a participant subscribes to the same
+  `vink:{vinkId}` channel and gets the same lean per-event payloads every other connection on
+  that vink gets, same as guest support (PV10) already established — only the *initial*
+  snapshot's source differs, and only for participants.
+- **Date:** 2026-07-23
+- **Status:** ACCEPTED (Slice I2C, owner-directed closure of a gap I2B's own completion report
+  flagged as explicitly out of its scope)
+- **Reason:** I2B shipped `ParticipantVinkView` as an HTTP-only read and documented the missing
+  realtime channel as a known, deliberate gap. This closes it with the smallest possible
+  change — reusing the read function verbatim, piggybacking on the existing flag, touching
+  nothing else in the transport layer — rather than inventing a new privacy boundary or a new
+  message shape.
+- **Alternatives considered:** a wire-envelope discriminator field (e.g. `viewerRole`) on every
+  `snapshot` message (rejected: unnecessary — the client already knows its own role from how it
+  navigated to the screen, and guest support already proves this pattern works without one);
+  filtering the outbox publisher's per-event payload by viewer role (rejected: the lean payload
+  already carries no requester-specific data for anyone, guest included — no reason to start
+  now for participants specifically).
+- **Affected modules:** `apps/api/src/modules/realtime/routes.ts`, `apps/mobile`
+  (`vink_lobby_screen.dart` — wires the already-generic `RealtimeClient` into the participant
+  branch it previously skipped).
+- **Revisit trigger:** none identified — the Activity-feed gap (a participant's own events not
+  appearing in Home's "Recent activity") remains separately open, unaffected by this decision.
+
+## D40 — Draft participants are correctable before VINK_OPENED
+
+- **Decision:** while a Vink is still `DRAFT`, non-organizer participants may be edited or
+  removed through the canonical create flow. A guest's `displayName`, `contactDestination`,
+  and `deliveryMode` (SMS | EMAIL | MANUAL) are editable via a new
+  `PATCH /vinks/:vinkId/participants/:participantId/guest` route and
+  `editGuestParticipantCommand` (`packages/application/src/guest.ts`); a member has nothing
+  client-editable (their delivery is account-driven, per I4) so only removal applies to them.
+  Removal reuses the existing, unmodified `removeParticipantCommand` /
+  `DELETE /vinks/:vinkId/participants/:participantId` route — organizer-ownership and
+  DRAFT-only gating were already correct there, so no backend change was needed for removal
+  itself. The edit contract always carries the complete resulting state (displayName +
+  deliveryMode + conditional contactDestination), never a sparse patch, mirroring the existing
+  invite contract exactly and avoiding "was this field omitted or unchanged?" ambiguity. A
+  token is minted only when the edit transitions a guest INTO `MANUAL` from a different mode,
+  and cleared only when it transitions AWAY from `MANUAL`; same-mode edits never touch the
+  single-slot `access_token_hash` binding (D14/PV4) at all. The organizer is never removable
+  (unchanged `removeParticipantCommand` guard) — they may only zero their own Custom share,
+  the same way any participant's share is edited. Removing a participant recalculates Equal
+  immediately (it is computed live from the current participant list on every build); Custom
+  is not auto-rebalanced — a removal or edit that changes the assigned total simply leaves
+  Custom mode unreconciled again, same as any other manual-total mismatch, requiring the
+  organizer to re-enter amounts before Continue re-enables. No participant mutation of any
+  kind is exposed once the Vink leaves `DRAFT`.
+- **Date:** 2026-07-22
+- **Status:** ACCEPTED (Slice I5B, owner brief)
+- **Reason:** the canonical create flow (D30) collapses setup into two screens with no
+  separate Review page to catch mistakes before opening — without in-place correction, a
+  wrong guest destination or an accidentally-added person had no recovery path short of
+  abandoning the draft and starting over.
+- **Alternatives considered:** sparse-patch edit semantics (rejected: ambiguous "omitted vs.
+  unchanged" meaning, unlike every other contract in this codebase); auto-rebalancing Custom
+  amounts on removal (rejected: silently redistributing money a human explicitly typed is a
+  financial-semantics change the brief explicitly prohibited — "do not introduce post-open
+  participant mutation" implies the same caution pre-open, and D40 stays strictly UI/workflow,
+  not a split-engine change).
+- **Affected modules:** `packages/application` (`guest.ts`, `ports.ts`), `apps/api`
+  (`modules/vinks/routes.ts`, `modules/vinks/store.ts`), `apps/mobile`
+  (`canonical_create_vink_screen.dart`, new `canonical_edit_guest_sheet.dart`).
+- **Revisit trigger:** a future slice that lets an organizer correct participants after
+  opening (explicitly out of scope here).
+
+## D39 — Purpose is first-class Vink metadata, separate from category
+
+- **Decision:** `Vink` gains a nullable `purpose: string | null` field (migration 0013,
+  `ALTER TABLE vinks ADD COLUMN IF NOT EXISTS purpose TEXT`) — a human-readable payment
+  context ("Weekly grocery run") distinct from `purchaseCategory`, which remains a separate
+  policy input (`packages/domain/src/policy.ts`) untouched by this change. `purpose` is
+  accepted by `POST /api/v1/vinks` as an optional field at the API layer — the five-step
+  wizard keeps hitting the same endpoint unmodified and simply never sends one — but the
+  canonical create screen requires it client-side before Continue proceeds. Historical Vinks
+  and any client that omits it read back `purpose: null`; consumers needing a display value
+  fall back to category (`vink.purpose ?? vink.purchaseCategory`, applied in both the guest
+  and member invitation dispatch templates). Purpose is returned through `PublicVinkSummary`
+  (guest-facing projections) and the organizer's own Vink snapshot, unchanged by the D14
+  guest-privacy boundary since it carries no financial or identity information.
+- **Date:** 2026-07-22
+- **Status:** ACCEPTED (Slice I5B, owner brief)
+- **Reason:** Phase 4's screen contracts and PV13/ENG2's own flagged gap both required a
+  freeform Vink name/purpose field that the domain had never modeled; the canonical create
+  screen's "What are you paying for, and how much?" framing is meaningless without one.
+- **Alternatives considered:** inferring purpose from category (rejected: the brief explicitly
+  prohibits this — category is a coarse policy bucket, not a description a person wrote);
+  making purpose required at the API layer (rejected: would break the untouched five-step
+  wizard and any older client, for no benefit — the requirement is a canonical-flow UX
+  decision, not a data-integrity one).
+- **Affected modules:** `packages/domain` (`entities.ts`), `packages/application`
+  (`commands.ts`, `guest.ts`, `delivery.ts`), `apps/api` (`modules/vinks/routes.ts`,
+  `modules/vinks/store.ts`, migration 0013), `apps/mobile`
+  (`canonical_create_vink_screen.dart`, `core/models/vink.dart`, `local_draft_store.dart`).
+- **Revisit trigger:** a decision to enforce purpose as required at the API layer (would need
+  a backward-compatibility plan for the five-step wizard first).
+
+## D38 — Guest automatic-delivery tokens are minted at dispatch time, not invite time; resend always issues a fresh credential
+
+- **Decision:** for `deliveryMode: 'SMS' | 'EMAIL'`, `inviteGuestCommand` no longer mints a
+  guest access token at invite time (`guest_identities.access_token_hash`/`expires_at` are now
+  nullable, migration 0012). The raw token is minted only once dispatch can actually happen —
+  either immediately, in the same transport request, if the vink is already OPEN, or later, by
+  the transport's `POST /vinks/:vinkId/open` handler, batched at `VINK_OPENED` (D23) — using a
+  transport-side "claim" (a conditional `UPDATE ... WHERE access_token_hash IS NULL`) so at
+  most one real send ever happens per guest even under a defensive re-invocation.
+  `deliveryMode: 'MANUAL'` is unchanged from I4: the token still mints synchronously at invite
+  time, since the organizer needs it back in that same response to copy/share it themselves.
+  A new `POST /vinks/:vinkId/participants/:participantId/resend` endpoint exists for SMS/EMAIL
+  guests only; because the single-slot `access_token_hash` binding (D14/PV4) means only one
+  token can ever be valid for a guest at a time, and the raw value is never persisted, resend
+  cannot "replay" the original send — it always mints a brand-new token and invalidates
+  whichever one existed before, gated by a best-effort per-participant cooldown
+  (`GUEST_RESEND_COOLDOWN_SECONDS`, real config not a hardcoded constant, ENG1-timer-semantics
+  pattern) that doubles as the endpoint's only idempotency guard.
+- **Date:** 2026-07-22
+- **Status:** ACCEPTED (Slice I4B, engineering-track implementation of D19/D23/D27's own
+  already-ratified "automatic guest delivery" product decision — this is the mechanism, not a
+  new product choice)
+- **Reason:** D14 forbids the raw guest token from ever reaching `packages/application` or
+  being persisted anywhere; a token minted once at invite time and returned in that one HTTP
+  response cannot be recovered later to build a delivery message or a resend, no matter how
+  the dispatch trigger is architected. Deferring the mint to the exact moment dispatch (or
+  resend) can use it immediately is the only design that satisfies D14 while still letting
+  automatic delivery fire at `VINK_OPENED` (D23) for a guest invited during DRAFT.
+- **Alternatives considered:** keep minting at invite time and store the raw token somewhere
+  retrievable for later dispatch (rejected outright — directly violates D14, the hard rule
+  this whole design exists to satisfy); a resend that reuses the guest's existing hash instead
+  of minting fresh (rejected — impossible without violating D14 a second way, since the raw
+  value behind an already-stored hash can never be recovered to resend it); a per-operator or
+  per-participant rate-limiter service instead of a plain cooldown column read (rejected as
+  disproportionate — VinkIn has no rate-limiting infrastructure beyond the existing public-join
+  limiter, and a cooldown read against `invitation_deliveries.attempted_at` needs none).
+- **Affected modules:** `apps/api/src/db/migrations/0012_guest_delivery_mode.sql`;
+  `packages/application/src/ports.ts` (`GuestDeliveryMode`, nullable
+  `accessTokenHash`/`expiresAt`, `PendingGuestDelivery`, new `VinkTx`/`VinkReader` methods);
+  `packages/application/src/guest.ts` (`InviteGuestInput.deliveryMode`,
+  `resendGuestInvitationCommand`); `packages/application/src/delivery.ts`
+  (`claimGuestDeliverySlot`, `recordGuestInvitationDeliveryResult`);
+  `apps/api/src/modules/vinks/{routes,store}.ts`; `apps/api/src/config/env.ts`
+  (`GUEST_RESEND_COOLDOWN_SECONDS`).
+- **Revisit trigger:** a real SMS/email provider is selected (§4) — its actual delivery
+  latency/retry semantics may argue for a smarter resend/cooldown policy than a flat
+  per-participant window.
+
+---
+
 ## D37 — `recovery_required`'s canonical sentence is shown to the guest, not organizer-only
 
 - **Decision:** the sentence "We're resolving your payment. You don't need to pay again." is

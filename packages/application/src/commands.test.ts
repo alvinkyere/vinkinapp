@@ -61,6 +61,65 @@ describe('CreateVinkCommand', () => {
     );
   });
 
+  describe('Slice I5B (D39) — purpose as first-class Vink metadata', () => {
+    it('purpose is persisted separately from category — omitting it leaves purpose null, category untouched', async () => {
+      const store = new InMemoryVinkStore();
+      const { vink } = await createDraft(store);
+      assert.equal(vink.purpose, null, 'historical/old-flow-shaped creates never invent one');
+      assert.equal(vink.purchaseCategory, 'GROCERY');
+    });
+
+    it('a canonical caller supplying purpose gets it stored distinctly from category', async () => {
+      const store = new InMemoryVinkStore();
+      const { vink } = await createVinkCommand(ctx(store), {
+        purchaseCategory: 'GROCERY',
+        purpose: 'Team lunch',
+        subtotalMinor: 5_000,
+        tipMinor: 0,
+        submissionDeadline: FUTURE,
+        organizerDisplayName: 'Org',
+      });
+      assert.equal(vink.purpose, 'Team lunch');
+      assert.equal(vink.purchaseCategory, 'GROCERY');
+      assert.notEqual(vink.purpose, vink.purchaseCategory);
+    });
+
+    it('purpose is trimmed, and an empty/whitespace-only purpose is stored as null, not an empty string', async () => {
+      const store = new InMemoryVinkStore();
+      const { vink } = await createVinkCommand(ctx(store), {
+        purchaseCategory: 'GROCERY',
+        purpose: '   ',
+        subtotalMinor: 5_000,
+        tipMinor: 0,
+        submissionDeadline: FUTURE,
+        organizerDisplayName: 'Org',
+      });
+      assert.equal(vink.purpose, null);
+    });
+
+    it('purpose appears in the created Vink snapshot returned to the caller', async () => {
+      const store = new InMemoryVinkStore();
+      const { vink } = await createVinkCommand(ctx(store), {
+        purchaseCategory: 'RETAIL',
+        purpose: 'Cabin weekend supplies',
+        subtotalMinor: 8_000,
+        tipMinor: 0,
+        submissionDeadline: FUTURE,
+        organizerDisplayName: 'Org',
+      });
+      const snapshot = await getVinkSnapshot(store, vink.id, ORGANIZER);
+      assert.equal(snapshot.vink.purpose, 'Cabin weekend supplies');
+    });
+
+    it('a historical Vink with a null purpose remains fully readable — no crash, no invented value', async () => {
+      const store = new InMemoryVinkStore();
+      const { vink } = await createDraft(store); // no purpose — the exact old-flow shape
+      const snapshot = await getVinkSnapshot(store, vink.id, ORGANIZER);
+      assert.equal(snapshot.vink.purpose, null);
+      assert.equal(snapshot.vink.state, 'DRAFT');
+    });
+  });
+
   it('ENG1 timer semantics: an omitted submissionDeadline defaults to the fallback open duration (24h)', async () => {
     const store = new InMemoryVinkStore();
     const { vink } = await createVinkCommand(ctx(store), {

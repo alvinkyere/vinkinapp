@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,12 +8,13 @@ import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/auth/auth_controller.dart';
+import '../../core/commands/command_state.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/errors/failure_classifier.dart';
-import '../../core/errors/failure_handling.dart';
 import '../../core/models/vink.dart';
 import '../../core/networking/api_config.dart';
 import '../../core/realtime/realtime_client.dart';
+import '../../core/repositories/vink_repository.dart';
 import '../../design_system/components/money_text.dart';
 import '../../design_system/components/vink_bottom_sheet.dart';
 import '../../design_system/components/vink_buttons.dart';
@@ -64,21 +66,49 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
   RealtimeClient? _realtime;
   VinkSnapshot? _snapshot;
   Object? _error;
-  bool _cancelling = false;
-  String? _cancelError;
-  bool _contributing = false;
-  String? _contributionError;
 
-  // Slice I2B — participant-view-only state. Deliberately HTTP-only, no realtime channel:
-  // the `/live` WS route resolves non-guest tokens via the same organizer-only
-  // `getVinkSnapshot` this screen's organizer path uses (apps/api/src/modules/realtime/
-  // routes.ts), so it would 403 for a participant exactly like the REST snapshot route does
-  // — wiring participant realtime is out of this slice's scope and is flagged as a known gap
-  // in the I2B completion report, not silently assumed to work.
+  // ENG3 ("command state separate from view state"): each mutating action's own in-flight/
+  // result state, replacing what used to be three separate ad hoc `bool _busy` + `String?
+  // _error` pairs on this screen alone. `_setState` is shared by all three — a single
+  // `(fn) { if (mounted) setState(fn); }` closure standing in for the `if (mounted)` guard
+  // every one of the original handlers repeated individually.
+  void _guardedSetState(void Function() fn) {
+    if (mounted) setState(fn);
+  }
+
+  late final _cancelCommand = CommandRunner<void>(_guardedSetState, ref);
+  late final _contributionCommand = CommandRunner<void>(_guardedSetState, ref);
+  late final _participantContributionCommand = CommandRunner<void>(
+    _guardedSetState,
+    ref,
+  );
+
+  bool get _cancelling => _cancelCommand.state.isInProgress;
+  String? get _cancelError => switch (_cancelCommand.state) {
+    CommandFailure(:final failure) => failure.message,
+    _ => null,
+  };
+  bool get _contributing => _contributionCommand.state.isInProgress;
+  String? get _contributionError => switch (_contributionCommand.state) {
+    CommandFailure(:final failure) => failure.message,
+    _ => null,
+  };
+  bool get _participantContributing =>
+      _participantContributionCommand.state.isInProgress;
+  String? get _participantContributionError =>
+      switch (_participantContributionCommand.state) {
+        CommandFailure(:final failure) => failure.message,
+        _ => null,
+      };
+
+  // Slice I2B introduced this participant-view-only state as HTTP-only, flagging the missing
+  // realtime channel as a known gap. Slice I2C closes it: the `/live` WS route now falls back
+  // to the same customer-safe `ParticipantVinkView` read for a non-organizer JWT (flag-gated
+  // on `VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL`, same as the REST route), so this state is now
+  // kept current by both the initial HTTP fetch below AND the realtime channel — see
+  // `_connect`/`_onMessage`.
   ParticipantVinkView? _participantView;
   Object? _participantError;
-  bool _participantContributing = false;
-  String? _participantContributionError;
 
   // Multiple WS events can arrive in quick succession (e.g. the organizer, a member, and a
   // guest all contributing within milliseconds of each other), each firing its own
@@ -88,34 +118,44 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
   // recently *issued* fetch is ever applied.
   int _snapshotRequestId = 0;
 
+  // ENG3 ("request cancellation"): every read this screen issues shares one token, cancelled
+  // on dispose — a request that's still in flight when the organizer navigates away is
+  // aborted outright rather than left to finish uselessly against a screen nobody can see.
+  // `_snapshotRequestId` above already prevents an in-flight-but-superseded fetch from
+  // corrupting state (defense that stays regardless), but doesn't stop the request itself
+  // from completing on the wire — cancellation does.
+  final _readCancelToken = CancelToken();
+
   @override
   void initState() {
     super.initState();
+    // Slice I2C: both roles now open the realtime channel — `_connect()` accepts any signed-in
+    // JWT (organizer or participant) with no role-specific logic of its own; the server decides
+    // what snapshot shape to send back. The realtime channel remains an enhancement, not the
+    // source of truth for first paint (ENG1 §3), for participant same as organizer: fetch the
+    // authoritative snapshot over plain, boundedly-timed-out HTTP immediately too, rather than
+    // leaving the screen on "Loading…" until a WebSocket `snapshot` frame happens to arrive.
+    // Whichever of the two resolves first shows the lobby; the other keeps it current.
+    _connect();
     if (widget.isParticipantView) {
       unawaited(_loadParticipantView());
-      return;
+    } else {
+      unawaited(_loadInitialSnapshot());
     }
-    _connect();
-    // The realtime channel is an enhancement, not the source of truth for first paint (ENG1
-    // §3): fetch the authoritative snapshot over plain, boundedly-timed-out HTTP immediately,
-    // rather than leaving the screen on "Connecting…" until a WebSocket `snapshot` frame
-    // happens to arrive. Whichever of the two resolves first shows the lobby; the other keeps
-    // it current.
-    unawaited(_loadInitialSnapshot());
   }
 
   Future<void> _loadParticipantView() async {
     try {
-      final response = await ref
-          .read(apiClientProvider)
-          .get('/api/v1/vinks/${widget.vinkId}/participant-view');
+      final view = await ref
+          .read(vinkRepositoryProvider)
+          .getParticipantView(widget.vinkId, cancelToken: _readCancelToken);
       if (!mounted) return;
       setState(() {
-        _participantView = ParticipantVinkView.fromJson(response);
+        _participantView = view;
         _participantError = null;
       });
     } on ApiException catch (error) {
-      if (!mounted) return;
+      if (!mounted || error.isCancelled) return;
       setState(() => _participantError = error);
     }
   }
@@ -124,23 +164,11 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
   /// (`POST .../contributions/authorize`, resolved by the caller's own user id) — no new
   /// financial logic, mirrors `_payMyShare` above.
   Future<void> _payMyShareAsParticipant() async {
-    setState(() {
-      _participantContributing = true;
-      _participantContributionError = null;
-    });
-    try {
-      await ref
-          .read(apiClientProvider)
-          .post('/api/v1/vinks/${widget.vinkId}/contributions/authorize');
-      await _loadParticipantView();
-    } on ApiException catch (error) {
-      setState(
-        () =>
-            _participantContributionError = presentFailure(ref, error).message,
-      );
-    } finally {
-      if (mounted) setState(() => _participantContributing = false);
-    }
+    await _participantContributionCommand.run(
+      () =>
+          ref.read(vinkRepositoryProvider).authorizeContribution(widget.vinkId),
+      onSuccess: (_) => _loadParticipantView(),
+    );
   }
 
   void _connect() {
@@ -166,11 +194,10 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
   Future<void> _loadInitialSnapshot() async {
     final requestId = ++_snapshotRequestId;
     try {
-      final response = await ref
-          .read(apiClientProvider)
-          .get('/api/v1/vinks/${widget.vinkId}');
+      final snapshot = await ref
+          .read(vinkRepositoryProvider)
+          .getSnapshot(widget.vinkId, cancelToken: _readCancelToken);
       if (!mounted || requestId != _snapshotRequestId) return;
-      final snapshot = VinkSnapshot.fromJson(response);
       // ENG1 #5 setup recovery: this screen is for OPEN-and-beyond live state, not setup —
       // a DRAFT vink (however this screen was reached: a stale link, a deep link, a card
       // that hasn't refreshed) belongs in the create flow's resume path instead. Decided
@@ -184,7 +211,10 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
         _error = null;
       });
     } on ApiException catch (error) {
-      if (!mounted || requestId != _snapshotRequestId || _snapshot != null) {
+      if (!mounted ||
+          requestId != _snapshotRequestId ||
+          _snapshot != null ||
+          error.isCancelled) {
         return;
       }
       setState(() => _error = error);
@@ -193,6 +223,27 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
 
   void _onMessage(Map<String, dynamic> message) {
     if (!mounted) return;
+    // Slice I2C: a participant's own connection gets `ParticipantVinkView`-shaped snapshots,
+    // never `VinkSnapshot` — the screen already knows this statically from `widget.role`, the
+    // same way guest-web already knows its own connection is guest-scoped. Lean per-event
+    // patches aren't hand-applied here the way the organizer path does below:
+    // `ParticipantVinkSummary`'s `confirmedAmountMinor`/`confirmedParticipantCount` (from
+    // `contributionProgress`) don't map 1:1 onto the lean payload's `fundedAmountMinor`, so a
+    // full HTTP refetch is the correct, simplest fit — same "refetch on event" fallback this
+    // screen already relies on for the organizer path's own card/participants/allowedActions.
+    if (widget.isParticipantView) {
+      if (message['type'] == 'snapshot') {
+        setState(() {
+          _participantView = ParticipantVinkView.fromJson(
+            message['snapshot'] as Map<String, dynamic>,
+          );
+          _participantError = null;
+        });
+      } else {
+        unawaited(_loadParticipantView());
+      }
+      return;
+    }
     if (message['type'] == 'snapshot') {
       setState(() {
         _snapshot = VinkSnapshot.fromJson(
@@ -239,11 +290,11 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
   Future<void> _refreshSnapshot() async {
     final requestId = ++_snapshotRequestId;
     try {
-      final response = await ref
-          .read(apiClientProvider)
-          .get('/api/v1/vinks/${widget.vinkId}');
+      final snapshot = await ref
+          .read(vinkRepositoryProvider)
+          .getSnapshot(widget.vinkId, cancelToken: _readCancelToken);
       if (!mounted || requestId != _snapshotRequestId) return;
-      setState(() => _snapshot = VinkSnapshot.fromJson(response));
+      setState(() => _snapshot = snapshot);
     } on ApiException {
       // The next WS message (or manual retry) will trigger another attempt; the lobby
       // already reflects the lightweight state/funded patch applied above.
@@ -251,53 +302,35 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
   }
 
   Future<void> _cancelVink() async {
-    setState(() {
-      _cancelling = true;
-      _cancelError = null;
-    });
-    try {
-      await ref
-          .read(apiClientProvider)
-          .post('/api/v1/vinks/${widget.vinkId}/cancel');
-      ref.invalidate(myVinksProvider);
-    } on ApiException catch (error) {
-      // ENG1 #4: cancel is a one-way transition (packages/domain/src/vink-state-machine.ts)
-      // — a double tap hits ILLEGAL_TRANSITION, classified as conflict. Either way the
-      // authoritative state is what matters now, so refresh and show it rather than a raw
-      // error for something that may well have already succeeded.
-      final failure = presentFailure(ref, error);
-      await _refreshSnapshot();
-      if (!mounted) return;
-      if (failure.category != FailureCategory.conflict) {
-        setState(() => _cancelError = failure.message);
-      }
-    } finally {
-      if (mounted) setState(() => _cancelling = false);
-    }
+    // ENG1 #4: cancel is a one-way transition (packages/domain/src/vink-state-machine.ts) —
+    // a double tap hits ILLEGAL_TRANSITION, classified as conflict. Either way the
+    // authoritative state is what matters now, so refresh and show it rather than a raw
+    // error for something that may well have already succeeded (`onFailure` returning
+    // `true` for a conflict suppresses it from ever reaching `_cancelError`).
+    await _cancelCommand.run(
+      () => ref.read(vinkRepositoryProvider).cancelVink(widget.vinkId),
+      onSuccess: (_) async => ref.invalidate(myVinksProvider),
+      onFailure: (failure) async {
+        await _refreshSnapshot();
+        return failure.category == FailureCategory.conflict;
+      },
+    );
   }
 
   /// The organizer's own "Pay my $X" — the exact same contribution engine every other
   /// participant uses (`POST .../contributions/authorize`, resolved by the caller's own
   /// user id), never a shortcut and never a hidden default.
   Future<void> _payMyShare() async {
-    setState(() {
-      _contributing = true;
-      _contributionError = null;
-    });
-    try {
-      await ref
-          .read(apiClientProvider)
-          .post('/api/v1/vinks/${widget.vinkId}/contributions/authorize');
-      await _refreshSnapshot();
-    } on ApiException catch (error) {
-      setState(() => _contributionError = presentFailure(ref, error).message);
-    } finally {
-      if (mounted) setState(() => _contributing = false);
-    }
+    await _contributionCommand.run(
+      () =>
+          ref.read(vinkRepositoryProvider).authorizeContribution(widget.vinkId),
+      onSuccess: (_) => _refreshSnapshot(),
+    );
   }
 
   @override
   void dispose() {
+    _readCancelToken.cancel();
     _realtime?.dispose();
     super.dispose();
   }
@@ -394,6 +427,7 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
                       label: 'Retry',
                       onPressed: () {
                         setState(() => _participantError = null);
+                        _realtime?.connect();
                         unawaited(_loadParticipantView());
                       },
                     ),

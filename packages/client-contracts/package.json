@@ -1,0 +1,20 @@
+{
+  "name": "@vinkin/client-contracts",
+  "version": "0.0.1",
+  "private": true,
+  "description": "ENG2 — typed screen/view-model and interaction-event contracts for every canonical consumer surface, grounded in docs/design/phase-4-screen-contracts.md and docs/design/phase-5-button-interaction-contracts.md. Documentation-and-types only: no transport, no rendering, no rewiring of apps/mobile or apps/guest-web.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

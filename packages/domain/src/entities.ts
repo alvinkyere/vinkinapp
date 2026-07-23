@@ -37,6 +37,12 @@ export interface Vink {
   organizerUserId: UserId;
   publicCode: string; // cryptographically random, never sequential (Plan §21)
   currency: CurrencyCode;
+  /** Slice I5B (D39) — human-readable payment context ("Team lunch"), non-financial metadata,
+   * deliberately separate from `purchaseCategory` (the policy input `policyForCategory`
+   * reads — never inferred from this field). Null for every Vink created before this slice
+   * and for every Vink the five-step wizard still creates (flag off) — a permanent, valid
+   * state, not a backfill gap. */
+  purpose: string | null;
   purchaseCategory: PurchaseCategory;
   paymentPolicy: PolicyType;
   subtotalAmount: Money;

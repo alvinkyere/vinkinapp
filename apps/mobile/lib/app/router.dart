@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/auth/auth_controller.dart';
+import '../core/config/feature_flags.dart';
 import '../features/activity/activity_screen.dart';
+import '../features/create_vink/canonical/canonical_create_vink_screen.dart';
 import '../features/create_vink/create_vink_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/onboarding/login_screen.dart';
@@ -15,7 +17,16 @@ import 'nav_shell.dart';
 /// The Flutter client never re-derives backend state-machine logic (Plan §19) — it also
 /// never re-derives AUTH logic: this redirect is the one place session state decides what
 /// screen is reachable.
-GoRouter buildRouter(Ref ref) {
+///
+/// Slice I5 (D30): [canonicalCreateFlow] defaults to `FeatureFlags.canonicalCreateFlow`
+/// (the real, `--dart-define`-driven flag) but stays an overridable parameter so tests can
+/// exercise both the flag-on and flag-off route builders without recompiling. Both
+/// `/create-vink` and `/create-vink/resume/:vinkId` gate their builder on this single flag —
+/// "the entire screen sequence as one unit," never a half-migrated hybrid — so neither Home
+/// nor `VinkLobbyScreen`'s own DRAFT redirect (both untouched, still literal `/create-vink`
+/// path strings) needs to know which flow is active.
+GoRouter buildRouter(Ref ref, {bool? canonicalCreateFlow}) {
+  final useCanonicalCreateFlow = canonicalCreateFlow ?? FeatureFlags.canonicalCreateFlow;
   return GoRouter(
     initialLocation: '/welcome',
     refreshListenable: _AuthListenable(ref),
@@ -47,15 +58,18 @@ GoRouter buildRouter(Ref ref) {
       // creating/viewing a Vink is a focused task, not a persistent tab destination.
       GoRoute(
         path: '/create-vink',
-        builder: (context, state) => const CreateVinkScreen(),
+        builder: (context, state) => useCanonicalCreateFlow
+            ? const CanonicalCreateVinkScreen()
+            : const CreateVinkScreen(),
       ),
       // ENG1 #5 setup recovery: resumes a server-persisted DRAFT Vink at its exact valid
       // step, rather than starting a new one. Reached from Home's Active Vinks card and from
       // VinkLobbyScreen's own DRAFT redirect — never from a "Draft" label alone deciding.
       GoRoute(
         path: '/create-vink/resume/:vinkId',
-        builder: (context, state) =>
-            CreateVinkScreen(resumeVinkId: state.pathParameters['vinkId']!),
+        builder: (context, state) => useCanonicalCreateFlow
+            ? CanonicalCreateVinkScreen(resumeVinkId: state.pathParameters['vinkId']!)
+            : CreateVinkScreen(resumeVinkId: state.pathParameters['vinkId']!),
       ),
       // Slice I2B: `?role=participant` (set only by Home's participant-role card tap) tells
       // the lobby to use the customer-safe participant-view route instead of the

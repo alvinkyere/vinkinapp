@@ -60,6 +60,14 @@ void main() {
       }
     });
 
+    test('ENG3: APP_VERSION_UNSUPPORTED (426) is terminal — an update, not a retry, is the only way forward', () {
+      final result = _classify(426, 'APP_VERSION_UNSUPPORTED');
+      expect(result.category, FailureCategory.terminal);
+      expect(result.canRetry, isFalse);
+      expect(result.requiresSignIn, isFalse);
+      expect(result.message, 'This version of VinkIn is no longer supported. Please update the app.');
+    });
+
     test('INVALID_SPLIT, UNSUPPORTED_SPLIT_METHOD, VALIDATION_FAILED, INVALID_AMOUNT are validation', () {
       for (final code in ['INVALID_SPLIT', 'UNSUPPORTED_SPLIT_METHOD', 'VALIDATION_FAILED', 'INVALID_AMOUNT']) {
         final result = _classify(422, code);

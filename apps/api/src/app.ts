@@ -22,6 +22,7 @@ import { registerRealtimeRoutes } from './modules/realtime/routes.ts';
 import { registerOpsRoutes } from './modules/ops/routes.ts';
 import { registerAnalyticsRoutes } from './modules/analytics/routes.ts';
 import { InProcessRealtimeHub, type RealtimeHub } from './realtime/hub.ts';
+import { isAppVersionSupported } from './app-version.ts';
 import type { FinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 import type { DeliveryProvider } from '../../../packages/delivery/src/index.ts';
 
@@ -41,6 +42,11 @@ export interface AppDeps extends HealthChecks {
   publicRateLimits?: PublicRateLimits;
   /** Shared with the outbox publisher (server.ts) so published events reach live sockets. */
   hub?: RealtimeHub;
+  /** Slice I4B (D38) — test-only hook: a writable stream Pino writes every log line to,
+   * letting a test assert on the actual serialized log output (e.g. "no raw guest token or
+   * contact destination ever appears in a log line") instead of trusting that no code path
+   * logs one. Omitted in production — Fastify/Pino default to stdout. */
+  logStream?: NodeJS.WritableStream;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -48,6 +54,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     logger: {
       level: deps.env.LOG_LEVEL,
       redact: ['req.headers.authorization'],
+      ...(deps.logStream !== undefined && { stream: deps.logStream }),
     },
     genReqId: () => randomUUID(),
     logController: new LogController({
@@ -59,6 +66,24 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   app.addHook('onSend', async (request, reply) => {
     reply.header('x-request-id', request.id);
   });
+
+  // ENG3 ("app-version enforcement"): a no-op whenever VINKIN_MINIMUM_APP_VERSION is unset
+  // (the default) or a request carries no x-app-version header at all — apps/guest-web and
+  // apps/operations-console never send one, so they're unaffected by construction. Only
+  // apps/mobile ever sends this header (ApiClient's own interceptor).
+  if (deps.env.VINKIN_MINIMUM_APP_VERSION !== undefined) {
+    const minimumVersion = deps.env.VINKIN_MINIMUM_APP_VERSION;
+    app.addHook('onRequest', async (request, reply) => {
+      const clientVersion = request.headers['x-app-version'];
+      if (typeof clientVersion !== 'string') return;
+      if (!isAppVersionSupported(clientVersion, minimumVersion)) {
+        return reply.code(426).send({
+          error: 'APP_VERSION_UNSUPPORTED',
+          message: 'This version of VinkIn is no longer supported. Please update the app.',
+        });
+      }
+    });
+  }
 
   // MUST be awaited before any route registers: @fastify/websocket wraps handlers via an
   // `onRoute` hook it adds inside its (deferred, avvio-queued) plugin body. Registering it

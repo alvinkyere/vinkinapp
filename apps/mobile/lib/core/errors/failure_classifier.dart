@@ -92,6 +92,10 @@ const _terminalCodes = {
   'PARTICIPANT_NOT_FOUND',
   'USER_NOT_FOUND',
   'FORBIDDEN',
+  // ENG3 ("app-version enforcement", 426 Upgrade Required): retrying — with the same or
+  // different input — can never succeed until the app itself is updated, the exact shape
+  // `terminal` already exists for. No new FailureCategory needed.
+  'APP_VERSION_UNSUPPORTED',
 };
 const _validationCodes = {
   'INVALID_SPLIT',

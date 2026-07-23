@@ -37,4 +37,30 @@ describe('environment configuration', () => {
   it('requires JWT_SECRET to be at least 32 characters', () => {
     assert.throws(() => loadEnv({ JWT_SECRET: 'short' }));
   });
+
+  // Slice I4B (D38) — the required "environment enforcement" test the I4/I4B briefs both
+  // named but neither had actually written yet (confirmed by grep before writing this).
+  it('refuses VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED outside development/test', () => {
+    for (const environment of ['staging', 'production', 'demo']) {
+      assert.throws(
+        () =>
+          loadEnv({
+            VINKIN_ENV: environment,
+            VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED: '1',
+            ...(environment === 'production' || environment === 'staging'
+              ? { JWT_SECRET: 'a-genuinely-configured-secret-value-123' }
+              : {}),
+            ...(environment === 'demo' ? { OPERATOR_PASSWORD: 'a-genuinely-configured-pw' } : {}),
+          }),
+        /VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED must stay off/,
+      );
+    }
+    for (const environment of ['development', 'test']) {
+      const env = loadEnv({
+        VINKIN_ENV: environment,
+        VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED: '1',
+      });
+      assert.equal(env.VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED, '1');
+    }
+  });
 });

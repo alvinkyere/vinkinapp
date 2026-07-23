@@ -26,6 +26,22 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- ENG3 Slice 4 ("deterministic deep-link routing"): a custom URL scheme, not Universal
+	     Links — those need a real domain serving a signed apple-app-site-association file
+	     (ENG4, not yet stood up). vinkin://vinks/:vinkId opens directly to that Vink's Lobby
+	     (lib/app/deep_links.dart); vinkin://g/:token is deliberately NOT handled here — that
+	     path is apps/guest-web's own route (Phase 4 §13), never the organizer app's. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>org.vinkin.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>vinkin</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
