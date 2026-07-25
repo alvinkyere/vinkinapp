@@ -271,4 +271,29 @@ describe('mock contribution flow (Plan PV5)', () => {
       isAppError('INVALID_COMMAND'),
     );
   });
+
+  it('Invites feature (D44): an INVITED (not yet accepted) participant cannot authorize a contribution — FORBIDDEN', async () => {
+    const store = new InMemoryVinkStore();
+    const provider = new MockFinancialProvider({ now: () => NOW });
+    const { vink } = await createVinkCommand(organizerCtx(store), {
+      purchaseCategory: 'GROCERY',
+      subtotalMinor: 12_000,
+      tipMinor: 0,
+      submissionDeadline: DEADLINE,
+      organizerDisplayName: 'Org',
+    });
+    await addParticipantCommand(
+      { ...organizerCtx(store), invitesEnabled: true },
+      { vinkId: vink.id, userId: 'user-a' as UserId, displayName: 'a' },
+    );
+    await setSplitCommand(organizerCtx(store), { vinkId: vink.id, method: 'EQUAL' });
+    await openVinkCommand(organizerCtx(store), { vinkId: vink.id });
+    await assert.rejects(
+      authorizeContributionCommand(
+        { uow: store, clock: { now: () => NOW }, correlationId: 'test', provider },
+        { vinkId: vink.id, requester: { kind: 'user', userId: 'user-a' } },
+      ),
+      isAppError('FORBIDDEN'),
+    );
+  });
 });

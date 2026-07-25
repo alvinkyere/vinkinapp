@@ -24,6 +24,11 @@ String humanErrorMessage(ApiException error) {
     'INVALID_AMOUNT' => 'Enter an amount greater than zero.',
     'APP_VERSION_UNSUPPORTED' =>
       'This version of VinkIn is no longer supported. Please update the app.',
+    // ENG3 Slice 6 — moved here verbatim from login_screen.dart/register_screen.dart's own
+    // ad hoc `error.code == '...' ? '...' : '...'` checks; same exact text, now the one
+    // shared table every screen's failure handling reads from.
+    'INVALID_CREDENTIALS' => 'Incorrect username or password.',
+    'USERNAME_TAKEN' => 'That username is already taken.',
     _ => "Something went wrong. Nothing was charged — try again.",
   };
 }

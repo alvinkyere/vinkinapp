@@ -77,7 +77,10 @@ void main() {
       ),
     );
     expect(find.byType(VinkPrimaryButton), findsOneWidget);
-    await tester.tap(find.text('OPEN VINK'));
+    // The sheet's own title heading also reads "Open Vink" in sentence case now that the
+    // button label is no longer forced uppercase — target the button specifically, not the
+    // ambiguous plain text.
+    await tester.tap(find.widgetWithText(VinkPrimaryButton, 'Open Vink'));
     expect(tapCount, 1);
 
     // Re-pump with submitting: true (the caller's own setState after the tap) — the button

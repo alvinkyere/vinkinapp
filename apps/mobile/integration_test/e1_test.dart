@@ -65,7 +65,10 @@ void main() {
     await tester.tap(find.text('CREATE ACCOUNT'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Hi, Organizer'), findsOneWidget);
+    // Slice I6 (R0): the persistent tagline/greeting is gone from signed-in Home, replaced
+    // with a restrained identity mark + Profile access — no "Hi, $firstName" to assert here
+    // anymore.
+    expect(find.text('START A VINK'), findsOneWidget);
     await binding.takeScreenshot('01-home');
 
     // --- Create Vink: Purpose ------------------------------------------------------

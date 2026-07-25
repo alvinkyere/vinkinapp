@@ -13,6 +13,7 @@ export * from './contributions.ts';
 export * from './purchases.ts';
 export * from './recovery.ts';
 export * from './refunds.ts';
+export * from './invites.ts';
 export * from './support/transition.ts';
 export * from './support/contribution-transition.ts';
 export * from './support/public-code.ts';

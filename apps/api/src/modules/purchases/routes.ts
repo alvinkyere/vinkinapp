@@ -6,7 +6,7 @@
  * are environment-allowlisted (governance §5) and mock-only.
  */
 
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   ApplicationError,
@@ -30,6 +30,10 @@ import type { Sql } from '../../db/client.ts';
 import { simulatorRoutesPermitted } from '../../config/simulator-guard.ts';
 import { authorizationIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
+import { toCommandLogger } from '../../observability/command-logger.ts';
+import { withProviderLogging } from '../../observability/provider-logging.ts';
+import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
+import { tagActiveSpan } from '../../observability/tracing.ts';
 
 const merchantSchema = z.object({
   merchantName: z.string().min(1).max(120).default('Simulated Merchant'),
@@ -61,12 +65,22 @@ export function registerPurchaseRoutes(
   env: Env,
   sql: Sql,
   provider: FinancialProvider,
+  metrics: Metrics = NOOP_METRICS,
 ): void {
   if (!simulatorRoutesPermitted(env.VINKIN_ENV)) return; // PV6 surface is simulator-only
   const store = new PostgresVinkStore(sql);
 
-  function contextFor(requestId: string): PurchaseCommandContext {
-    return { uow: store, clock: { now: () => new Date() }, correlationId: requestId, provider };
+  function contextFor(request: FastifyRequest): PurchaseCommandContext {
+    const correlationId = String(request.id);
+    const logger = toCommandLogger(request.log);
+    tagActiveSpan({ 'correlation.id': correlationId });
+    return {
+      uow: store,
+      clock: { now: () => new Date() },
+      correlationId,
+      provider: withProviderLogging(provider, correlationId, logger, metrics),
+      logger,
+    };
   }
 
   async function handle(
@@ -87,7 +101,7 @@ export function registerPurchaseRoutes(
   app.post('/internal/simulator/vinks/:vinkId/provision-card', async (request, reply) => {
     const { vinkId } = vinkIdParams.parse(request.params);
     return handle(reply, 201, async () => {
-      const card = await provisionCardCommand(contextFor(String(request.id)), {
+      const card = await provisionCardCommand(contextFor(request), {
         vinkId: vinkId as VinkId,
       });
       return {
@@ -122,7 +136,7 @@ export function registerPurchaseRoutes(
           providerAuthorizationId = outcome.providerAuthorizationId;
         }
       }
-      const result = await authorizeMerchantPurchaseCommand(contextFor(String(request.id)), {
+      const result = await authorizeMerchantPurchaseCommand(contextFor(request), {
         vinkId: vinkId as VinkId,
         providerAuthorizationId,
         merchantName: body.merchantName,
@@ -145,7 +159,7 @@ export function registerPurchaseRoutes(
       const { authorizationId } = authorizationIdParams.parse(request.params);
       const body = z.object({ vinkId: z.uuid() }).parse(request.body);
       return handle(reply, 200, async () => {
-        const vink = await reverseAuthorizationCommand(contextFor(String(request.id)), {
+        const vink = await reverseAuthorizationCommand(contextFor(request), {
           vinkId: body.vinkId as VinkId,
           authorizationId,
         });
@@ -176,7 +190,7 @@ export function registerPurchaseRoutes(
             currency: 'USD',
           });
         }
-        const result = await settlePurchaseCommand(contextFor(String(request.id)), {
+        const result = await settlePurchaseCommand(contextFor(request), {
           vinkId: body.vinkId as VinkId,
           authorizationId,
           settledAmountMinor: body.settledAmountMinor,

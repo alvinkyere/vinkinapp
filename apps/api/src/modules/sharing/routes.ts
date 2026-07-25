@@ -21,6 +21,8 @@ import { GUEST_TOKEN_PREFIX, hashGuestToken, newGuestToken } from '../../auth/gu
 import { makeRateLimiter, type RateLimitConfig } from '../../middleware/rate-limit.ts';
 import { publicCodeParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
+import { toCommandLogger } from '../../observability/command-logger.ts';
+import { tagActiveSpan } from '../../observability/tracing.ts';
 
 export interface PublicRateLimits {
   publicView: RateLimitConfig;
@@ -127,12 +129,14 @@ export function registerSharingRoutes(
       const { publicCode } = publicCodeParams.parse(request.params);
       const body = joinSchema.parse(request.body);
       const { token, tokenHash } = newGuestToken();
+      tagActiveSpan({ 'correlation.id': String(request.id) });
       try {
         const joined = await guestJoinVinkCommand(
           {
             uow: store,
             clock: { now: () => new Date() },
             correlationId: String(request.id),
+            logger: toCommandLogger(request.log),
           },
           { publicCode, displayName: body.displayName, accessTokenHash: tokenHash },
         );

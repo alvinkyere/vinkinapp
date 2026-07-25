@@ -102,6 +102,16 @@ const _validationCodes = {
   'UNSUPPORTED_SPLIT_METHOD',
   'VALIDATION_FAILED',
   'INVALID_AMOUNT',
+  // ENG3 Slice 6 ("typed error mapping completion", login_screen.dart/register_screen.dart):
+  // wrong credentials / a taken username are exactly "retrying the identical request fails
+  // identically, but different input could succeed" — validation's own definition. Both
+  // happen to arrive as HTTP 401/409 (apps/api/src/modules/auth/routes.ts,
+  // `authErrorStatus`), which is why these are checked (see below) *before* the blanket
+  // [ApiException.isAuthError] fallback, not after it — a wrong-password 401 is not "your
+  // session died," and misclassifying it as [FailureCategory.authenticationRequired] would be
+  // wrong on the login screen of all places.
+  'INVALID_CREDENTIALS',
+  'USERNAME_TAKEN',
 };
 
 /// Classifies any failure a mutating (or read) request can throw. [error] is typically
@@ -109,6 +119,18 @@ const _validationCodes = {
 /// this never assumes that; a raw exception `ApiClient` didn't wrap (a genuine network
 /// failure, a JSON parse error) classifies as [FailureCategory.retryable] rather than
 /// crashing the classifier itself.
+///
+/// ENG3 Slice 6: every code-specific set below is checked **before** the blanket
+/// [ApiException.isAuthError] (a plain `statusCode == 401` check) — a specific, known code
+/// always wins over the generic "your session died" assumption a bare 401 would otherwise
+/// imply. This also fixes a real, pre-existing gap the slice's own audit surfaced:
+/// `GUEST_UNAUTHENTICATED` was already in [_expiredCodes] but — with the old, `isAuthError`-
+/// first ordering — could never actually be reached for the real 401 status the backend sends
+/// for it (`apps/api/src/modules/sharing/routes.ts`); the existing unit test only ever
+/// exercised it with an artificial, non-matching status code (410). Reordering fixes both the
+/// new login/register case and this latent one, with no change for any code that isn't in one
+/// of the sets below (still falls through to the unchanged `isAuthError` check exactly as
+/// before).
 ClassifiedFailure classifyFailure(Object error) {
   if (error is! ApiException) {
     return const ClassifiedFailure(
@@ -122,15 +144,6 @@ ClassifiedFailure classifyFailure(Object error) {
 
   final message = humanErrorMessage(error);
 
-  if (error.isAuthError) {
-    return ClassifiedFailure(
-      category: FailureCategory.authenticationRequired,
-      message: message,
-      canRetry: false,
-      shouldRefreshState: false,
-      requiresSignIn: true,
-    );
-  }
   if (_alreadyCompletedCodes.contains(error.code)) {
     return ClassifiedFailure(
       category: FailureCategory.alreadyCompleted,
@@ -174,6 +187,17 @@ ClassifiedFailure classifyFailure(Object error) {
       canRetry: false,
       shouldRefreshState: false,
       requiresSignIn: false,
+    );
+  }
+  // Checked after every specific-code set above, not before: a 401 with an unrecognized code
+  // really is "your session died" (the only case left once none of the known codes matched).
+  if (error.isAuthError) {
+    return ClassifiedFailure(
+      category: FailureCategory.authenticationRequired,
+      message: message,
+      canRetry: false,
+      shouldRefreshState: false,
+      requiresSignIn: true,
     );
   }
   if (error.code == 'RATE_LIMITED' || error.code == 'NETWORK_ERROR' || error.statusCode >= 500) {

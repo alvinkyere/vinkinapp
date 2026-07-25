@@ -392,6 +392,46 @@ describe('participants and split', () => {
     assert.equal(opened.state, 'OPEN');
     assert.ok(other.id); // silence unused warning-style lint
   });
+
+  describe('Invites feature (D44) — addParticipantCommand INVITED path', () => {
+    it("flag off: adds an existing member as JOINED immediately — today's exact behavior", async () => {
+      const store = new InMemoryVinkStore();
+      const { vink } = await createDraft(store);
+      const member = await addParticipantCommand(ctx(store), {
+        vinkId: vink.id,
+        userId: 'user-a' as UserId,
+        displayName: 'a',
+      });
+      assert.equal(member.status, 'JOINED');
+      assert.notEqual(member.joinedAt, null);
+      assert.equal(store.outbox.at(-1)?.eventType, 'ParticipantJoined');
+    });
+
+    it('flag on: adds an existing member as INVITED, not JOINED, with joinedAt null', async () => {
+      const store = new InMemoryVinkStore();
+      const { vink } = await createDraft(store);
+      const member = await addParticipantCommand(
+        { ...ctx(store), invitesEnabled: true },
+        { vinkId: vink.id, userId: 'user-a' as UserId, displayName: 'a' },
+      );
+      assert.equal(member.status, 'INVITED');
+      assert.equal(member.joinedAt, null);
+      assert.ok(member.invitedAt);
+      assert.equal(store.outbox.at(-1)?.eventType, 'ParticipantInvited');
+    });
+
+    it('a vink can still open while a member is INVITED (unaccepted) — the crux design choice', async () => {
+      const store = new InMemoryVinkStore();
+      const { vink } = await createDraft(store);
+      await addParticipantCommand(
+        { ...ctx(store), invitesEnabled: true },
+        { vinkId: vink.id, userId: 'user-a' as UserId, displayName: 'a' },
+      );
+      await setSplitCommand(ctx(store), { vinkId: vink.id, method: 'EQUAL' });
+      const opened = await openVinkCommand(ctx(store), { vinkId: vink.id });
+      assert.equal(opened.state, 'OPEN');
+    });
+  });
 });
 
 describe('lifecycle guards', () => {

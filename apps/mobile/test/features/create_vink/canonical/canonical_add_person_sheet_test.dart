@@ -43,11 +43,11 @@ void main() {
           client,
         ),
       );
-      await tester.tap(find.text('OPEN'));
+      await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField).first, 'known_member');
-      await tester.tap(find.text('ADD'));
+      await tester.tap(find.text('Add'));
       await tester.pumpAndSettle();
 
       expect(result?.displayName, 'Known Member');
@@ -62,20 +62,20 @@ void main() {
 
       await tester.pumpWidget(_wrap(CanonicalAddPersonSheet(vinkId: 'vink-1'), client));
       await tester.enterText(find.byType(TextField).first, 'nobody');
-      await tester.tap(find.text('ADD'));
+      await tester.tap(find.text('Add'));
       await tester.pumpAndSettle();
 
       expect(find.text('No VinkIn account yet'), findsOneWidget);
-      expect(find.text('ADD AS GUEST'), findsOneWidget);
+      expect(find.text('Add as guest'), findsOneWidget);
     });
   });
 
   group('CanonicalAddPersonSheet — guest details phase (Slice I5, I4B contract)', () {
     Future<void> goToGuestDetails(WidgetTester tester) async {
       await tester.enterText(find.byType(TextField).first, 'nobody');
-      await tester.tap(find.text('ADD'));
+      await tester.tap(find.text('Add'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('ADD AS GUEST'));
+      await tester.tap(find.text('Add as guest'));
       await tester.pumpAndSettle();
     }
 
@@ -116,7 +116,7 @@ void main() {
       await tester.pump();
 
       VinkPrimaryButton addButton() =>
-          tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'ADD GUEST'));
+          tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'Add guest'));
       expect(addButton().onPressed, isNull, reason: 'no phone entered yet');
 
       await tester.enterText(find.byType(TextField).last, 'not-a-phone');
@@ -137,7 +137,7 @@ void main() {
       await tester.pump();
 
       VinkPrimaryButton addButton() =>
-          tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'ADD GUEST'));
+          tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'Add guest'));
 
       await tester.enterText(find.byType(TextField).last, 'not-an-email');
       await tester.pump();
@@ -168,7 +168,7 @@ void main() {
       await goToGuestDetails(tester);
       await tester.enterText(find.byType(TextField).first, 'Manual Guest');
       await tester.pump();
-      await tester.tap(find.text('ADD GUEST'));
+      await tester.tap(find.text('Add guest'));
       await tester.pumpAndSettle();
 
       expect(find.text('Manual Guest is in'), findsOneWidget);
@@ -197,7 +197,7 @@ void main() {
       await tester.pump();
       await tester.enterText(find.byType(TextField).last, '+15551234567');
       await tester.pump(); // rebuild so the (now-valid) destination actually enables Add
-      await tester.tap(find.text('ADD GUEST'));
+      await tester.tap(find.text('Add guest'));
       await tester.pumpAndSettle();
 
       expect(find.text('SMS Guest is in'), findsOneWidget);
@@ -235,12 +235,12 @@ void main() {
           client,
         ),
       );
-      await tester.tap(find.text('OPEN'));
+      await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
       await goToGuestDetails(tester);
       await tester.enterText(find.byType(TextField).first, 'Dup Guest');
       await tester.pump();
-      await tester.tap(find.text('ADD GUEST'));
+      await tester.tap(find.text('Add guest'));
       await tester.pumpAndSettle();
 
       expect(result, isNull, reason: 'closes without a person to add — no error dialog, no duplicate');

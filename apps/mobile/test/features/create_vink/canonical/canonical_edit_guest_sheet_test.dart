@@ -65,12 +65,12 @@ void main() {
         client,
       ),
     );
-    await tester.tap(find.text('OPEN'));
+    await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField).first, 'Renamed');
     await tester.pump();
-    await tester.tap(find.text('SAVE'));
+    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     expect(result?.displayName, 'Renamed');
@@ -89,7 +89,7 @@ void main() {
 
     await tester.enterText(find.byType(TextField).last, '+19998887777');
     await tester.pump();
-    await tester.tap(find.text('SAVE'));
+    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     expect(client.calls, hasLength(1));
@@ -116,7 +116,7 @@ void main() {
 
     await tester.enterText(find.byType(TextField).last, 'new@example.com');
     await tester.pump();
-    await tester.tap(find.text('SAVE'));
+    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     expect(client.calls, hasLength(1));
@@ -137,7 +137,7 @@ void main() {
 
     await tester.tap(find.widgetWithText(ChoiceChip, 'I\'ll share it myself'));
     await tester.pump();
-    await tester.tap(find.text('SAVE'));
+    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     expect(client.calls, hasLength(1));
@@ -150,7 +150,7 @@ void main() {
     await tester.enterText(find.byType(TextField).last, 'not-a-phone');
     await tester.pump();
 
-    final saveButton = tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'SAVE'));
+    final saveButton = tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'Save'));
     expect(saveButton.onPressed, isNull);
     expect(client.calls, isEmpty);
   });

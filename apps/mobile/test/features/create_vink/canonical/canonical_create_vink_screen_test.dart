@@ -58,6 +58,12 @@ Map<String, dynamic> _snapshot({
   'unallocatedAmountMinor': 0,
   'allowedActions': const [],
   'card': null,
+  'contributionProgress': {
+    'confirmedAmountMinor': 0,
+    'totalAmountMinor': requiredAmountMinor,
+    'confirmedParticipantCount': 0,
+    'totalParticipantCount': participants.length,
+  },
 };
 
 Widget _wrap({required FakeApiClient client, required String initialLocation, required _CapturedNav captured}) {
@@ -96,7 +102,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField).last, '50.00'); // total only, purpose left blank
-      await tester.tap(find.text('CONTINUE'));
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
 
       expect(find.text('Tell everyone what this Vink is for.'), findsOneWidget);
@@ -112,7 +118,7 @@ void main() {
       expect(moneyField.keyboardType, const TextInputType.numberWithOptions(decimal: true));
 
       await tester.enterText(find.byType(TextField).first, 'Team lunch');
-      await tester.tap(find.text('CONTINUE'));
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
       expect(find.text('Enter an amount greater than zero.'), findsOneWidget);
       expect(client.calls, isEmpty, reason: 'never call the server for an invalid amount');
@@ -138,7 +144,7 @@ void main() {
 
       await tester.enterText(find.byType(TextField).first, 'Team lunch');
       await tester.enterText(find.byType(TextField).last, '50.50');
-      await tester.tap(find.text('CONTINUE'));
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
 
       // Organizer default inclusion, proven from the very next screen: alone, their own
@@ -202,7 +208,7 @@ void main() {
       await tester.pump();
 
       expect(find.textContaining('still needs to be assigned'), findsOneWidget);
-      final continueButton = tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'CONTINUE'));
+      final continueButton = tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'Continue'));
       expect(continueButton.onPressed, isNull);
     });
 
@@ -233,7 +239,7 @@ void main() {
       await tester.pump();
 
       expect(find.textContaining('more than the total'), findsOneWidget);
-      final continueButton = tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'CONTINUE'));
+      final continueButton = tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'Continue'));
       expect(continueButton.onPressed, isNull);
     });
 
@@ -271,7 +277,7 @@ void main() {
       await tester.enterText(fields.at(1), '100.00');
       await tester.pump();
 
-      final continueButton = tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'CONTINUE'));
+      final continueButton = tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'Continue'));
       expect(continueButton.onPressed, isNotNull);
     });
   });
@@ -333,7 +339,7 @@ void main() {
       await tester.pump();
       await tester.enterText(find.byType(TextField).last, 'sam@example.com');
       await tester.pump();
-      await tester.tap(find.text('SAVE'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(find.text('Will be emailed'), findsOneWidget);
@@ -409,7 +415,7 @@ void main() {
       await tester.enterText(fields.at(2), '30.00');
       await tester.pump();
       expect(
-        tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'CONTINUE')).onPressed,
+        tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'Continue')).onPressed,
         isNotNull,
         reason: 'fully reconciled at \$90.00 == \$90.00 before any removal',
       );
@@ -420,7 +426,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'CONTINUE')).onPressed,
+        tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'Continue')).onPressed,
         isNull,
         reason: 'the removed row\'s \$30.00 is gone from the total assigned — no longer reconciled',
       );
@@ -433,7 +439,7 @@ void main() {
         _wrap(client: client, initialLocation: '/create-vink/resume/$vinkId', captured: _CapturedNav()),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('CONTINUE'));
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
     }
 
@@ -477,7 +483,9 @@ void main() {
       final client = clientForConfirmation(onOpen: () async => {});
       await reachConfirmation(tester, client);
 
-      expect(find.text('Open Vink'), findsOneWidget); // the sheet's own title
+      // The sheet's own title heading and its primary button both read "Open Vink" now that
+      // the button label is no longer forced uppercase.
+      expect(find.text('Open Vink'), findsWidgets);
       expect(find.text('\$100.00'), findsWidgets);
 
       // Tap the barrier (top-left corner, outside the sheet's own content) to dismiss.
@@ -496,11 +504,11 @@ void main() {
         _wrap(client: client, initialLocation: '/create-vink/resume/vink-1', captured: captured),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('CONTINUE'));
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
 
       expect(captured.vinkId, isNull, reason: 'not navigated yet — still inside the confirmation sheet');
-      await tester.tap(find.text('OPEN VINK'));
+      await tester.tap(find.widgetWithText(VinkPrimaryButton, 'Open Vink'));
       await tester.pumpAndSettle();
 
       expect(captured.vinkId, 'vink-1');
@@ -515,7 +523,7 @@ void main() {
       );
       await reachConfirmation(tester, client);
 
-      final openVinkButton = find.widgetWithText(VinkPrimaryButton, 'OPEN VINK');
+      final openVinkButton = find.widgetWithText(VinkPrimaryButton, 'Open Vink');
       await tester.tap(openVinkButton);
       await tester.pump(); // let submitting: true take effect, don't wait for the request
       await tester.tap(openVinkButton, warnIfMissed: false); // a "duplicate" tap
@@ -535,15 +543,15 @@ void main() {
         _wrap(client: client, initialLocation: '/create-vink/resume/vink-1', captured: captured),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('CONTINUE'));
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('OPEN VINK'));
+      await tester.tap(find.widgetWithText(VinkPrimaryButton, 'Open Vink'));
       await tester.pumpAndSettle();
 
       expect(captured.vinkId, isNull, reason: 'never navigates on failure');
-      expect(find.text('Open Vink'), findsOneWidget, reason: 'sheet is still open, not dismissed');
-      final button = tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'OPEN VINK'));
+      expect(find.text('Open Vink'), findsWidgets, reason: 'sheet is still open, not dismissed');
+      final button = tester.widget<VinkPrimaryButton>(find.widgetWithText(VinkPrimaryButton, 'Open Vink'));
       expect(button.onPressed, isNotNull, reason: 'a fresh, deliberate tap must be possible again');
 
       final openCalls = client.calls.where((c) => c.method == 'POST' && c.path.endsWith('/open'));
@@ -560,10 +568,10 @@ void main() {
         _wrap(client: client, initialLocation: '/create-vink/resume/vink-1', captured: captured),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('CONTINUE'));
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('OPEN VINK'));
+      await tester.tap(find.widgetWithText(VinkPrimaryButton, 'Open Vink'));
       await tester.pumpAndSettle();
 
       expect(captured.vinkId, 'vink-1', reason: 'the vink was already OPEN — proceed, do not show an error');

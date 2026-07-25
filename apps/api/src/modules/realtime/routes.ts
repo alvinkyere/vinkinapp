@@ -43,6 +43,8 @@ import { GUEST_TOKEN_PREFIX, hashGuestToken } from '../../auth/guest-tokens.ts';
 import { vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
 import type { RealtimeHub } from '../../realtime/hub.ts';
+import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
+import { tagActiveSpan } from '../../observability/tracing.ts';
 
 const CLOSE_BAD_REQUEST = 4400;
 const CLOSE_UNAUTHENTICATED = 4401;
@@ -54,6 +56,7 @@ export function registerRealtimeRoutes(
   env: Env,
   sql: Sql,
   hub: RealtimeHub,
+  metrics: Metrics = NOOP_METRICS,
 ): void {
   const store = new PostgresVinkStore(sql);
 
@@ -67,6 +70,13 @@ export function registerRealtimeRoutes(
       return;
     }
     const { vinkId } = paramsResult.data;
+    // ENG4 Slice 5: tags whatever span (if any) Node's HTTP auto-instrumentation created for
+    // this upgrade request — deliberately not a new manually-created span here, unlike
+    // sweeps.ts/worker.ts/provider-logging.ts: this handler's auth/snapshot-resolution logic
+    // has many early-return branches, and restructuring it around a span callback risked a
+    // real regression in security-sensitive code for a smaller, less certain benefit (WS
+    // upgrade auto-instrumentation coverage isn't verified here — see the milestone report).
+    tagActiveSpan({ 'vink.id': vinkId, 'correlation.id': String(request.id) });
     const token = (request.query as { token?: string }).token;
     if (token === undefined) {
       socket.close(CLOSE_UNAUTHENTICATED, 'missing token');
@@ -140,6 +150,10 @@ export function registerRealtimeRoutes(
     const unsubscribe = await hub.subscribe(vinkId, (message) => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
     });
+    // ENG4 Slice 4 ("realtime connections" metric) — counted from here, not any of the
+    // earlier close() paths above: those are rejected upgrade attempts, never real
+    // connections.
+    metrics.connectionOpened();
     // ENG3 heartbeat: browsers don't expose the WebSocket protocol's own ping/pong control
     // frames to application code, so liveness is checked at the application layer instead —
     // a client sends `{type:'ping'}` on its own interval and expects this `{type:'pong'}`
@@ -164,6 +178,7 @@ export function registerRealtimeRoutes(
     });
     socket.on('close', () => {
       void unsubscribe();
+      metrics.connectionClosed();
     });
   });
 }

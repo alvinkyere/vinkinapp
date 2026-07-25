@@ -54,7 +54,7 @@ function activeParticipants(participants: Participant[]): Participant[] {
  * amount must keep matching its allocation or the funding resolver could never conclude
  * (§15 split-immutability spirit; participant-exit flows arrive with PV7 recovery work).
  */
-async function assertNoLiveContributions(
+export async function assertNoLiveContributions(
   tx: VinkTx,
   vinkId: VinkId,
   action: string,
@@ -178,6 +178,7 @@ export async function createVinkCommand(
     status: 'JOINED',
     allocatedAmount: money(0),
     maximumApprovedAmount: money(0),
+    invitedAt: now.toISOString(),
     joinedAt: now.toISOString(),
     updatedAt: now.toISOString(),
   };
@@ -299,6 +300,12 @@ export async function addParticipantCommand(
       throw new ApplicationError('PARTICIPANT_ALREADY_ADDED', 'user is already a participant');
     }
     const now = ctx.clock.now().toISOString();
+    // Invites feature (2026-07-23): an existing member added by the organizer starts
+    // INVITED, not JOINED — they must call acceptInviteCommand themselves before they can
+    // contribute (findOwnParticipant already requires JOINED) or count toward "my vinks"
+    // (listVinksByParticipant now filters on JOINED). Flag off preserves today's exact
+    // immediate-JOINED behavior, byte-for-byte.
+    const invited = ctx.invitesEnabled === true;
     const participant: Participant = {
       id: newParticipantId(),
       vinkId: vink.id,
@@ -306,15 +313,16 @@ export async function addParticipantCommand(
       guestIdentityId: null,
       displayName: input.displayName,
       role: 'MEMBER',
-      status: 'JOINED',
+      status: invited ? 'INVITED' : 'JOINED',
       allocatedAmount: money(0),
       maximumApprovedAmount: money(0),
-      joinedAt: now,
+      invitedAt: now,
+      joinedAt: invited ? null : now,
       updatedAt: now,
     };
     await tx.insertParticipant(participant);
     await tx.insertOutbox({
-      eventType: 'ParticipantJoined',
+      eventType: invited ? 'ParticipantInvited' : 'ParticipantJoined',
       aggregateType: 'vink',
       aggregateId: vink.id,
       payload: { vinkId: vink.id, participantId: participant.id },
@@ -416,9 +424,14 @@ export async function setSplitCommand(
     }
     await assertNoLiveContributions(tx, vink.id, 'the split');
     const participants = await tx.listParticipants(vink.id);
-    // Stable join order makes the EQUAL remainder deterministic (Plan §15).
+    // Stable added-to-vink order makes the EQUAL remainder deterministic (Plan §15). Keyed on
+    // `invitedAt`, not `joinedAt` — the latter is null for a still-INVITED participant, and
+    // `invitedAt` is the moment every participant, invited or joined, actually entered the
+    // ordering (identical to `joinedAt` for every pre-Invites-feature path).
     const active = activeParticipants(participants).sort((a, b) =>
-      a.joinedAt === b.joinedAt ? a.id.localeCompare(b.id) : a.joinedAt.localeCompare(b.joinedAt),
+      a.invitedAt === b.invitedAt
+        ? a.id.localeCompare(b.id)
+        : a.invitedAt.localeCompare(b.invitedAt),
     );
     const activeIds = new Set<string>(active.map((participant) => participant.id));
 

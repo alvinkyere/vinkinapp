@@ -16,6 +16,7 @@ import {
 } from '../../domain/src/index.ts';
 import { ApplicationError, InviteIdempotencyRaceError } from './errors.ts';
 import type {
+  ActivityEntry,
   CommandContext,
   GuestDeliveryMode,
   GuestIdentityRecord,
@@ -55,7 +56,13 @@ export type GuestVinkOutcome =
   | 'returned'
   | 'recovery_required';
 
-function computeGuestVinkOutcome(vinkState: Vink['state']): GuestVinkOutcome {
+/** Slice I6 — exported for reuse by Activity's own outcome-summary list
+ * (`getVinkOutcomeSummaries`/`getVinkDetails` in `queries.ts`). The mapping is purely
+ * vink-level (state in, category out) — nothing about it is guest-specific despite the name,
+ * so it's reused as-is rather than duplicated or renamed; renaming would only cost every
+ * existing reference to this function across the decision log/reports for no behavioral
+ * benefit. */
+export function computeGuestVinkOutcome(vinkState: Vink['state']): GuestVinkOutcome {
   switch (vinkState) {
     case 'DRAFT':
       return 'not_open_yet';
@@ -103,7 +110,12 @@ export type GuestContributionStatus =
   | 'returned'
   | 'recovery_required';
 
-function computeGuestContributionStatus(
+/** Exported (Slice I6): participant-id-agnostic by design (takes a raw status string, not a
+ * participant object), so `getVinkDetails` reuses it unchanged to compute EVERY participant's
+ * own outcome, not just "self" — the deliberate Phase 4 §11 widening (every participant's
+ * contribution outcome visible on this one read-only, historical screen), never a new status
+ * vocabulary invented for it. */
+export function computeGuestContributionStatus(
   ownContributionStatus: string | undefined,
   vinkState: Vink['state'],
 ): GuestContributionStatus {
@@ -249,6 +261,7 @@ export async function guestJoinVinkCommand(
       status: 'JOINED',
       allocatedAmount: money(0),
       maximumApprovedAmount: money(0),
+      invitedAt: now.toISOString(),
       joinedAt: now.toISOString(),
       updatedAt: now.toISOString(),
     };
@@ -421,6 +434,7 @@ export async function inviteGuestCommand(
         status: 'JOINED',
         allocatedAmount: money(0),
         maximumApprovedAmount: money(0),
+        invitedAt: now.toISOString(),
         joinedAt: now.toISOString(),
         updatedAt: now.toISOString(),
       };
@@ -828,6 +842,215 @@ export async function getParticipantVinkView(
         vink.state,
       ),
     },
+  };
+}
+
+/** Slice I2D — vink-wide milestone event types safe to show any active participant: none of
+ * these carry participant-identifying detail in the copy that renders them
+ * (`apps/mobile/lib/features/activity/activity_copy.dart`'s own switch never names anyone for
+ * these). `VinkCreated`/`VinkCancelled` render neutral ("This Vink was...") copy for a
+ * participant viewer client-side — the server doesn't need to know about that distinction.
+ * Exported (Slice I6) for `getVinkDetails`'s own timeline — the exact same "vink-wide,
+ * identity-free" allowlist applies there too, no separate list to invent or keep in sync. */
+export const PARTICIPANT_SAFE_MILESTONE_EVENTS = new Set<string>([
+  'VinkCreated',
+  'VinkOpened',
+  'ParticipantJoined',
+  'ParticipantAllocationChanged',
+  'ParticipantRemoved',
+  'VinkFunded',
+  'TemporaryCardIssued',
+  'MerchantAuthorizationApproved',
+  'PurchaseCaptured',
+  'VinkCompleted',
+  'VinkCancelled',
+  'VinkExpired',
+  // Invites feature (2026-07-23, D44) — all three are vink-wide milestones with no
+  // participant-identifying copy (the payload carries only vinkId/participantId, already
+  // stripped before reaching the wire — same rule every other entry here already follows).
+  'ParticipantInvited',
+  'ParticipantInviteAccepted',
+  'ParticipantInviteDeclined',
+]);
+
+/** Contribution/refund lifecycle events — safe only when they're the viewer's OWN, per the
+ * same "own contribution only" boundary `ParticipantVinkView` already enforces (D24/D25). A
+ * fellow participant's payment activity is never this participant's business. */
+const PARTICIPANT_OWN_CONTRIBUTION_EVENTS = new Set<string>([
+  'ContributionAuthorized',
+  'ContributionDeclined',
+  'ContributionCaptured',
+  'ContributionCancelled',
+  'ContributionSettled',
+  'RefundCompleted',
+]);
+
+/** The signed-in participant's own customer-safe activity feed for a vink they don't organize
+ * (Slice I2D). Reuses the exact `ActivityEntry` wire shape `listActivity` already returns for
+ * the organizer — no new client model needed — but filters and sanitizes every entry first:
+ * every `'transition'` row is internal-only and dropped outright; an `'event'` row survives
+ * only if its `eventType` is a vink-wide milestone (safe for anyone) or a contribution/refund
+ * event that belongs to THIS participant; every surviving `detail` is reduced to `{eventType}`
+ * — no `participantId`, `actor`, `correlationId`, or amount ever reaches the wire here, even
+ * for the viewer's own contribution (the copy that renders it needs nothing more). Throws
+ * FORBIDDEN under the same "must be an active participant" rule as `getParticipantVinkView`. */
+export async function getParticipantVinkActivity(
+  reader: VinkReader,
+  vinkId: Vink['id'],
+  actorUserId: string,
+): Promise<ActivityEntry[]> {
+  const vink = await reader.getVink(vinkId);
+  if (vink === null) throw new ApplicationError('VINK_NOT_FOUND', `vink ${vinkId} not found`);
+
+  const participants = await reader.listParticipants(vinkId);
+  const self = participants.find(
+    (participant) => participant.userId === actorUserId && participant.status !== 'REMOVED',
+  );
+  if (self === undefined) {
+    throw new ApplicationError('FORBIDDEN', 'not an active participant of this vink');
+  }
+
+  const activity = await reader.listActivity(vinkId);
+  const safe: ActivityEntry[] = [];
+  for (const entry of activity) {
+    if (entry.kind !== 'event') continue;
+    const eventType = entry.detail.eventType as string | undefined;
+    if (eventType === undefined) continue;
+    const isMilestone = PARTICIPANT_SAFE_MILESTONE_EVENTS.has(eventType);
+    const isOwnContribution =
+      PARTICIPANT_OWN_CONTRIBUTION_EVENTS.has(eventType) && entry.detail.participantId === self.id;
+    if (!isMilestone && !isOwnContribution) continue;
+    safe.push({ kind: 'event', at: entry.at, detail: { eventType } });
+  }
+  return safe;
+}
+
+export interface VinkDetailsSummary {
+  confirmedAmountMinor: number;
+  confirmedParticipantCount: number;
+  totalParticipantCount: number;
+}
+
+export interface VinkDetailsTimelineEntry {
+  eventType: string;
+  at: string;
+}
+
+/** Present only when the viewer is a participant (D43) — never another participant's data,
+ * never present at all for the organizer's own viewing of this screen. */
+export interface VinkDetailsViewerParticipant {
+  assignedShareMinor: number;
+  confirmedAmountMinor: number;
+  contributionOutcomeLabel: GuestContributionStatus;
+}
+
+export interface VinkDetailsView {
+  vinkId: Vink['id'];
+  purpose: string | null;
+  purchaseCategory: Vink['purchaseCategory'];
+  totalMinor: number;
+  organizerDisplayName: string;
+  viewerRole: 'organizer' | 'participant';
+  vinkOutcome: GuestVinkOutcome;
+  /** Slice I6 (D43) — an aggregate only: how much of the total is confirmed and by how many
+   * of how many participants. Never a per-participant breakdown — that was I6's own first
+   * draft (superseded, see D43) and would leak one participant's payment behavior to another,
+   * exactly the boundary `ParticipantVinkView` already protects for the live view. */
+  summary: VinkDetailsSummary;
+  timeline: VinkDetailsTimelineEntry[];
+  /** `null` if the vink never reached a merchant settlement — never a fabricated placeholder
+   * (D21: no fee line either, same discipline: absent means absent). */
+  merchantSettlementDetail: string | null;
+  viewerParticipant: VinkDetailsViewerParticipant | null;
+}
+
+/** The organizer's OR any active participant's shared, read-only historical view of a vink
+ * (Slice I6, D29/D31/D43 "Vink details" — never "receipt"). Broader access than
+ * `getParticipantVinkView` (participant-only) and than the organizer-only snapshot routes: a
+ * third, deliberate access shape for this one screen — but, per D43, NOT a widening of what
+ * data is visible, only of who may view the same customer-safe aggregate. Throws FORBIDDEN for
+ * anyone who is neither the organizer nor an active participant; VINK_NOT_FOUND for an unknown
+ * vink. */
+export async function getVinkDetails(
+  reader: VinkReader,
+  vinkId: Vink['id'],
+  actorUserId: string,
+): Promise<VinkDetailsView> {
+  const vink = await reader.getVink(vinkId);
+  if (vink === null) throw new ApplicationError('VINK_NOT_FOUND', `vink ${vinkId} not found`);
+
+  const { participants, latestStatusByParticipant } = await loadContributionProgressData(
+    reader,
+    vink,
+  );
+  const active = participants.filter((participant) => participant.status !== 'REMOVED');
+  const organizer = active.find((participant) => participant.role === 'ORGANIZER');
+  const isOrganizer = vink.organizerUserId === actorUserId;
+  const self = active.find((participant) => participant.userId === actorUserId);
+  if (!isOrganizer && self === undefined) {
+    throw new ApplicationError(
+      'FORBIDDEN',
+      'must be the organizer or an active participant of this vink',
+    );
+  }
+
+  const activity = await reader.listActivity(vinkId);
+  const timeline: VinkDetailsTimelineEntry[] = [];
+  for (const entry of activity) {
+    if (entry.kind !== 'event') continue;
+    const eventType = entry.detail.eventType as string | undefined;
+    if (eventType === undefined || !PARTICIPANT_SAFE_MILESTONE_EVENTS.has(eventType)) continue;
+    timeline.push({ eventType, at: entry.at });
+  }
+
+  const [purchaseAuthorizations, settlements] = await Promise.all([
+    reader.listPurchaseAuthorizations(vinkId),
+    reader.listSettlements(vinkId),
+  ]);
+  const latestSettlement = settlements.at(-1) ?? null;
+  const settlementAuthorization =
+    latestSettlement === null
+      ? undefined
+      : purchaseAuthorizations.find(
+          (authorization) => authorization.id === latestSettlement.authorizationId,
+        );
+  const merchantSettlementDetail =
+    settlementAuthorization === undefined
+      ? null
+      : `${settlementAuthorization.merchantName} — settled`;
+
+  const progress = computeContributionProgress(vink, participants, latestStatusByParticipant);
+
+  let viewerParticipant: VinkDetailsViewerParticipant | null = null;
+  if (!isOrganizer && self !== undefined) {
+    const outcomeLabel = computeGuestContributionStatus(
+      latestStatusByParticipant.get(self.id),
+      vink.state,
+    );
+    const isConfirmed = outcomeLabel === 'confirmed' || outcomeLabel === 'recovery_required';
+    viewerParticipant = {
+      assignedShareMinor: self.allocatedAmount.amountMinor,
+      confirmedAmountMinor: isConfirmed ? self.allocatedAmount.amountMinor : 0,
+      contributionOutcomeLabel: outcomeLabel,
+    };
+  }
+
+  return {
+    vinkId: vink.id,
+    purpose: vink.purpose,
+    purchaseCategory: vink.purchaseCategory,
+    totalMinor: vink.requiredAmount.amountMinor,
+    organizerDisplayName: organizer?.displayName ?? '',
+    viewerRole: isOrganizer ? 'organizer' : 'participant',
+    vinkOutcome: computeGuestVinkOutcome(vink.state),
+    summary: {
+      confirmedAmountMinor: progress.confirmedAmountMinor,
+      confirmedParticipantCount: progress.confirmedParticipantCount,
+      totalParticipantCount: progress.totalParticipantCount,
+    },
+    timeline,
+    merchantSettlementDetail,
+    viewerParticipant,
   };
 }
 

@@ -87,7 +87,8 @@ function rowToParticipant(row: Row): Participant {
       amountMinor: asMinor(row.maximum_approved_amount_minor, 'maximum_approved'),
       currency,
     },
-    joinedAt: toIso(row.joined_at),
+    invitedAt: toIso(row.invited_at),
+    joinedAt: row.joined_at === null || row.joined_at === undefined ? null : toIso(row.joined_at),
     updatedAt: toIso(row.updated_at),
   };
 }
@@ -389,19 +390,19 @@ class PostgresVinkTx implements VinkTx {
   async insertParticipant(participant: Participant): Promise<void> {
     await this.#sql`INSERT INTO participants (
       id, vink_id, user_id, guest_identity_id, display_name, role, status,
-      allocated_amount_minor, maximum_approved_amount_minor, joined_at, updated_at
+      allocated_amount_minor, maximum_approved_amount_minor, invited_at, joined_at, updated_at
     ) VALUES (
       ${participant.id}, ${participant.vinkId}, ${participant.userId},
       ${participant.guestIdentityId}, ${participant.displayName}, ${participant.role},
       ${participant.status}, ${participant.allocatedAmount.amountMinor},
-      ${participant.maximumApprovedAmount.amountMinor}, ${participant.joinedAt},
-      ${participant.updatedAt}
+      ${participant.maximumApprovedAmount.amountMinor}, ${participant.invitedAt},
+      ${participant.joinedAt}, ${participant.updatedAt}
     )`;
   }
 
   async listParticipants(vinkId: VinkId): Promise<Participant[]> {
     const rows = await this.#sql`SELECT * FROM participants
-      WHERE vink_id = ${vinkId} ORDER BY joined_at, id`;
+      WHERE vink_id = ${vinkId} ORDER BY invited_at, id`;
     return rows.map((row) => rowToParticipant(row as Row));
   }
 
@@ -411,6 +412,7 @@ class PostgresVinkTx implements VinkTx {
       status = ${participant.status},
       allocated_amount_minor = ${participant.allocatedAmount.amountMinor},
       maximum_approved_amount_minor = ${participant.maximumApprovedAmount.amountMinor},
+      joined_at = ${participant.joinedAt},
       updated_at = ${participant.updatedAt}
     WHERE id = ${participant.id}`;
   }
@@ -597,16 +599,37 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
   }
 
   /** Slice I2 (docs/design/phase-10-implementation-readiness.md) — every Vink where this
-   * user has a non-removed participant row, by `user_id` (never a guest's
-   * `guest_identity_id`). `DISTINCT` guards against the (not expected, but not worth
-   * assuming away) case of more than one live participant row for the same
-   * (vink, user) pair. */
+   * user has a JOINED participant row, by `user_id` (never a guest's `guest_identity_id`).
+   * `DISTINCT` guards against the (not expected, but not worth assuming away) case of more
+   * than one live participant row for the same (vink, user) pair.
+   *
+   * Invites feature (2026-07-23): deliberately `status = 'JOINED'`, not `!= 'REMOVED'` — a
+   * still-`INVITED` (not yet accepted) participant must NOT appear in Home/Activity's normal
+   * "my vinks" list; see `listVinksByPendingInvite` for that separate surface. */
   async listVinksByParticipant(userId: string): Promise<Vink[]> {
     const rows = await this.#sql`
       SELECT DISTINCT v.* FROM vinks v
       JOIN participants p ON p.vink_id = v.id
-      WHERE p.user_id = ${userId} AND p.status != 'REMOVED'
+      WHERE p.user_id = ${userId} AND p.status = 'JOINED'
       ORDER BY v.created_at DESC`;
+    return rows.map((row) => rowToVink(row as Row));
+  }
+
+  /** Invites feature (2026-07-23) — every Vink where this user has a still-pending
+   * (`INVITED`, not yet accepted or declined) participant row. The counterpart surface to
+   * `listVinksByParticipant` above, kept as a genuinely separate query rather than a `role`
+   * value threaded through it — an invite and a real membership are different invariants for
+   * every caller (Home, Activity) that already assumes "in this list" means "really in it." */
+  async listVinksByPendingInvite(userId: string): Promise<Vink[]> {
+    // Postgres requires every `SELECT DISTINCT` ORDER BY expression to appear in the select
+    // list — `p.invited_at` is included for exactly that reason (`rowToVink` reads its own
+    // named columns and ignores the extra one, same as every other enriched-select in this
+    // file).
+    const rows = await this.#sql`
+      SELECT DISTINCT v.*, p.invited_at FROM vinks v
+      JOIN participants p ON p.vink_id = v.id
+      WHERE p.user_id = ${userId} AND p.status = 'INVITED'
+      ORDER BY p.invited_at DESC`;
     return rows.map((row) => rowToVink(row as Row));
   }
 
@@ -658,7 +681,7 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
 
   async listParticipants(vinkId: VinkId): Promise<Participant[]> {
     const rows = await this.#sql`SELECT * FROM participants
-      WHERE vink_id = ${vinkId} ORDER BY joined_at, id`;
+      WHERE vink_id = ${vinkId} ORDER BY invited_at, id`;
     return rows.map((row) => rowToParticipant(row as Row));
   }
 
@@ -681,6 +704,22 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
     const rows = await this.#sql`SELECT * FROM contributions
       WHERE vink_id = ${vinkId} ORDER BY created_at, id`;
     return rows.map((row) => rowToContribution(row as Row));
+  }
+
+  /** Slice I6 — plain read counterparts to `listPurchaseAuthorizationsForUpdate`/
+   * `listSettlementsForUpdate` above (`PostgresVinkTx`), same pattern as
+   * `listContributionsByVink`'s own relationship to `listContributionsForUpdate`: Vink
+   * Details is a read-only historical view, never a command, so it never needs the row lock. */
+  async listPurchaseAuthorizations(vinkId: VinkId): Promise<PurchaseAuthorization[]> {
+    const rows = await this.#sql`SELECT * FROM purchase_authorizations
+      WHERE vink_id = ${vinkId} ORDER BY created_at, id`;
+    return rows.map((row) => rowToPurchaseAuthorization(row as Row));
+  }
+
+  async listSettlements(vinkId: VinkId): Promise<Settlement[]> {
+    const rows = await this.#sql`SELECT * FROM settlements
+      WHERE vink_id = ${vinkId} ORDER BY created_at, id`;
+    return rows.map((row) => rowToSettlement(row as Row));
   }
 
   /** Slice I4 — newest first (organizer-facing "Sent" / "Couldn't send" row status). */

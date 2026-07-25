@@ -27,7 +27,10 @@ class VinkStepHeader extends StatelessWidget {
   }
 }
 
-/// A lightweight step progress dots row — "step 2 of 5" without technical labels.
+/// Concept-image step progress: connected circle nodes, not a dot row — "step 2 of 5"
+/// without technical labels. A node is solid blue once reached (current or done), a hollow
+/// gray ring while still ahead; the connecting line between two reached nodes is blue, gray
+/// otherwise.
 class VinkStepDots extends StatelessWidget {
   const VinkStepDots({super.key, required this.stepIndex, required this.stepCount});
 
@@ -39,20 +42,28 @@ class VinkStepDots extends StatelessWidget {
     return Semantics(
       label: 'Step ${stepIndex + 1} of $stepCount',
       child: Row(
-        children: List.generate(stepCount, (index) {
-          final active = index == stepIndex;
-          return Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: Container(
-              width: active ? 20 : 6,
-              height: 6,
+        children: [
+          for (var index = 0; index < stepCount; index++) ...[
+            if (index > 0)
+              Expanded(
+                child: Container(
+                  height: 2,
+                  color: index <= stepIndex ? VinkColors.blue : VinkColors.ink.withValues(alpha: 0.12),
+                ),
+              ),
+            Container(
+              width: 10,
+              height: 10,
               decoration: BoxDecoration(
-                color: active ? VinkColors.blue : VinkColors.ink.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(999),
+                shape: BoxShape.circle,
+                color: index <= stepIndex ? VinkColors.blue : Colors.transparent,
+                border: index <= stepIndex
+                    ? null
+                    : Border.all(color: VinkColors.ink.withValues(alpha: 0.2), width: 1.5),
               ),
             ),
-          );
-        }),
+          ],
+        ],
       ),
     );
   }

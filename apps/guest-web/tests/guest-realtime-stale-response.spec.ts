@@ -8,7 +8,7 @@
 // session, intercepted `GET /api/v1/guest/session`, a controlled WebSocket via
 // `page.routeWebSocket`) rather than driving a real backend.
 
-import { test, expect, type Page, type Route } from '@playwright/test';
+import { test, expect, type Route } from '@playwright/test';
 import type { GuestVinkView } from '../lib/types';
 
 const PUBLIC_CODE = 'RACE0000';

@@ -17,7 +17,7 @@ import {
   settlePurchaseCommand,
 } from './purchases.ts';
 import { retryRecoveryCommand, startRecoveryCommand, RECOVERY_MAX_ATTEMPTS } from './recovery.ts';
-import { getParticipantVinkView } from './guest.ts';
+import { getParticipantVinkActivity, getParticipantVinkView, getVinkDetails } from './guest.ts';
 import { ApplicationError } from './errors.ts';
 
 const isAppError = (code: string) => (error: unknown) =>
@@ -200,4 +200,266 @@ describe('getParticipantVinkView (Slice I2B)', () => {
       assert.equal(view.participant.contributionStatus, 'confirmed');
     },
   );
+});
+
+describe('getParticipantVinkActivity (Slice I2D)', () => {
+  it('VINK_NOT_FOUND for an unknown vink', async () => {
+    const store = new InMemoryVinkStore();
+    await assert.rejects(
+      getParticipantVinkActivity(store, 'nope' as VinkId, MEMBER_A),
+      isAppError('VINK_NOT_FOUND'),
+    );
+  });
+
+  it('FORBIDDEN for a signed-in user who is not a participant of this vink', async () => {
+    const f = await fixture();
+    await assert.rejects(
+      getParticipantVinkActivity(f.store, f.vinkId, STRANGER),
+      isAppError('FORBIDDEN'),
+    );
+  });
+
+  it('includes vink-wide milestone events (VinkCreated, VinkOpened) but excludes transition rows entirely', async () => {
+    const f = await fixture();
+    const activity = await getParticipantVinkActivity(f.store, f.vinkId, MEMBER_A);
+    const eventTypes = activity.map((entry) => entry.detail.eventType);
+    assert.ok(eventTypes.includes('VinkCreated'));
+    assert.ok(eventTypes.includes('VinkOpened'));
+    assert.ok(activity.every((entry) => entry.kind === 'event'));
+  });
+
+  it('every surviving entry is sanitized to {eventType} only — no participantId, actor, or correlationId', async () => {
+    const f = await fixture();
+    await authorizeContributionCommand(f.ctx, {
+      vinkId: f.vinkId,
+      requester: { kind: 'user', userId: MEMBER_A },
+    });
+    const activity = await getParticipantVinkActivity(f.store, f.vinkId, MEMBER_A);
+    for (const entry of activity) {
+      assert.deepEqual(Object.keys(entry.detail), ['eventType']);
+    }
+  });
+
+  it(
+    "PRIVACY: member A's activity feed includes A's own ContributionAuthorized but never " +
+      "member B's — a fellow participant's payment activity is never this participant's business",
+    async () => {
+      const f = await fixture();
+      await authorizeContributionCommand(f.ctx, {
+        vinkId: f.vinkId,
+        requester: { kind: 'user', userId: MEMBER_A },
+      });
+      await authorizeContributionCommand(f.ctx, {
+        vinkId: f.vinkId,
+        requester: { kind: 'user', userId: MEMBER_B },
+      });
+      const activityA = await getParticipantVinkActivity(f.store, f.vinkId, MEMBER_A);
+      const authorizedCount = activityA.filter(
+        (entry) => entry.detail.eventType === 'ContributionAuthorized',
+      ).length;
+      assert.equal(authorizedCount, 1, "exactly one ContributionAuthorized — A's own, never B's");
+    },
+  );
+
+  it(
+    'excludes organizer-only recovery/restriction internals even when they genuinely occurred ' +
+      'on this vink (RecoveryObligationCreated, OrganizerRestricted never leak to a participant)',
+    async () => {
+      const f = await fixture();
+      await authorizeContributionCommand(f.ctx, {
+        vinkId: f.vinkId,
+        requester: { kind: 'user', userId: ORGANIZER },
+      });
+      await authorizeContributionCommand(f.ctx, {
+        vinkId: f.vinkId,
+        requester: { kind: 'user', userId: MEMBER_A },
+      });
+      await authorizeContributionCommand(f.ctx, {
+        vinkId: f.vinkId,
+        requester: { kind: 'user', userId: MEMBER_B },
+      });
+      const card = await provisionCardCommand(f.ctx, { vinkId: f.vinkId });
+      const swipe = f.provider.simulateMerchantAuthorization({
+        providerCardId: card.providerCardId,
+        amount: { amountMinor: 12_000, currency: 'USD' },
+        merchantId: 'GROCER-1',
+        merchantName: 'Grocer',
+        mcc: '5411',
+        merchantCountry: 'US',
+      });
+      const auth = await authorizeMerchantPurchaseCommand(f.ctx, {
+        vinkId: f.vinkId,
+        providerAuthorizationId: swipe.providerAuthorizationId!,
+        merchantName: 'Grocer',
+        merchantIdentifier: 'GROCER-1',
+        mcc: '5411',
+        amountMinor: 12_000,
+      });
+      await settlePurchaseCommand(f.ctx, {
+        vinkId: f.vinkId,
+        authorizationId: auth.authorization.id,
+        settledAmountMinor: 13_500, // overage → RECOVERY_REQUIRED
+      });
+      await startRecoveryCommand(f.ctx, { vinkId: f.vinkId, scenario: 'DECLINE' });
+      for (let attempt = 2; attempt < RECOVERY_MAX_ATTEMPTS; attempt += 1) {
+        await retryRecoveryCommand(f.ctx, { vinkId: f.vinkId, scenario: 'DECLINE' });
+      }
+      await retryRecoveryCommand(f.ctx, { vinkId: f.vinkId, scenario: 'DECLINE' });
+
+      // Reachability, matching getParticipantVinkView's own RESTRICTED proof — must not throw.
+      const activity = await getParticipantVinkActivity(f.store, f.vinkId, MEMBER_A);
+      const eventTypes = activity.map((entry) => entry.detail.eventType);
+      assert.ok(!eventTypes.includes('RecoveryObligationCreated'));
+      assert.ok(!eventTypes.includes('OrganizerRestricted'));
+      assert.ok(!eventTypes.includes('SettlementVarianceDetected'));
+    },
+  );
+});
+
+describe('getVinkDetails (Slice I6, D29/D31)', () => {
+  it('VINK_NOT_FOUND for an unknown vink', async () => {
+    const store = new InMemoryVinkStore();
+    await assert.rejects(
+      getVinkDetails(store, 'nope' as VinkId, MEMBER_A),
+      isAppError('VINK_NOT_FOUND'),
+    );
+  });
+
+  it('FORBIDDEN for a signed-in user who is neither the organizer nor an active participant', async () => {
+    const f = await fixture();
+    await assert.rejects(getVinkDetails(f.store, f.vinkId, STRANGER), isAppError('FORBIDDEN'));
+  });
+
+  it('the organizer can view it — full shape, viewerRole organizer, no viewerParticipant', async () => {
+    const f = await fixture();
+    const details = await getVinkDetails(f.store, f.vinkId, ORGANIZER);
+    assert.equal(details.vinkId, f.vinkId);
+    assert.equal(details.purchaseCategory, 'GROCERY');
+    assert.equal(details.totalMinor, 12_000);
+    assert.equal(details.viewerRole, 'organizer');
+    assert.equal(details.organizerDisplayName, 'Org');
+    assert.equal(
+      details.viewerParticipant,
+      null,
+      'D43: the organizer view never carries a viewerParticipant block',
+    );
+  });
+
+  it('D43: the organizer sees only a customer-safe AGGREGATE summary, never a per-participant breakdown', async () => {
+    const f = await fixture();
+    await authorizeContributionCommand(f.ctx, {
+      vinkId: f.vinkId,
+      requester: { kind: 'user', userId: MEMBER_A },
+    });
+    const details = await getVinkDetails(f.store, f.vinkId, ORGANIZER);
+    assert.equal(details.summary.confirmedAmountMinor, 5_000);
+    assert.equal(details.summary.confirmedParticipantCount, 1);
+    assert.equal(details.summary.totalParticipantCount, 3);
+    assert.ok(
+      !('participants' in details),
+      'no per-participant array anywhere on the response — D43 supersedes the earlier widening',
+    );
+    const serialized = JSON.stringify(details);
+    assert.ok(
+      !serialized.includes('Member B'),
+      "no participant's name ever appears in the organizer's own aggregate-only view",
+    );
+  });
+
+  it(
+    "D43: a participant sees ONLY their own share/outcome — never another participant's amount, " +
+      'status, or identity',
+    async () => {
+      const f = await fixture();
+      await authorizeContributionCommand(f.ctx, {
+        vinkId: f.vinkId,
+        requester: { kind: 'user', userId: MEMBER_A },
+      });
+      await authorizeContributionCommand(f.ctx, {
+        vinkId: f.vinkId,
+        requester: { kind: 'user', userId: MEMBER_B },
+      });
+      const details = await getVinkDetails(f.store, f.vinkId, MEMBER_A);
+      assert.equal(details.viewerRole, 'participant');
+      assert.equal(details.organizerDisplayName, 'Org');
+      assert.ok(details.viewerParticipant, "memberA's own viewerParticipant block is present");
+      assert.equal(details.viewerParticipant!.assignedShareMinor, 5_000);
+      assert.equal(details.viewerParticipant!.confirmedAmountMinor, 5_000);
+      assert.equal(details.viewerParticipant!.contributionOutcomeLabel, 'confirmed');
+      // The aggregate is fine (pooled, not identity-linked) — but memberB's own name/amount
+      // must never appear anywhere in memberA's response.
+      const serialized = JSON.stringify(details);
+      assert.ok(!serialized.includes('Member B'), "memberB's identity never leaks to memberA");
+      assert.ok(
+        !serialized.includes('3000') || !serialized.includes('memberBId'),
+        "memberB's own amount is never independently identifiable in memberA's view",
+      );
+      assert.equal(details.summary.confirmedAmountMinor, 8_000, 'aggregate: A (5000) + B (3000)');
+      assert.equal(details.summary.confirmedParticipantCount, 2);
+    },
+  );
+
+  it('vinkOutcome reflects the vink-level outcome category, never the raw state name', async () => {
+    const f = await fixture();
+    const details = await getVinkDetails(f.store, f.vinkId, ORGANIZER);
+    assert.equal(details.vinkOutcome, 'open');
+  });
+
+  it('timeline includes vink-wide milestones, sanitized to {eventType, at} only', async () => {
+    const f = await fixture();
+    const details = await getVinkDetails(f.store, f.vinkId, ORGANIZER);
+    const eventTypes = details.timeline.map((entry) => entry.eventType);
+    assert.ok(eventTypes.includes('VinkCreated'));
+    assert.ok(eventTypes.includes('VinkOpened'));
+    for (const entry of details.timeline) {
+      assert.deepEqual(Object.keys(entry).sort(), ['at', 'eventType']);
+    }
+  });
+
+  it('merchantSettlementDetail is null before any settlement occurs', async () => {
+    const f = await fixture();
+    const details = await getVinkDetails(f.store, f.vinkId, ORGANIZER);
+    assert.equal(details.merchantSettlementDetail, null);
+  });
+
+  it('merchantSettlementDetail names the real merchant once a settlement occurs', async () => {
+    const f = await fixture();
+    await authorizeContributionCommand(f.ctx, {
+      vinkId: f.vinkId,
+      requester: { kind: 'user', userId: ORGANIZER },
+    });
+    await authorizeContributionCommand(f.ctx, {
+      vinkId: f.vinkId,
+      requester: { kind: 'user', userId: MEMBER_A },
+    });
+    await authorizeContributionCommand(f.ctx, {
+      vinkId: f.vinkId,
+      requester: { kind: 'user', userId: MEMBER_B },
+    });
+    const card = await provisionCardCommand(f.ctx, { vinkId: f.vinkId });
+    const swipe = f.provider.simulateMerchantAuthorization({
+      providerCardId: card.providerCardId,
+      amount: { amountMinor: 12_000, currency: 'USD' },
+      merchantId: 'GROCER-1',
+      merchantName: 'Corner Grocer',
+      mcc: '5411',
+      merchantCountry: 'US',
+    });
+    const auth = await authorizeMerchantPurchaseCommand(f.ctx, {
+      vinkId: f.vinkId,
+      providerAuthorizationId: swipe.providerAuthorizationId!,
+      merchantName: 'Corner Grocer',
+      merchantIdentifier: 'GROCER-1',
+      mcc: '5411',
+      amountMinor: 12_000,
+    });
+    await settlePurchaseCommand(f.ctx, {
+      vinkId: f.vinkId,
+      authorizationId: auth.authorization.id,
+      settledAmountMinor: 12_000,
+    });
+
+    const details = await getVinkDetails(f.store, f.vinkId, ORGANIZER);
+    assert.equal(details.merchantSettlementDetail, 'Corner Grocer — settled');
+  });
 });

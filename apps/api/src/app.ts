@@ -23,6 +23,7 @@ import { registerOpsRoutes } from './modules/ops/routes.ts';
 import { registerAnalyticsRoutes } from './modules/analytics/routes.ts';
 import { InProcessRealtimeHub, type RealtimeHub } from './realtime/hub.ts';
 import { isAppVersionSupported } from './app-version.ts';
+import { NOOP_METRICS, type Metrics } from './observability/metrics.ts';
 import type { FinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 import type { DeliveryProvider } from '../../../packages/delivery/src/index.ts';
 
@@ -47,6 +48,9 @@ export interface AppDeps extends HealthChecks {
    * contact destination ever appears in a log line") instead of trusting that no code path
    * logs one. Omitted in production — Fastify/Pino default to stdout. */
   logStream?: NodeJS.WritableStream;
+  /** ENG4 Slice 4 ("metrics & observability") — defaults to a genuine no-op so every existing
+   * test/caller that never sets this is unaffected. */
+  metrics?: Metrics;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -65,6 +69,20 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   app.addHook('onSend', async (request, reply) => {
     reply.header('x-request-id', request.id);
+  });
+
+  // ENG4 Slice 4 ("API latency"): the route PATTERN (`/vinks/:vinkId`), never the resolved
+  // URL — using the resolved URL would give every UUID path segment its own label value, an
+  // unbounded-cardinality anti-pattern for a metrics label. `routeOptions.url` is undefined
+  // only for an unmatched (404) request.
+  const metrics = deps.metrics ?? NOOP_METRICS;
+  app.addHook('onResponse', async (request, reply) => {
+    metrics.recordApiRequest({
+      method: request.method,
+      route: request.routeOptions.url ?? 'unmatched',
+      statusCode: reply.statusCode,
+      durationMs: reply.elapsedTime,
+    });
   });
 
   // ENG3 ("app-version enforcement"): a no-op whenever VINKIN_MINIMUM_APP_VERSION is unset
@@ -120,16 +138,22 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerHealthRoutes(app, { checkDb: deps.checkDb, checkRedis: deps.checkRedis });
   if (deps.sql !== null) {
     registerAuthRoutes(app, deps.env, deps.sql);
-    registerVinkRoutes(app, deps.env, deps.sql, deps.deliveryProvider);
+    registerVinkRoutes(app, deps.env, deps.sql, deps.deliveryProvider, metrics);
     registerSharingRoutes(app, deps.env, deps.sql, deps.publicRateLimits);
     registerAnalyticsRoutes(app, deps.sql);
     if (deps.provider !== undefined) {
-      registerContributionRoutes(app, deps.env, deps.sql, deps.provider);
-      registerPurchaseRoutes(app, deps.env, deps.sql, deps.provider);
-      registerRecoveryRoutes(app, deps.env, deps.sql, deps.provider);
-      registerOpsRoutes(app, deps.env, deps.sql, deps.provider);
+      registerContributionRoutes(app, deps.env, deps.sql, deps.provider, metrics);
+      registerPurchaseRoutes(app, deps.env, deps.sql, deps.provider, metrics);
+      registerRecoveryRoutes(app, deps.env, deps.sql, deps.provider, metrics);
+      registerOpsRoutes(app, deps.env, deps.sql, deps.provider, metrics);
     }
-    registerRealtimeRoutes(app, deps.env, deps.sql, deps.hub ?? new InProcessRealtimeHub());
+    registerRealtimeRoutes(
+      app,
+      deps.env,
+      deps.sql,
+      deps.hub ?? new InProcessRealtimeHub(),
+      metrics,
+    );
   }
 
   return app;

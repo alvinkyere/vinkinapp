@@ -105,6 +105,7 @@ class OpenVinkConfirmationSheet extends StatelessWidget {
         const SizedBox(height: VinkSpacing.lg),
         VinkPrimaryButton(
           label: 'Open Vink',
+          trailingIcon: Icons.arrow_forward_rounded,
           glow: true,
           loading: submitting,
           // Hard-disable the instant a request is in flight (Phase 5 C15) — `loading` alone

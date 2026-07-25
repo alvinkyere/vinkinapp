@@ -67,6 +67,13 @@ const MESSAGE_TYPE: Record<DomainEventName, ClientMessageType> = {
   ContributionSettled: 'funding_progress_updated',
   RefundFailed: 'vink_state_changed',
   ParticipantRemoved: 'participant_updated',
+  // Invites feature (2026-07-23, D44) — no new Plan §14 message type: an invite appearing or
+  // being accepted is, from the client's perspective, exactly "the participant list changed,
+  // refetch" — the same reaction `participant_joined` already causes. A decline lands the
+  // participant on REMOVED, so it reuses ParticipantRemoved's own mapping.
+  ParticipantInvited: 'participant_joined',
+  ParticipantInviteAccepted: 'participant_joined',
+  ParticipantInviteDeclined: 'participant_updated',
 };
 
 export function clientMessageType(eventType: DomainEventName): ClientMessageType {

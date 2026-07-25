@@ -2,6 +2,34 @@
 /// wire shape of `POST /api/v1/vinks` — the same JSON crosses both endpoints.
 library;
 
+/// Mirrors `ContributionProgressView` (`packages/application/src/queries.ts`) — the D20/D24
+/// server-computed incremental progress signal. Slice I6: Home's own compact progress must
+/// consume this, never derive a percentage from `Vink.fundedAmountMinor` (that field keeps its
+/// existing, unrelated, all-at-once-at-full-resolution meaning — see D5/D20's own note that
+/// this is an additive projection, not a reinterpretation of it).
+class ContributionProgress {
+  const ContributionProgress({
+    required this.confirmedAmountMinor,
+    required this.totalAmountMinor,
+    required this.confirmedParticipantCount,
+    required this.totalParticipantCount,
+  });
+
+  final int confirmedAmountMinor;
+  final int totalAmountMinor;
+  final int confirmedParticipantCount;
+  final int totalParticipantCount;
+
+  double get fraction => totalAmountMinor == 0 ? 0.0 : confirmedAmountMinor / totalAmountMinor;
+
+  factory ContributionProgress.fromJson(Map<String, dynamic> json) => ContributionProgress(
+    confirmedAmountMinor: (json['confirmedAmountMinor'] as num).toInt(),
+    totalAmountMinor: (json['totalAmountMinor'] as num).toInt(),
+    confirmedParticipantCount: (json['confirmedParticipantCount'] as num).toInt(),
+    totalParticipantCount: (json['totalParticipantCount'] as num).toInt(),
+  );
+}
+
 class VinkParticipant {
   const VinkParticipant({
     required this.id,
@@ -206,6 +234,7 @@ class VinkSnapshot {
     required this.unallocatedAmountMinor,
     required this.allowedActions,
     required this.card,
+    required this.contributionProgress,
     this.contributionStatusByParticipant = const {},
   });
 
@@ -214,6 +243,10 @@ class VinkSnapshot {
   final int unallocatedAmountMinor;
   final List<String> allowedActions;
   final VinkCard? card;
+
+  /// D20/D24 — the server-computed incremental progress signal (Slice I6's own Home progress
+  /// source; see [ContributionProgress]'s own doc comment).
+  final ContributionProgress contributionProgress;
 
   /// Each participant's most recent contribution attempt's raw status (Contribution
   /// ['status'] — CREATED/AUTHORIZED/CAPTURED/etc.), keyed by participant id. Absence
@@ -231,10 +264,121 @@ class VinkSnapshot {
     card: json['card'] == null
         ? null
         : VinkCard.fromJson(json['card'] as Map<String, dynamic>),
+    contributionProgress: ContributionProgress.fromJson(
+      json['contributionProgress'] as Map<String, dynamic>,
+    ),
     contributionStatusByParticipant: {
       for (final entry in (json['contributions'] as List<dynamic>? ?? const []))
         (entry as Map<String, dynamic>)['participantId'] as String:
             entry['status'] as String,
     },
+  );
+}
+
+/// Slice I6 (D43) — the organizer/participant shared, read-only historical view (D29/D31
+/// "Vink details", never "receipt"). D43 corrects I6's own first draft (which listed every
+/// participant's name+amount+status to every viewer — superseded, never shipped past this
+/// session): the organizer sees only an aggregate [VinkDetailsSummary], never a per-participant
+/// breakdown; a participant additionally sees their OWN [viewerParticipant] block, never
+/// another participant's.
+class VinkDetailsSummary {
+  const VinkDetailsSummary({
+    required this.confirmedAmountMinor,
+    required this.confirmedParticipantCount,
+    required this.totalParticipantCount,
+  });
+
+  final int confirmedAmountMinor;
+  final int confirmedParticipantCount;
+  final int totalParticipantCount;
+
+  factory VinkDetailsSummary.fromJson(Map<String, dynamic> json) => VinkDetailsSummary(
+    confirmedAmountMinor: (json['confirmedAmountMinor'] as num).toInt(),
+    confirmedParticipantCount: (json['confirmedParticipantCount'] as num).toInt(),
+    totalParticipantCount: (json['totalParticipantCount'] as num).toInt(),
+  );
+}
+
+class VinkDetailsTimelineEntry {
+  const VinkDetailsTimelineEntry({required this.eventType, required this.at});
+
+  final String eventType;
+  final DateTime at;
+
+  factory VinkDetailsTimelineEntry.fromJson(Map<String, dynamic> json) =>
+      VinkDetailsTimelineEntry(
+        eventType: json['eventType'] as String,
+        at: DateTime.parse(json['at'] as String),
+      );
+}
+
+/// Present only when [VinkDetailsView.viewerRole] is `'participant'` — the viewer's OWN share
+/// and outcome, never another participant's (D43).
+class VinkDetailsViewerParticipant {
+  const VinkDetailsViewerParticipant({
+    required this.assignedShareMinor,
+    required this.confirmedAmountMinor,
+    required this.contributionOutcomeLabel,
+  });
+
+  final int assignedShareMinor;
+  final int confirmedAmountMinor;
+  final String contributionOutcomeLabel;
+
+  factory VinkDetailsViewerParticipant.fromJson(Map<String, dynamic> json) =>
+      VinkDetailsViewerParticipant(
+        assignedShareMinor: (json['assignedShareMinor'] as num).toInt(),
+        confirmedAmountMinor: (json['confirmedAmountMinor'] as num).toInt(),
+        contributionOutcomeLabel: json['contributionOutcomeLabel'] as String,
+      );
+}
+
+class VinkDetailsView {
+  const VinkDetailsView({
+    required this.vinkId,
+    required this.purpose,
+    required this.purchaseCategory,
+    required this.totalMinor,
+    required this.organizerDisplayName,
+    required this.viewerRole,
+    required this.vinkOutcome,
+    required this.summary,
+    required this.timeline,
+    required this.merchantSettlementDetail,
+    required this.viewerParticipant,
+  });
+
+  final String vinkId;
+  final String? purpose;
+  final String purchaseCategory;
+  final int totalMinor;
+  final String organizerDisplayName;
+  final String viewerRole;
+  final String vinkOutcome;
+  final VinkDetailsSummary summary;
+  final List<VinkDetailsTimelineEntry> timeline;
+  final String? merchantSettlementDetail;
+  final VinkDetailsViewerParticipant? viewerParticipant;
+
+  bool get isOrganizerViewer => viewerRole == 'organizer';
+
+  factory VinkDetailsView.fromJson(Map<String, dynamic> json) => VinkDetailsView(
+    vinkId: json['vinkId'] as String,
+    purpose: json['purpose'] as String?,
+    purchaseCategory: json['purchaseCategory'] as String,
+    totalMinor: (json['totalMinor'] as num).toInt(),
+    organizerDisplayName: json['organizerDisplayName'] as String,
+    viewerRole: json['viewerRole'] as String,
+    vinkOutcome: json['vinkOutcome'] as String,
+    summary: VinkDetailsSummary.fromJson(json['summary'] as Map<String, dynamic>),
+    timeline: (json['timeline'] as List<dynamic>)
+        .map((entry) => VinkDetailsTimelineEntry.fromJson(entry as Map<String, dynamic>))
+        .toList(),
+    merchantSettlementDetail: json['merchantSettlementDetail'] as String?,
+    viewerParticipant: json['viewerParticipant'] == null
+        ? null
+        : VinkDetailsViewerParticipant.fromJson(
+            json['viewerParticipant'] as Map<String, dynamic>,
+          ),
   );
 }

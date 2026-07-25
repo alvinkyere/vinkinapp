@@ -7,10 +7,12 @@ import '../features/activity/activity_screen.dart';
 import '../features/create_vink/canonical/canonical_create_vink_screen.dart';
 import '../features/create_vink/create_vink_screen.dart';
 import '../features/home/home_screen.dart';
+import '../features/invites/invites_screen.dart';
 import '../features/onboarding/login_screen.dart';
 import '../features/onboarding/register_screen.dart';
 import '../features/onboarding/welcome_screen.dart';
 import '../features/profile/profile_screen.dart';
+import '../features/vink_details/vink_details_screen.dart';
 import '../features/vink_lobby/vink_lobby_screen.dart';
 import 'nav_shell.dart';
 
@@ -25,8 +27,16 @@ import 'nav_shell.dart';
 /// "the entire screen sequence as one unit," never a half-migrated hybrid — so neither Home
 /// nor `VinkLobbyScreen`'s own DRAFT redirect (both untouched, still literal `/create-vink`
 /// path strings) needs to know which flow is active.
-GoRouter buildRouter(Ref ref, {bool? canonicalCreateFlow}) {
+/// Slice I6 adds [homeActivityV2] as the same kind of overridable parameter, for the same
+/// reason: Home's two-section redesign, Activity's outcome-summary list, and the new Vink
+/// Details screen gate on it as one unit (Phase 10 §11's own flag table).
+/// Invites feature (D44) adds [invitesEnabled] the same way — it changes the STATEFUL SHELL'S
+/// OWN BRANCH COUNT (a 4th `/invites` branch), not just a visual toggle, so `VinkNavShell`
+/// must be told the exact same resolved value this function used.
+GoRouter buildRouter(Ref ref, {bool? canonicalCreateFlow, bool? homeActivityV2, bool? invitesEnabled}) {
   final useCanonicalCreateFlow = canonicalCreateFlow ?? FeatureFlags.canonicalCreateFlow;
+  final useHomeActivityV2 = homeActivityV2 ?? FeatureFlags.homeActivityV2;
+  final useInvitesEnabled = invitesEnabled ?? FeatureFlags.invitesEnabled;
   return GoRouter(
     initialLocation: '/welcome',
     refreshListenable: _AuthListenable(ref),
@@ -83,15 +93,25 @@ GoRouter buildRouter(Ref ref, {bool? canonicalCreateFlow}) {
           role: state.uri.queryParameters['role'],
         ),
       ),
+      // Slice I6 (Phase 4 §11's own named route) — pushed full-screen, no tab bar, matching
+      // Phase 8 §22's exact "Vink Details" composition. Only reachable when the flag is on;
+      // Activity's own row-tap navigation is the sole caller.
+      GoRoute(
+        path: '/activity/:vinkId',
+        builder: (context, state) =>
+            VinkDetailsScreen(vinkId: state.pathParameters['vinkId']!),
+      ),
       StatefulShellRoute.indexedStack(
-        builder: (context, state, navigationShell) =>
-            VinkNavShell(navigationShell: navigationShell),
+        builder: (context, state, navigationShell) => VinkNavShell(
+          navigationShell: navigationShell,
+          invitesEnabled: useInvitesEnabled,
+        ),
         branches: [
           StatefulShellBranch(
             routes: [
               GoRoute(
                 path: '/home',
-                builder: (context, state) => const HomeScreen(),
+                builder: (context, state) => HomeScreen(homeActivityV2: useHomeActivityV2),
               ),
             ],
           ),
@@ -99,10 +119,22 @@ GoRouter buildRouter(Ref ref, {bool? canonicalCreateFlow}) {
             routes: [
               GoRoute(
                 path: '/activity',
-                builder: (context, state) => const ActivityScreen(),
+                builder: (context, state) => ActivityScreen(homeActivityV2: useHomeActivityV2),
               ),
             ],
           ),
+          // Invites feature (D44) — inserted before Profile so the branch INDEX order matches
+          // VinkNavShell's own tab order (Home, Activity, Invites, Profile) exactly; omitted
+          // entirely when the flag is off, so Profile stays branch index 2, unchanged.
+          if (useInvitesEnabled)
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/invites',
+                  builder: (context, state) => const InvitesScreen(),
+                ),
+              ],
+            ),
           StatefulShellBranch(
             routes: [
               GoRoute(

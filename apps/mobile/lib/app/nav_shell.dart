@@ -1,14 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../core/config/feature_flags.dart';
 import '../design_system/vink_colors.dart';
 import '../design_system/vink_typography.dart';
 
-/// The three-tab structure the design correction calls for — no backend terminology
-/// anywhere in navigation, just Home / Activity / Profile.
+/// The tab structure the design correction calls for — no backend terminology anywhere in
+/// navigation, just Home / Activity / (Invites) / Profile.
+///
+/// Invites feature (D44): a 4th tab, gated by [invitesEnabled] (defaults to the real
+/// `FeatureFlags.invitesEnabled`, overridable for tests exactly like [router.dart]'s own
+/// `homeActivityV2`/`canonicalCreateFlow` params) — this widget and `router.dart`'s branch
+/// list must agree on the same flag value, since branch *count* itself changes, not just a
+/// visual toggle.
 class VinkNavShell extends StatelessWidget {
-  const VinkNavShell({super.key, required this.navigationShell});
+  const VinkNavShell({
+    super.key,
+    required this.navigationShell,
+    this.invitesEnabled = FeatureFlags.invitesEnabled,
+  });
 
   final StatefulNavigationShell navigationShell;
+  final bool invitesEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -38,12 +50,20 @@ class VinkNavShell extends StatelessWidget {
                   selected: navigationShell.currentIndex == 1,
                   onTap: () => navigationShell.goBranch(1),
                 ),
+                if (invitesEnabled)
+                  _NavItem(
+                    icon: Icons.mail_outline_rounded,
+                    activeIcon: Icons.mail_rounded,
+                    label: 'Invites',
+                    selected: navigationShell.currentIndex == 2,
+                    onTap: () => navigationShell.goBranch(2),
+                  ),
                 _NavItem(
                   icon: Icons.person_outline_rounded,
                   activeIcon: Icons.person_rounded,
-                  label: 'Profile',
-                  selected: navigationShell.currentIndex == 2,
-                  onTap: () => navigationShell.goBranch(2),
+                  label: 'Me',
+                  selected: navigationShell.currentIndex == (invitesEnabled ? 3 : 2),
+                  onTap: () => navigationShell.goBranch(invitesEnabled ? 3 : 2),
                 ),
               ],
             ),

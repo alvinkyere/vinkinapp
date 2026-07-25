@@ -76,6 +76,37 @@ void main() {
       }
     });
 
+    test(
+      'ENG3 Slice 6: INVALID_CREDENTIALS and USERNAME_TAKEN are validation, never '
+      'authenticationRequired, even though the backend sends them as a real HTTP 401/409',
+      () {
+        // The exact status codes apps/api/src/modules/auth/routes.ts's authErrorStatus
+        // actually sends — the whole point of this test is proving the specific-code check
+        // wins over the blanket `isAuthError` (401) check, not an artificial status code that
+        // happens to dodge it.
+        final credentials = _classify(401, 'INVALID_CREDENTIALS');
+        expect(credentials.category, FailureCategory.validation);
+        expect(credentials.requiresSignIn, isFalse);
+        expect(credentials.message, 'Incorrect username or password.');
+
+        final taken = _classify(409, 'USERNAME_TAKEN');
+        expect(taken.category, FailureCategory.validation);
+        expect(taken.requiresSignIn, isFalse);
+        expect(taken.message, 'That username is already taken.');
+      },
+    );
+
+    test(
+      'ENG3 Slice 6 regression: GUEST_UNAUTHENTICATED classifies as expired even at its real '
+      '401 status — the pre-existing test only ever proved this at an artificial 410, which '
+      'never exercised the actual isAuthError-vs-specific-code ordering bug',
+      () {
+        final result = _classify(401, 'GUEST_UNAUTHENTICATED');
+        expect(result.category, FailureCategory.expired);
+        expect(result.requiresSignIn, isFalse);
+      },
+    );
+
     test('RATE_LIMITED and 5xx are retryable', () {
       expect(_classify(429, 'RATE_LIMITED').category, FailureCategory.retryable);
       expect(_classify(503, 'SOME_SERVER_CODE').category, FailureCategory.retryable);

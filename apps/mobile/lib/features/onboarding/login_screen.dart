@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth_controller.dart';
-import '../../core/errors/api_exception.dart';
+import '../../core/commands/command_state.dart';
 import '../../design_system/components/vink_buttons.dart';
 import '../../design_system/components/vink_inline_error.dart';
 import '../../design_system/components/vink_step_header.dart';
@@ -19,24 +19,34 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _submitting = false;
-  String? _error;
+
+  // ENG3 Slice 6 ("typed error mapping completion"): replaces the ad hoc `bool _submitting` +
+  // `String? _error` pair (whose catch block also never checked `mounted`, unlike this
+  // screen's own `finally` block one line below it — a real, if minor, latent gap fixed for
+  // free by `CommandRunner`'s own `_guardedSetState`-shaped closure) and the hand-rolled
+  // `error.code == 'INVALID_CREDENTIALS' ? ... : ...` check with the same typed
+  // `CommandRunner`/`classifyFailure` pipeline every other mutating screen already uses
+  // (`vink_lobby_screen.dart`, Slice 2).
+  void _guardedSetState(void Function() fn) {
+    if (mounted) setState(fn);
+  }
+
+  late final _loginCommand = CommandRunner<void>(_guardedSetState, ref);
+
+  bool get _submitting => _loginCommand.state.isInProgress;
+  String? get _error => switch (_loginCommand.state) {
+    CommandFailure(:final failure) => failure.message,
+    _ => null,
+  };
 
   Future<void> _submit() async {
-    setState(() {
-      _submitting = true;
-      _error = null;
-    });
-    try {
-      await ref
+    // Navigation to /home happens via the router's redirect on AuthSignedIn — no onSuccess
+    // needed here.
+    await _loginCommand.run(
+      () => ref
           .read(authControllerProvider.notifier)
-          .login(username: _usernameController.text.trim(), password: _passwordController.text);
-      // Navigation to /home happens via the router's redirect on AuthSignedIn.
-    } on ApiException catch (error) {
-      setState(() => _error = error.code == 'INVALID_CREDENTIALS' ? 'Incorrect username or password.' : 'Something went wrong. Try again.');
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
+          .login(username: _usernameController.text.trim(), password: _passwordController.text),
+    );
   }
 
   @override

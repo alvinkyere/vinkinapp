@@ -12,9 +12,21 @@ import { clearGuestSession, loadGuestSession, saveGuestSession } from '../../lib
 import { useHasMounted } from '../../lib/use-has-mounted';
 import { JoinForm } from './JoinForm';
 import { SessionView } from './SessionView';
-import type { GuestSession } from '../../lib/types';
+import type { GuestSession, PublicVinkView } from '../../lib/types';
 
-export function JoinExperience({ publicCode }: { publicCode: string }) {
+export function JoinExperience({
+  publicCode,
+  initialPublicView = null,
+}: {
+  publicCode: string;
+  /** ENG3 Slice 5 — the anonymous-visitor view, fetched server-side
+   * (`app/join/[publicCode]/page.tsx`) and seeded as this query's `initialData` so the first
+   * paint (server HTML and pre-hydration client render alike) already has real
+   * organizer/purpose/amount content, never a mandatory "Loading…" gate. `null` (the default,
+   * and what a server-side fetch failure passes) falls back to today's exact original
+   * behavior — a client-side fetch behind the same loading/error states as before. */
+  initialPublicView?: PublicVinkView | null;
+}) {
   const hasMounted = useHasMounted();
   // Only ever set by the join event handler below — never by an effect. A returning
   // guest's stored session is read fresh on each render once mounted (cheap; storage
@@ -45,6 +57,12 @@ export function JoinExperience({ publicCode }: { publicCode: string }) {
     queryKey: ['public-vink', publicCode],
     queryFn: () => getPublicVinkView(publicCode),
     enabled: hasMounted && effectiveSession === null,
+    // ENG3 Slice 5: seeds the query with the server-fetched view so both the server's HTML
+    // and the client's pre-hydration render already report `isSuccess`/`data` — no fetch is
+    // awaited before real content can appear. `undefined` (server fetch failed, or this is a
+    // returning guest whose stored session takes priority) falls back to the original
+    // behavior exactly: `enabled` alone decides whether/when a real fetch happens.
+    initialData: initialPublicView ?? undefined,
   });
 
   // Funnel entry point (PV12 prep). A pure side effect — track() is fire-and-forget, not a
@@ -59,7 +77,13 @@ export function JoinExperience({ publicCode }: { publicCode: string }) {
     }
   }, [publicViewQuery.isSuccess, publicViewQuery.isError, publicViewQuery.error, publicCode]);
 
-  if (!hasMounted || (effectiveSession !== null && sessionQuery.isPending)) {
+  // ENG3 Slice 5: no longer gated on `!hasMounted` — the anonymous-visitor path below has
+  // real data from the very first render (server HTML included) via `initialData`, so it no
+  // longer needs to wait for mount. `effectiveSession` is always `null` pre-mount (storage
+  // isn't readable server-side), so this condition was only ever "loading" for a *returning*
+  // guest's own session lookup pre-mount anyway — that case is unaffected: it still shows
+  // Loading… once mounted, while `sessionQuery` is genuinely in flight.
+  if (effectiveSession !== null && sessionQuery.isPending) {
     return <StatusMessage>Loading…</StatusMessage>;
   }
 
@@ -87,6 +111,18 @@ export function JoinExperience({ publicCode }: { publicCode: string }) {
   }
 
   if (effectiveSession === null) {
+    // ENG3 Slice 5 ("expired and revoked token handling"): the audit found this specific
+    // path — a *returning* guest whose already-stored token has since expired/been revoked —
+    // silently fell through to a bare join form with no explanation, inconsistent with the
+    // initial `/g/:token` redemption path (`app/g/[token]/page.tsx`), which already shows a
+    // clear message for the same underlying failure. Reuses the exact existing
+    // `GUEST_UNAUTHENTICATED` copy (`lib/human-errors.ts`) already written for this — not new
+    // copy, just surfaced on the one path that was missing it.
+    const sessionExpiredNotice =
+      candidateSession !== null && sessionQuery.isError
+        ? humanErrorMessage(sessionQuery.error)
+        : null;
+
     if (publicViewQuery.isPending) return <StatusMessage>Loading…</StatusMessage>;
     if (publicViewQuery.isError) {
       return <StatusMessage>{humanErrorMessage(publicViewQuery.error)}</StatusMessage>;
@@ -105,14 +141,21 @@ export function JoinExperience({ publicCode }: { publicCode: string }) {
         );
       }
       return (
-        <JoinForm
-          publicCode={publicCode}
-          summary={summary}
-          onJoined={(newSession) => {
-            saveGuestSession(newSession);
-            setJoinedSession(newSession);
-          }}
-        />
+        <>
+          {sessionExpiredNotice !== null && (
+            <p role="status" className="mx-auto max-w-md px-6 pb-2 text-center text-sm text-smoke">
+              {sessionExpiredNotice}
+            </p>
+          )}
+          <JoinForm
+            publicCode={publicCode}
+            summary={summary}
+            onJoined={(newSession) => {
+              saveGuestSession(newSession);
+              setJoinedSession(newSession);
+            }}
+          />
+        </>
       );
     }
   }

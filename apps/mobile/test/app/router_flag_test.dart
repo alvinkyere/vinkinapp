@@ -57,6 +57,12 @@ FakeApiClient _resumeStubClient() => FakeApiClient((method, path, body) async {
       'unallocatedAmountMinor': 5000,
       'allowedActions': const [],
       'card': null,
+      'contributionProgress': {
+        'confirmedAmountMinor': 0,
+        'totalAmountMinor': 5000,
+        'confirmedParticipantCount': 0,
+        'totalParticipantCount': 1,
+      },
     };
   }
   throw ApiException(statusCode: 404, code: 'UNEXPECTED_CALL', message: '$method $path');

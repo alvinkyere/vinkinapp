@@ -235,7 +235,7 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
   async listVinksByParticipant(userId: string): Promise<Vink[]> {
     const vinkIds = new Set<string>();
     for (const participant of this.participants.values()) {
-      if (participant.userId === userId && participant.status !== 'REMOVED') {
+      if (participant.userId === userId && participant.status === 'JOINED') {
         vinkIds.add(participant.vinkId);
       }
     }
@@ -243,6 +243,19 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
       .map((id) => this.vinks.get(id))
       .filter((vink): vink is Vink => vink !== undefined)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async listVinksByPendingInvite(userId: string): Promise<Vink[]> {
+    const invited: { vinkId: string; invitedAt: string }[] = [];
+    for (const participant of this.participants.values()) {
+      if (participant.userId === userId && participant.status === 'INVITED') {
+        invited.push({ vinkId: participant.vinkId, invitedAt: participant.invitedAt });
+      }
+    }
+    return invited
+      .sort((a, b) => b.invitedAt.localeCompare(a.invitedAt))
+      .map((entry) => this.vinks.get(entry.vinkId))
+      .filter((vink): vink is Vink => vink !== undefined);
   }
 
   async updateVink(vink: Vink): Promise<void> {
@@ -360,6 +373,18 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
 
   async listContributionsByVink(vinkId: VinkId): Promise<Contribution[]> {
     return [...this.contributions.values()]
+      .filter((row) => row.vinkId === vinkId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async listPurchaseAuthorizations(vinkId: VinkId): Promise<PurchaseAuthorization[]> {
+    return [...this.purchaseAuthorizations.values()]
+      .filter((row) => row.vinkId === vinkId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async listSettlements(vinkId: VinkId): Promise<Settlement[]> {
+    return [...this.settlements.values()]
       .filter((row) => row.vinkId === vinkId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }

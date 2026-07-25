@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_controller.dart';
 import '../models/activity_entry.dart';
+import '../models/pending_invite.dart';
 import '../models/vink.dart';
 import '../networking/api_client.dart';
 
@@ -62,6 +63,26 @@ class VinkRepository {
     return list.map((raw) => ActivityEntry.fromJson(raw as Map<String, dynamic>)).toList();
   }
 
+  /// `GET /api/v1/vinks/:vinkId/participant-activity` — the customer-safe counterpart to
+  /// [getActivity] for a signed-in member who isn't the organizer (Slice I2D). Reuses the same
+  /// [ActivityEntry] wire shape; the server has already filtered/sanitized every entry.
+  Future<List<ActivityEntry>> getParticipantActivity(String vinkId, {CancelToken? cancelToken}) async {
+    final list = await _client.getList(
+      '/api/v1/vinks/$vinkId/participant-activity',
+      cancelToken: cancelToken,
+    );
+    return list.map((raw) => ActivityEntry.fromJson(raw as Map<String, dynamic>)).toList();
+  }
+
+  /// `GET /api/v1/vinks/:vinkId/details` — Vink Details (Slice I6, D29/D31 "Vink details",
+  /// never "receipt"). Organizer or any active participant; the server has already applied
+  /// Phase 4 §11's deliberate widening (every participant's own outcome, not just the
+  /// viewer's).
+  Future<VinkDetailsView> getDetails(String vinkId, {CancelToken? cancelToken}) async {
+    final response = await _client.get('/api/v1/vinks/$vinkId/details', cancelToken: cancelToken);
+    return VinkDetailsView.fromJson(response);
+  }
+
   /// `POST /api/v1/vinks/:vinkId/cancel` — organizer-only, `OPEN` only. Idempotent: cancelling
   /// an already-cancelled Vink is a no-op success server-side (ENG1 #4), so this never needs
   /// its own idempotency handling on the client. Deliberately no [CancelToken] parameter — a
@@ -76,6 +97,25 @@ class VinkRepository {
   /// [CancelToken] parameter, for the same reason as [cancelVink] above.
   Future<void> authorizeContribution(String vinkId) =>
       _client.post('/api/v1/vinks/$vinkId/contributions/authorize');
+
+  /// `GET /api/v1/invites` — Invites feature (D44). Newest-invited-first.
+  Future<List<PendingInvite>> listMyInvites({CancelToken? cancelToken}) async {
+    final response = await _client.get('/api/v1/invites', cancelToken: cancelToken);
+    return (response['invites'] as List<dynamic>)
+        .map((entry) => PendingInvite.fromJson(entry as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// `POST /api/v1/vinks/:vinkId/participants/me/accept` — the invitee's own acceptance. No
+  /// [CancelToken], same reasoning as [cancelVink]/[authorizeContribution]: a mutating
+  /// command should complete server-side regardless of screen lifetime.
+  Future<void> acceptInvite(String vinkId) =>
+      _client.post('/api/v1/vinks/$vinkId/participants/me/accept');
+
+  /// `POST /api/v1/vinks/:vinkId/participants/me/decline` — dismiss-only "Not now" lives in
+  /// the UI layer; this is the real decline, called from the Invites tab.
+  Future<void> declineInvite(String vinkId) =>
+      _client.post('/api/v1/vinks/$vinkId/participants/me/decline');
 }
 
 final vinkRepositoryProvider = Provider<VinkRepository>(

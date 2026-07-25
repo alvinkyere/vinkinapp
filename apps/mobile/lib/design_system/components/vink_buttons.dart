@@ -5,10 +5,14 @@ import '../vink_shadows.dart';
 import '../vink_spacing.dart';
 import '../vink_typography.dart';
 
-/// Every button on vinkin.org is `rounded-full` with an uppercase, bold, wide-tracked
-/// `font-display` label — never sentence case, never the body font. `minHeight: 48`
-/// clears the 44×44pt minimum touch target with room for label ascenders/descenders.
+/// Owner design directive (2026-07-24, concept-image visual spec): buttons are a rounded
+/// rectangle (`VinkRadius.xxl`, 16px), sentence-case label — superseding vinkin.org's own
+/// site CSS (`rounded-full`, uppercase), which this component originally replicated exactly.
+/// The site's real blue/paper/ink color tokens are unchanged; only shape and case converge
+/// to the concept. `minHeight: 48` clears the 44×44pt minimum touch target with room for
+/// label ascenders/descenders.
 const double _minButtonHeight = 48;
+const double _buttonRadius = 16;
 
 /// Swaps a button's label for a loading spinner without the button visibly resizing
 /// (docs/design/phase-9-motion-system.md §2/§7, docs/design/phase-10-implementation-readiness.md
@@ -22,6 +26,8 @@ class _ButtonContent extends StatelessWidget {
     required this.spinnerColor,
     required this.textStyle,
     this.spinnerSize = 20,
+    this.leadingIcon,
+    this.trailingIcon,
   });
 
   final String label;
@@ -30,18 +36,38 @@ class _ButtonContent extends StatelessWidget {
   final TextStyle textStyle;
   final double spinnerSize;
 
+  /// Concept-image buttons carry a small directional/action icon ("+ Start a Vink",
+  /// "Continue →") — opt-in per call site, default none, so every existing button is
+  /// unaffected until a screen is deliberately converged.
+  final IconData? leadingIcon;
+  final IconData? trailingIcon;
+
   @override
   Widget build(BuildContext context) {
+    final labelText = Text(label, style: textStyle);
+    final content = (leadingIcon == null && trailingIcon == null)
+        ? labelText
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (leadingIcon != null) ...[
+                Icon(leadingIcon, size: 18, color: textStyle.color),
+                const SizedBox(width: 6),
+              ],
+              labelText,
+              if (trailingIcon != null) ...[
+                const SizedBox(width: 6),
+                Icon(trailingIcon, size: 18, color: textStyle.color),
+              ],
+            ],
+          );
     // The label stays mounted (opacity-toggled, never removed) so it always reserves the
     // button's natural width; the spinner is only mounted while loading, which is safe
     // because it's smaller than the label and can never make the Stack narrower.
     return Stack(
       alignment: Alignment.center,
       children: [
-        Opacity(
-          opacity: loading ? 0 : 1,
-          child: Text(label.toUpperCase(), style: textStyle),
-        ),
+        Opacity(opacity: loading ? 0 : 1, child: content),
         if (loading)
           SizedBox(
             width: spinnerSize,
@@ -66,6 +92,8 @@ class VinkPrimaryButton extends StatelessWidget {
     this.loading = false,
     this.semanticLabel,
     this.glow = false,
+    this.leadingIcon,
+    this.trailingIcon,
   });
 
   final String label;
@@ -76,6 +104,10 @@ class VinkPrimaryButton extends StatelessWidget {
   /// The site's blue CTA glow shadow — reserve for the single most important action on a
   /// screen (e.g. "Open Vink"), not every primary button, or it stops meaning anything.
   final bool glow;
+
+  /// Concept-image icon accents ("+ Start a Vink", "Continue →") — opt-in, default none.
+  final IconData? leadingIcon;
+  final IconData? trailingIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -92,10 +124,10 @@ class VinkPrimaryButton extends StatelessWidget {
           color: disabled
               ? VinkColors.ink.withValues(alpha: 0.15)
               : VinkColors.blue,
-          borderRadius: BorderRadius.circular(VinkRadius.pill),
+          borderRadius: BorderRadius.circular(_buttonRadius),
           child: InkWell(
             onTap: disabled ? null : onPressed,
-            borderRadius: BorderRadius.circular(VinkRadius.pill),
+            borderRadius: BorderRadius.circular(_buttonRadius),
             splashColor: VinkColors.blueDeep.withValues(alpha: 0.3),
             highlightColor: VinkColors.blueDeep.withValues(alpha: 0.2),
             child: Container(
@@ -112,6 +144,8 @@ class VinkPrimaryButton extends StatelessWidget {
                 textStyle: VinkTypography.buttonLabel.copyWith(
                   color: VinkColors.white,
                 ),
+                leadingIcon: leadingIcon,
+                trailingIcon: trailingIcon,
               ),
             ),
           ),
@@ -129,12 +163,16 @@ class VinkSecondaryButton extends StatelessWidget {
     required this.onPressed,
     this.loading = false,
     this.semanticLabel,
+    this.leadingIcon,
+    this.trailingIcon,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool loading;
   final String? semanticLabel;
+  final IconData? leadingIcon;
+  final IconData? trailingIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -145,10 +183,10 @@ class VinkSecondaryButton extends StatelessWidget {
       label: semanticLabel ?? label,
       child: Material(
         color: VinkColors.white,
-        borderRadius: BorderRadius.circular(VinkRadius.pill),
+        borderRadius: BorderRadius.circular(_buttonRadius),
         child: InkWell(
           onTap: disabled ? null : onPressed,
-          borderRadius: BorderRadius.circular(VinkRadius.pill),
+          borderRadius: BorderRadius.circular(_buttonRadius),
           child: Container(
             constraints: const BoxConstraints(minHeight: _minButtonHeight),
             padding: const EdgeInsets.symmetric(
@@ -157,7 +195,7 @@ class VinkSecondaryButton extends StatelessWidget {
             ),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(VinkRadius.pill),
+              borderRadius: BorderRadius.circular(_buttonRadius),
               border: Border.all(color: VinkColors.ink.withValues(alpha: 0.15)),
             ),
             child: _ButtonContent(
@@ -168,6 +206,8 @@ class VinkSecondaryButton extends StatelessWidget {
               textStyle: VinkTypography.buttonLabel.copyWith(
                 color: disabled ? VinkColors.smoke : VinkColors.ink,
               ),
+              leadingIcon: leadingIcon,
+              trailingIcon: trailingIcon,
             ),
           ),
         ),
@@ -206,10 +246,10 @@ class VinkDestructiveButton extends StatelessWidget {
       label: semanticLabel ?? label,
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(VinkRadius.pill),
+        borderRadius: BorderRadius.circular(_buttonRadius),
         child: InkWell(
           onTap: disabled ? null : onPressed,
-          borderRadius: BorderRadius.circular(VinkRadius.pill),
+          borderRadius: BorderRadius.circular(_buttonRadius),
           child: Container(
             constraints: const BoxConstraints(minHeight: _minButtonHeight),
             padding: const EdgeInsets.symmetric(
@@ -218,7 +258,7 @@ class VinkDestructiveButton extends StatelessWidget {
             ),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(VinkRadius.pill),
+              borderRadius: BorderRadius.circular(_buttonRadius),
               border: Border.all(
                 color: VinkColors.danger.withValues(
                   alpha: disabled ? 0.3 : 0.6,

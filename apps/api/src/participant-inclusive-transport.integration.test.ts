@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.ts';
 import { createIsolatedTestDb, type IsolatedTestDb } from './testing/integration-db.ts';
+import { MockFinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 
 const RUN = process.env.VINKIN_INTEGRATION === '1';
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
@@ -101,6 +102,9 @@ describe('participant-inclusive transport contract (PostgreSQL, Slice I2B)', { s
     db = await createIsolatedTestDb('participant_inclusive_transport');
     const deps = {
       sql: db.sql,
+      // Slice I2D's own test needs the contribution routes, which `buildApp` only registers
+      // when a provider is supplied — every prior test in this file never needed them.
+      provider: new MockFinancialProvider(),
       checkDb: async () => {
         await db.sql`SELECT 1`;
       },
@@ -276,6 +280,139 @@ describe('participant-inclusive transport contract (PostgreSQL, Slice I2B)', { s
     });
     assert.equal(response.statusCode, 404);
   });
+
+  it('participant-activity is gated off (404) when the flag is off', async () => {
+    const organizer = await register(appFlagOff, `i2dpaoo${STAMP}`);
+    const member = await register(appFlagOff, `i2dpaom${STAMP}`);
+    const vink = await createVink(appFlagOff, organizer.token);
+    await addMember(appFlagOff, organizer.token, vink.id, member.username);
+
+    const response = await appFlagOff.inject({
+      method: 'GET',
+      url: `/api/v1/vinks/${vink.id}/participant-activity`,
+      headers: { authorization: `Bearer ${member.token}` },
+    });
+    assert.equal(response.statusCode, 404);
+  });
+
+  it(
+    "Slice I2D, real PostgreSQL: a participant's activity feed shows vink-wide milestones and " +
+      "their own contribution, but never a fellow participant's contribution event",
+    async () => {
+      const organizer = await register(appFlagOn, `i2dpaeo${STAMP}`);
+      const memberA = await register(appFlagOn, `i2dpaea${STAMP}`);
+      const memberB = await register(appFlagOn, `i2dpaeb${STAMP}`);
+      const vink = await createVink(appFlagOn, organizer.token);
+      await addMember(appFlagOn, organizer.token, vink.id, memberA.username);
+      await addMember(appFlagOn, organizer.token, vink.id, memberB.username);
+      await openVink(appFlagOn, organizer.token, vink.id);
+
+      const authA = await appFlagOn.inject({
+        method: 'POST',
+        url: `/api/v1/vinks/${vink.id}/contributions/authorize`,
+        headers: { authorization: `Bearer ${memberA.token}` },
+      });
+      assert.equal(authA.statusCode, 200, `memberA authorize failed: ${authA.body}`);
+      const authB = await appFlagOn.inject({
+        method: 'POST',
+        url: `/api/v1/vinks/${vink.id}/contributions/authorize`,
+        headers: { authorization: `Bearer ${memberB.token}` },
+      });
+      assert.equal(authB.statusCode, 200, `memberB authorize failed: ${authB.body}`);
+
+      const response = await appFlagOn.inject({
+        method: 'GET',
+        url: `/api/v1/vinks/${vink.id}/participant-activity`,
+        headers: { authorization: `Bearer ${memberA.token}` },
+      });
+      assert.equal(response.statusCode, 200, `participant-activity failed: ${response.body}`);
+      const entries = response.json() as Array<{ kind: string; detail: Record<string, unknown> }>;
+      const eventTypes = entries.map((entry) => entry.detail.eventType);
+
+      assert.ok(eventTypes.includes('VinkOpened'), 'vink-wide milestone present');
+      assert.equal(
+        eventTypes.filter((t) => t === 'ContributionAuthorized').length,
+        1,
+        "exactly one — memberA's own, never memberB's",
+      );
+      assert.ok(
+        entries.every((entry) => entry.kind === 'event'),
+        'no transition rows leaked',
+      );
+      assert.ok(
+        entries.every((entry) => Object.keys(entry.detail).length === 1),
+        'every entry sanitized to {eventType} only',
+      );
+    },
+  );
+
+  it('details is gated off (404) when the flag is off', async () => {
+    const organizer = await register(appFlagOff, `i6dtloo${STAMP}`);
+    const vink = await createVink(appFlagOff, organizer.token);
+
+    const response = await appFlagOff.inject({
+      method: 'GET',
+      url: `/api/v1/vinks/${vink.id}/details`,
+      headers: { authorization: `Bearer ${organizer.token}` },
+    });
+    assert.equal(response.statusCode, 404);
+  });
+
+  it(
+    'Slice I6 (D43), real PostgreSQL: organizer sees an aggregate-only summary; a participant ' +
+      "sees only their own share/outcome — neither ever sees another participant's identity or amount",
+    async () => {
+      const organizer = await register(appFlagOn, `i6dtleo${STAMP}`);
+      const memberA = await register(appFlagOn, `i6dtlea${STAMP}`);
+      const memberB = await register(appFlagOn, `i6dtleb${STAMP}`);
+      const vink = await createVink(appFlagOn, organizer.token);
+      await addMember(appFlagOn, organizer.token, vink.id, memberA.username);
+      await addMember(appFlagOn, organizer.token, vink.id, memberB.username);
+      await openVink(appFlagOn, organizer.token, vink.id);
+
+      const organizerView = await appFlagOn.inject({
+        method: 'GET',
+        url: `/api/v1/vinks/${vink.id}/details`,
+        headers: { authorization: `Bearer ${organizer.token}` },
+      });
+      assert.equal(
+        organizerView.statusCode,
+        200,
+        `organizer /details failed: ${organizerView.body}`,
+      );
+      const organizerBody = organizerView.json() as Record<string, unknown>;
+      assert.equal(organizerBody.viewerRole, 'organizer');
+      assert.equal(organizerBody.viewerParticipant, null);
+      assert.ok(!('participants' in organizerBody), 'D43: no per-participant array, ever');
+      assert.ok(
+        !JSON.stringify(organizerBody).includes(memberA.username),
+        "D43: not even the organizer sees a participant's identity on this screen",
+      );
+
+      const memberView = await appFlagOn.inject({
+        method: 'GET',
+        url: `/api/v1/vinks/${vink.id}/details`,
+        headers: { authorization: `Bearer ${memberA.token}` },
+      });
+      assert.equal(memberView.statusCode, 200, `member /details failed: ${memberView.body}`);
+      const memberBody = memberView.json() as Record<string, unknown>;
+      assert.equal(memberBody.viewerRole, 'participant');
+      assert.ok(memberBody.viewerParticipant, "memberA's own viewerParticipant block is present");
+      assert.ok(
+        !JSON.stringify(memberBody).includes(memberB.username),
+        "D43: memberB's identity never reaches memberA's view",
+      );
+
+      const strangerView = await appFlagOn.inject({
+        method: 'GET',
+        url: `/api/v1/vinks/${vink.id}/details`,
+        headers: {
+          authorization: `Bearer ${(await register(appFlagOn, `i6dtles${STAMP}`)).token}`,
+        },
+      });
+      assert.equal(strangerView.statusCode, 403);
+    },
+  );
 
   it(
     "participant-private data is not exposed via the list: a fellow participant's " +

@@ -618,7 +618,12 @@ class _CanonicalCreateVinkScreenState extends ConsumerState<CanonicalCreateVinkS
         Center(child: VinkMoneyField(controller: _totalController, autofocus: true, errorText: _totalError)),
         const Spacer(),
         if (_error != null) ...[VinkInlineError(message: _error!), const SizedBox(height: VinkSpacing.md)],
-        VinkPrimaryButton(label: 'Continue', loading: _busy, onPressed: _createVinkAndContinue),
+        VinkPrimaryButton(
+          label: 'Continue',
+          trailingIcon: Icons.arrow_forward_rounded,
+          loading: _busy,
+          onPressed: _createVinkAndContinue,
+        ),
       ],
     );
   }

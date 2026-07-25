@@ -546,9 +546,271 @@ tests** across two files — `flutter analyze` clean (same 11 pre-existing issue
 test` 158/158, re-verified twice including once after a concurrent-session change landed on
 `vink_lobby_screen.dart` mid-slice (Slice I2C, participant realtime support) — merged cleanly.
 
-Next: ENG3 Slice 5 (guest-web hardening — server-rendered invite context, tab-resume handling,
-token-expiry consistency) is next in the owner-approved order, pending go-ahead. `PV12` (the
-actual closed pilot) remains an owner/operational decision deferred until ENG0–ENG9 close.
+**ENG3 Slice 5 done** (`milestone-reports/ENG3-SLICE-5-GUEST-WEB-HARDENING.md`): guest-web
+hardening. One of the three flagged items — mobile-browser tab-resume recovery — turned out
+already resolved as a side effect of Slice 1's own `visibilitychange` work; verified, not
+re-built. Server-rendered invite context + immediate first render fixed together: a new
+Server Component fetch in `app/join/[publicCode]/page.tsx` seeds `JoinExperience`'s React
+Query as `initialData`, so the organizer/purpose/amount are in the actual server HTML — proven
+by a new Playwright test with JavaScript disabled entirely, not just "loads fast after
+hydration." The blanket `!hasMounted` render gate was narrowed to the one case it was ever
+actually needed for (a *returning* guest's own session lookup), since `effectiveSession` is
+provably always `null` pre-mount. Expired-token handling made consistent: a returning guest
+whose stored token has since expired now sees the same `GUEST_UNAUTHENTICATED` copy the
+initial `/g/:token` redemption path already showed, reusing existing copy and an existing UI
+pattern — previously it silently fell through to a bare join form. Both new tests initially
+failed for an unrelated, mundane reason (the test setup's own `/open` call omitted a required
+empty JSON body, leaving the Vink stuck in DRAFT) — root-caused against `e9.spec.ts`'s own
+working call and fixed in the test files. **2 new tests** — `pnpm typecheck/lint/format:check/
+guard` clean, `apps/guest-web` 43 passed/8 pre-existing-failed (same confirmed-unrelated Slice
+I3/I3A gap as every prior ENG3 slice), including the full E9 golden path passing.
+
+**ENG3 Slice 6 done** (`milestone-reports/ENG3-SLICE-6-ERROR-MAPPING.md`): typed error mapping
+completion — the last of the six owner-approved slices. `login_screen.dart`/`register_screen.dart`
+were the only two mutating screens still bypassing `failure_classifier.dart`/`CommandRunner`,
+hand-rolling their own `bool _submitting`/`String? _error` pairs and ad hoc code comparisons;
+both migrated to the same `CommandRunner` pattern Slice 2 established. Found and fixed a real,
+disclosed ordering bug along the way: `classifyFailure()` checked the blanket `error.isAuthError`
+(401) before any specific-code-set check, safe only by coincidence until login needed it —
+`apps/api`'s `authErrorStatus` sends `INVALID_CREDENTIALS` at a genuine 401, which the old
+ordering would have misclassified as "your session died" instead of "wrong password, try again."
+Reordered so specific codes (`_alreadyCompletedCodes`/`_conflictCodes`/`_expiredCodes`/
+`_terminalCodes`/`_validationCodes`) are all checked before the blanket auth fallback; added
+`INVALID_CREDENTIALS`/`USERNAME_TAKEN` to `_validationCodes` and `human_errors.dart`, preserving
+the exact copy the two screens' old ad hoc strings already used. The same reordering fixed a
+second, previously-uncaught latent bug for free: `GUEST_UNAUTHENTICATED` was already in
+`_expiredCodes` but unreachable at its real 401 status (the pre-existing test only ever exercised
+it at an artificial 410) — now correct and regression-tested at the real status. One deliberate,
+disclosed simplification on register: `VALIDATION_FAILED`'s old screen-specific copy ("Username
+needs 3+ letters/numbers...") is now the shared generic message, since `ClassifiedFailure`
+doesn't carry the original error code and widening it for one screen's preference wasn't worth
+it — flagged in a code comment, not hidden. Caught a real, previously-undiscovered layout bug
+while writing the register widget test: no `SingleChildScrollView` around its 5-field form,
+overflowing on a phone-sized viewport — Phase 4 §3 already required scroll behavior for this
+exact screen ("more fields so more likely to need it"), evidently missed when the D19/D27
+email/phone fields landed; fixed by implementing that already-approved requirement, not by
+inventing new layout. **168/168 Flutter tests green** (up from 158), `flutter analyze` clean
+(same 11 pre-existing issues), `pnpm typecheck/lint/guard` clean repo-wide; the only
+`format:check` warnings are in three files this slice never touched, confirmed as the concurrent
+UX-track session's own in-flight work.
+
+**ENG3 is fully closed.** All six owner-approved slices are done: realtime backbone hardening
+(reconnect backoff+jitter, app-level heartbeat, lifecycle-aware reconnection), the Flutter typed
+repository + `CommandRunner` command-state layer, resilience primitives (request cancellation,
+network reachability, app-version enforcement), deterministic deep-link routing, guest-web
+hardening (server-rendered invite context, tab-resume, token-expiry consistency), and typed error
+mapping completion. Every slice shipped with real tests (never simulated), caught and fixed at
+least one genuine pre-existing defect along the way (several latent, previously-undiscovered —
+the `classifyFailure` ordering bug, the register-screen overflow, the guest-web stale-refresh
+race, the port-3000 double-heartbeat issue, and more, each documented in its own report), and
+verified clean against the full repo-wide suite. No visual/UX decisions were made per the brief's
+own explicit constraint — layout fixes were grounded in already-approved screen contracts
+(Phase 4), never invented.
+
+**UX-track Slice I6 done** (`milestone-reports/I6.md`), running concurrently with the ENG track:
+Home (tagline/greeting removed unconditionally, two-section needs-attention/waiting-on-others
+layout, compact progress now sourced from the server-projected `contributionProgress`
+(D20/D24) rather than `fundedAmountMinor`), Activity (outcome-summary list, partial-failure
+resilience on both the old and new list), and a new Vink Details screen. **D43** corrects this
+slice's own first-pass Vink Details implementation before it shipped: the organizer sees only a
+customer-safe AGGREGATE summary, never a per-participant breakdown; a participant sees only
+their own share/outcome — matching D24/D25/D42's own "own-contribution-only" boundary
+everywhere else in this app, not the wider per-participant roster the first draft built. **204
+Flutter tests green** (up from 168), `apps/api` 137/137, `packages/application` 120/120,
+`flutter analyze` clean at the 11-issue baseline; verified on a real iOS Simulator against the
+real local backend across all three required flows (organizer, participant, and a genuinely
+mixed-role account whose Activity tab renders both roles without crashing). Caught and fixed
+along the way: a real regression this slice's own `VinkSnapshot.contributionProgress` field
+introduced in two other tests' raw JSON fixtures, and a real disk-full environment issue
+(freed with explicit owner approval — pure build caches, no project files touched).
+
+**Invites done** (`milestone-reports/INVITES.md`, D44) — new scope outside the original I1–I11
+sequence, owner-directed after comparing two aspirational mockups against the shipped post-I6
+app. A real `INVITED → accept/decline` gate before an organizer-added existing member becomes
+`JOINED` (`ParticipantStatus.INVITED` existed in the domain type since PV3, never assigned
+until now), flag-gated end to end (`VINKIN_INVITES_ENABLED`/`FeatureFlags.invitesEnabled`): new
+`acceptInviteCommand`/`declineInviteCommand` (decline reuses `removeParticipantCommand`'s exact
+allocation-zeroing, landing on the canonical `REMOVED` state per D11, distinguished only by its
+own outbox event per D12), a new `GET /api/v1/invites` read (deliberately separate from `GET
+/api/v1/vinks`, not an overload of its `role` field), and a 4th mobile "Invites" tab plus a Home
+"You're invited to…" card. The one required fix, not optional polish:
+`listVinksByParticipant`'s filter changed from "non-removed" to `JOINED`-only, since without it
+an `INVITED` row would silently leak into Home/Activity's normal vink list the moment the flag
+went live. **Real operational finding, documented in D44, not a code defect:** the server flag
+and client flag must roll out together — turning the server flag on against a client build that
+still lacks the Invites tab leaves an added member permanently stuck `INVITED` with no way to
+ever accept, reproduced directly by running `e1_test.dart` against a mismatched flag pair.
+**219 Flutter tests green** (up from 204), `apps/api` 143/143, `packages/application` 137/137;
+real-device verified end to end (organizer adds a member → member sees a real backend-confirmed
+`INVITED` status → accepts through the real UI → backend confirms `JOINED` and real `GET
+/api/v1/vinks` membership), plus the `e1_test.dart` rollback contract re-confirmed clean with
+the flag off.
+
+**I7 done** (`milestone-reports/I7.md`) — the second slice of the mockup-gap plan, built to
+the already-ratified Phase 8 §15 spec (calm level-rise fill, explicitly not the mockups' own
+liquid-physics animation, per the owner's own earlier decision this session). New
+`VinkProgressVessel` (`design_system/components/vink_progress_vessel.dart`) replaces
+`VinkProgressIndicator` entirely on the Lobby (organizer + participant) and Home's compact
+card, flag-gated (`ink_progress_vessel`/`FeatureFlags.inkProgressVessel`), driven only by
+`contributionProgress` (D20/D24) — never `fundedAmountMinor`. Two waiting-clause helpers, not
+one: real names for the organizer's own Lobby (D24/D25's organizer-sees-all boundary) vs.
+count-only for the participant/guest privacy-scoped view (a disclosed adaptation of Phase 6
+§12's table, which assumes name data that view structurally doesn't have). **Caught and fixed
+a real pre-existing gap along the way**: the organizer Lobby's progress bar had been reading
+raw `fundedAmountMinor` all along, not `contributionProgress` — still exhibiting the exact
+"jumps 0→100%" problem (P0-3) this slice exists to fix, undetected until this pass compared the
+two fields on that specific screen. Also did the participant-row consolidation Phase 8 §13/§27
+flagged (the organizer's own duplicate row in the Participants list, skipped only while the
+standalone "Your share" card is also showing). **233 Flutter tests green** (up from 219,
+including 14 new tests covering every Phase 8 §15 fill state and the full Phase 6 §12 waiting-
+clause table), `flutter analyze` clean at the 11-issue baseline; real-device verified — an
+organizer's Lobby vessel observed rising $0 → $40 → $80 live as each participant confirms,
+never jumping straight to full, with the flag-off rollback re-confirmed via `e1_test.dart`.
+Guest Web's own vessel remains I8's scope, unstarted, matching the original phase-10 entry.
+
+**Home/category visual polish done** (`milestone-reports/HOME-VISUAL-POLISH.md`) — the third
+and final slice of the mockup-gap plan. Participant avatar circles on an organizer-role Home
+card only (`ActiveVink` gained `participantNames`, deliberately empty for a participant-role
+entry — D24/D25 means there's no other participant's identity to show safely there, so that
+card keeps its plain "N people" icon+text instead), reusing the existing `VinkAvatar` component
+rather than inventing a new one. Category icons (`purchaseCategoryIcon`, plain Material icons,
+no new assets). A repo-wide grep guard for wallet/balance-adjacent copy came back clean,
+confirming the earlier "relabel, don't build a wallet" decision never needed a real fix.
+**237 Flutter tests green** (up from 233), `flutter analyze` clean at the 11-issue baseline.
+This closes the full three-slice mockup-gap plan (Invites → I7 → this slice) the owner
+commissioned after comparing two aspirational mockups against the shipped post-I6 app.
+
+**ENG4 in progress** ("Hosted Pilot Infrastructure," owner-supplied full brief — 10 slices,
+config/deploy/logging/metrics/tracing/deep-links/secrets/release-pipeline/crash-reporting/
+certification). Owner approved doing the four pure-application-code slices (1, 3, 4, 5) first,
+since none need an infrastructure/vendor decision; the six that do (2, 6, 7, 8, 9, 10) will
+surface those questions when reached rather than blocking now.
+
+**ENG4 Slice 1 done** (`milestone-reports/ENG4-SLICE-1-PRODUCTION-CONFIGURATION.md`): production
+configuration. Audit found `apps/api/src/config/env.ts` already Zod-validated and fail-fast with
+real boot-refusal checks for unsafe dev-default secrets — a solid foundation, not greenfield.
+The real gap: `apps/guest-web`/`apps/operations-console` read `NEXT_PUBLIC_API_BASE_URL` with a
+bare, unvalidated fallback — a staging/production deploy missing it would silently serve traffic
+against a loopback address instead of refusing to start. New `lib/env.ts` in both apps (Zod,
+mirroring `env.ts`'s pattern) plus `scripts/validate-env.ts` wired into `npm start` via `&&` —
+deliberately kept separate from `lib/config.ts`'s existing literal `process.env.NEXT_PUBLIC_X`
+reads, since Next.js only inlines those into the browser bundle via static literal replacement;
+routing the same value through a dynamically-parsed schema would have silently broken it
+client-side. Both `tsconfig.json`s gained `allowImportingTsExtensions: true` (safe given both
+already have `noEmit: true`) so the new scripts' `.ts`-extensioned imports — required for Node's
+native execution, matching `apps/api`'s own convention — typecheck under Next's bundler
+resolution mode. Root `.env.example` re-synced (was documenting 4 of `env.ts`'s ~19 real
+variables). **12 new tests** (7 guest-web + 5 operations-console), `pnpm typecheck/lint/
+format:check/guard` clean. Verified against real running processes, not just unit tests: `next
+build` + `npm start` with valid config serves a real `curl` 200; the same command in a
+staging-shaped misconfiguration exits 1 with the port confirmed never bound; setting the missing
+value then boots clean — proven in both directions, for both apps independently.
+
+**ENG4 Slice 3 done** (`milestone-reports/ENG4-SLICE-3-STRUCTURED-LOGGING.md`): structured
+logging. Audit found "every request/command carries a correlation ID" already true and already
+the same ID (Fastify's `request.id` was already threaded into `CommandContext.correlationId`
+everywhere) — better than expected. The two real gaps: worker jobs (`jobs/worker.ts`'s
+heartbeat used raw `console.log`, no correlation ID at all; `jobs/sweeps.ts` generated one per
+tick but never logged it) and provider interactions (`packages/payment-provider` had zero
+logging). New `CommandLogger` port on `CommandContext`/`PublicCommandContext` (dependency-free,
+optional, same convention as `timers`/`invitesEnabled` — keeps `packages/application` "pure
+orchestration"). New `withProviderLogging`: a `Proxy` decorator around `FinancialProvider`
+logging `provider_call_start/end/error` — deliberately NOT a change to the interface itself,
+since it's a spec-verbatim (§43) contract shared with the D7 conformance suite; wrapping the
+instance at construction time respects "do not bypass existing architecture" while still
+achieving per-call correlation logging, and special-cases `parseWebhookEvent` (the interface's
+one synchronous method) to avoid silently changing its call contract. Wired into 6 route-module
+context-builders plus `sweeps.ts`/`worker.ts` (the latter two via a new shared `createLogger`
+Pino factory, `pino` promoted from transitive to a direct `apps/api` dependency). **12 new
+tests**, `apps/api` 153/153 (up from 148), `packages/application` 137/137 unchanged (confirms
+the additive field broke nothing), `pnpm typecheck/lint/format:check/guard` clean. Verified
+against real infrastructure, not just unit tests: the existing recovery-integration suite's E8
+scenario now visibly prints a real `provider_call_error` log line during its normal run; a real
+`node src/jobs/worker.ts` smoke test against local Redis shows structured JSON replacing the
+old console.log; a real `node src/server.ts` boot against local Postgres/Redis confirms the
+6-file route refactor didn't break startup. Audited every new log call site: only event names +
+correlation IDs + provider/method names + error messages are ever logged, never raw
+input/output payloads — confirmed `MockFinancialProvider`'s own error-message text embeds only
+opaque provider-reference IDs, never actual payment credentials.
+
+**ENG4 Slice 4 done** (`milestone-reports/ENG4-SLICE-4-METRICS.md`): metrics. Fully greenfield
+(zero metrics infra existed). Built on the existing OTel setup (`otel.ts`) rather than a
+separate library like `prom-client` — new `observability/metrics.ts` (`MeterProvider` +
+`PrometheusExporter`), deliberately **not** gated by `VINKIN_OTEL_ENABLED` (that flag stays off
+because a push exporter needs a collector to be useful; this is pull-based and self-contained)
+but still its own default-off flag (`VINKIN_METRICS_ENABLED`) since it opens a new port. Five
+real instruments (API latency, provider/authorization call latency, worker failures, invitation
+delivery, realtime connections) plus a generic `registerObservableGauge` for polled facts
+(queue depth, health status) — wired at 7 real choke points, all additive
+(`= NOOP_METRICS` default, zero pre-existing call sites touched): `app.ts`'s new `onResponse`
+hook (using the route *pattern* via `request.routeOptions.url`, never the resolved URL, to
+avoid unbounded UUID-cardinality labels); Slice 3's `withProviderLogging` wrapper now also
+times each call (one wrapper, two concerns, since both fire around the identical call);
+`sweeps.ts`/`worker.ts`'s BullMQ workers (the latter — a genuinely separate OS process — gets
+its own metrics port, `+1` offset, to avoid a bind conflict with the main server); realtime
+connection open/close in `realtime/routes.ts`; guest-invitation delivery outcomes in
+`vinks/routes.ts` (mirroring the audit-row write that already exists, not a new determination);
+a health-status gauge in `server.ts` reusing the exact `checkDb`/`checkRedis` closures
+`/health/ready` already runs. **4 new tests** (including a real HTTP scrape against a real
+ephemeral-port server, not mocked), `apps/api` 157/157 (up from 153),
+`pnpm typecheck/lint/format:check/guard` clean despite the 7-file wiring surface (10/10
+packages typechecked clean on the first pass). Verified against real running processes: a full
+server boot with metrics on shows live latency/health/queue values from real requests; a
+separate worker-process boot confirms no port conflict running alongside the main server.
+**Two disclosed, deliberately unbuilt gaps**: database latency (the `postgres` npm client
+exposes no per-query duration hook; the only alternative — wrapping the single most pervasively
+used object in the entire backend, including inside financial transactions — was judged too
+risky for an additive-metrics slice) and reconnect frequency (a client-side fact the backend
+structurally cannot observe without clients reporting it, likely through the existing PV12-prep
+analytics pipeline — a bigger decision flagged, not invented here). A third, smaller gap:
+member-invitation delivery (as opposed to guest-invitation delivery, which is instrumented)
+lives entirely inside `packages/application` with no apps/api-visible outcome, and is boot-
+refused outside dev/test anyway.
+
+**ENG4 Slice 5 done** (`milestone-reports/ENG4-SLICE-5-DISTRIBUTED-TRACING.md`): distributed
+tracing — the fourth and final owner-approved pure-application-code slice. Key design decision:
+a Vink's lifecycle can span up to 24h+, and OTel traces are shaped for bounded operations, not
+multi-day business processes — forcing one trace across a whole Vink would be a real
+anti-pattern. Built instead on the standard pattern: every individual operation (one HTTP
+request, one job tick, one provider call) gets its own normal-shaped span, tagged with a stable
+`vink.id`/`correlation.id` attribute for cross-trace correlation in a real backend. New
+`observability/tracing.ts` (`withSpan`, `tagActiveSpan`) built directly on `@opentelemetry/
+api`'s `trace` namespace — deliberately not a custom no-op wrapper like `metrics.ts`'s, since
+the OTel API is already safely no-op by its own design when no SDK is running. Wired at the real
+gaps the audit found (HTTP already gets spans free from `otel.ts`'s existing auto-
+instrumentation): `sweeps.ts`'s whole tick and `worker.ts`'s heartbeat each get a root span
+(nothing triggers them via HTTP); `withProviderLogging` (Slice 3/4's wrapper) now also spans
+each provider call — one wrapper now serving logging, metrics, and tracing, since all three fire
+around the identical call — which is what makes provider-call propagation real from both the
+HTTP and job paths; `dispatchGuestInvitation`'s delivery-provider send is spanned; seven HTTP
+route context-builders tag the real per-request auto-span with `correlation.id`. One deliberate,
+disclosed lower-risk choice: the realtime WS connection-setup handler (five interleaved
+early-return rejection branches) gets `tagActiveSpan` only, not a restructured dedicated span —
+judged not worth the regression risk in security-sensitive auth code for this slice. Caught a
+real test-infrastructure detour along the way, not a product defect: the first test attempt
+using `NodeSDK` (matching `otel.ts`'s own class) showed zero exported spans even after shutdown;
+root-caused to `NodeSDK`'s default `BatchSpanProcessor` (~5s buffering, correct production
+behavior, wrong for a synchronous test check) — confirmed no defect in `otel.ts` itself, and
+switched the test to the lower-level `NodeTracerProvider`/`SimpleSpanProcessor` (synchronous,
+the standard pattern for this), which resolved cleanly. **5 new tests** including a real
+parent-child span-nesting proof, `apps/api` 162/162 (up from 157), `pnpm typecheck/lint/
+format:check/guard` clean. Verified with a real server boot under `VINKIN_OTEL_ENABLED=1` —
+real requests served, no unexpected errors. Disclosed gaps: WS-upgrade auto-instrumentation
+coverage wasn't independently confirmed; no live trace backend exists locally to visually
+confirm the exit criteria's "visualized end-to-end" claim — structural correctness is proven,
+visual confirmation isn't.
+
+**ENG4 status**: all four owner-approved pure-application-code slices (1 production config, 3
+structured logging, 4 metrics, 5 distributed tracing) are done. The remaining five brief items —
+Slice 2 (deployment topology), Slice 6 (Universal Links/App Links), Slice 7 (secrets
+management), Slice 8 (release pipeline), Slice 9 (crash reporting) — each need a real
+infrastructure/vendor decision (hosting platform + staging domain, secrets manager,
+crash-reporting vendor) not guessed at here; Slice 10 (certification) depends on those.
+
+Next: awaiting owner input on the ENG4 infrastructure/vendor decisions above before continuing
+Slices 2/6/7/8/9/10.
+`PV12` (the actual closed pilot) remains an owner/operational decision deferred until
+ENG0–ENG9 close.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

@@ -31,6 +31,14 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32).default(DEV_JWT_SECRET),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   VINKIN_OTEL_ENABLED: z.enum(['0', '1']).default('0'),
+  /** ENG4 Slice 4 ("metrics & observability") — a pull-based Prometheus `/metrics` endpoint
+   * (own tiny HTTP server, `observability/metrics.ts`), deliberately gated by its own flag
+   * rather than `VINKIN_OTEL_ENABLED`: that one is off by default because a push exporter is
+   * useless without a running collector; this is scrape-based and self-contained (works with
+   * nothing else running), but still opens a new port — a real behavior change that shouldn't
+   * happen silently in an already-running environment, hence still default-off. */
+  VINKIN_METRICS_ENABLED: z.enum(['0', '1']).default('0'),
+  VINKIN_METRICS_PORT: z.coerce.number().int().min(1).max(65_535).default(9464),
   /** Slice I1 (docs/design/phase-10-implementation-readiness.md §11) — gates the D23
    * DRAFT-gate on the guest-facing views (`getPublicVinkView`/`getGuestVinkView`). The
    * additive `contributionProgress`/`vinkOutcome`/`contributionStatus` fields are always
@@ -46,6 +54,12 @@ const envSchema = z.object({
    * elsewhere until I6's Home/Activity consumption is proven in staging. Off preserves
    * `GET /api/v1/vinks`'s exact current organizer-only shape byte-for-byte. */
   VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL: z.enum(['0', '1']).default('0'),
+  /** Invites feature (2026-07-23): gates `addParticipantCommand` inserting `INVITED` (needing
+   * `acceptInviteCommand`) instead of today's immediate `JOINED`, plus the accept/decline/
+   * list-invites routes themselves (404 when off, same pattern as
+   * `VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL`). Off preserves today's exact instant-join
+   * behavior byte-for-byte. */
+  VINKIN_INVITES_ENABLED: z.enum(['0', '1']).default('0'),
   /** Base for share links / QR payloads — the guest web app's own origin (PV10,
    * apps/guest-web), also the allowed CORS origin for its browser fetches (app.ts). */
   VINKIN_PUBLIC_BASE_URL: z.url().default('http://localhost:3100'),

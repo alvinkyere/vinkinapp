@@ -33,6 +33,10 @@ import { authorizationIdParams, vinkIdParams } from '../../middleware/params.ts'
 import { PostgresVinkStore } from '../vinks/store.ts';
 import { getVinkDetail, insertAuditEntry, listAuditLog, searchVinks } from './store.ts';
 import { getFunnelSummary } from './analytics.ts';
+import { toCommandLogger } from '../../observability/command-logger.ts';
+import { withProviderLogging } from '../../observability/provider-logging.ts';
+import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
+import { tagActiveSpan } from '../../observability/tracing.ts';
 
 const merchantSchema = z.object({
   merchantName: z.string().min(1).max(120).default('Simulated Merchant'),
@@ -89,12 +93,22 @@ export function registerOpsRoutes(
   env: Env,
   sql: Sql,
   provider: FinancialProvider,
+  metrics: Metrics = NOOP_METRICS,
 ): void {
   if (!simulatorRoutesPermitted(env.VINKIN_ENV)) return; // same allowlist as the simulator surface
   const store = new PostgresVinkStore(sql);
 
-  function contextFor(requestId: string): PurchaseCommandContext {
-    return { uow: store, clock: { now: () => new Date() }, correlationId: requestId, provider };
+  function contextFor(request: FastifyRequest): PurchaseCommandContext {
+    const correlationId = String(request.id);
+    const logger = toCommandLogger(request.log);
+    tagActiveSpan({ 'correlation.id': correlationId });
+    return {
+      uow: store,
+      clock: { now: () => new Date() },
+      correlationId,
+      provider: withProviderLogging(provider, correlationId, logger, metrics),
+      logger,
+    };
   }
 
   async function handle(
@@ -193,7 +207,7 @@ export function registerOpsRoutes(
           providerAuthorizationId = outcome.providerAuthorizationId;
         }
       }
-      const result = await authorizeMerchantPurchaseCommand(contextFor(String(request.id)), {
+      const result = await authorizeMerchantPurchaseCommand(contextFor(request), {
         vinkId: vinkId as VinkId,
         providerAuthorizationId,
         merchantName: body.merchantName,
@@ -232,7 +246,7 @@ export function registerOpsRoutes(
           currency: 'USD',
         });
       }
-      const result = await settlePurchaseCommand(contextFor(String(request.id)), {
+      const result = await settlePurchaseCommand(contextFor(request), {
         vinkId: body.vinkId as VinkId,
         authorizationId,
         settledAmountMinor: body.settledAmountMinor,

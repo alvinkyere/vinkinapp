@@ -13,6 +13,7 @@ export type ApplicationErrorCode =
   | 'GUEST_UNAUTHENTICATED' // invalid/expired guest token — HTTP 401
   | 'PARTICIPANT_ALREADY_ADDED' // ENG1 #4: this exact user is already a participant — HTTP 409
   | 'INVITE_ALREADY_SENT' // ENG1 #4: this exact invite idempotency key was already used — HTTP 409
+  | 'INVITE_ALREADY_RESOLVED' // Invites feature: this invite was already accepted/declined — HTTP 409
   | 'INVALID_COMMAND'; // command-level validation that is not a domain invariant
 
 export class ApplicationError extends Error {

@@ -8,6 +8,153 @@ contract.
 
 ---
 
+## D44 — Invites: a real INVITED → accept/decline gate before an added member is JOINED
+
+- **Decision:** an existing VinkIn member added to someone else's Vink by the organizer no
+  longer becomes `JOINED` immediately. Behind a new flag (`VINKIN_INVITES_ENABLED`), they start
+  `INVITED` and must call a new `acceptInviteCommand` (→ `JOINED`) or `declineInviteCommand`
+  (→ `REMOVED`, reusing the canonical terminal state rather than inventing a fourth
+  `ParticipantStatus` value) themselves before they can contribute money
+  (`authorizeContributionCommand` already required `JOINED`) or appear in their own "my Vinks"
+  list (`GET /api/v1/vinks`, now `status = 'JOINED'`-scoped, was `!= 'REMOVED'`). A new `GET
+  /api/v1/invites` surfaces the invitee's own pending invites, and a 4th "Invites" mobile tab
+  plus a Home "You're invited to…" card (dismiss-only "Not now"; the real Decline lives on the
+  Invites tab) give it a UI. This is genuinely new product scope — no prior I1–I11 slice or
+  design doc specified an accept/decline gate; it originated from the owner directly comparing
+  two aspirational mockups against the shipped app and choosing "build the full version."
+- **Date:** 2026-07-23
+- **Status:** ACCEPTED (owner-directed, chosen from three sized options — full feature, a
+  lighter dismiss-only card with no lifecycle change, or deferring entirely — during the same
+  session that produced this decision)
+- **Reason:** the mockups' "You're invited to… Not now / View" card implies real agency over
+  joining a Vink, which the shipped app never had (an organizer's add was always instant and
+  final from the added member's side). `ParticipantStatus`'s `INVITED` value already existed in
+  the domain type and the DB CHECK constraint (never assigned anywhere) — the domain was
+  effectively built anticipating this, not retrofitted for it.
+- **Alternatives considered:** a lighter dismiss-only Home card with no real lifecycle gate
+  (rejected: doesn't match the mockup's implied agency, and the owner explicitly chose "full");
+  reusing `GET /api/v1/vinks`'s existing `role` field with a third `'invited'` value instead of
+  a separate endpoint (rejected: that field already means "I'm really in this" to every existing
+  consumer — Home, Activity — overloading it risked silently mixing not-yet-accepted invites
+  into surfaces that assume real participation, exactly the bug `listVinksByParticipant`'s own
+  filter change was written to prevent).
+- **A Vink can still open while a member is INVITED (unaccepted).** The existing split/open-
+  readiness math (`activeParticipants`, `computeAllowedActions`, `unallocatedAmount`,
+  `fundingParticipants`) already treats every non-`REMOVED` participant as occupying a real
+  funding slot — an invite that's never accepted simply expires the Vink at the deadline exactly
+  like today's "never paid" case. Chosen over requiring universal acceptance before opening
+  because it needed zero changes to already-consistent code, not because the alternative was
+  considered and rejected on product grounds — flagged as adjustable if the owner disagrees.
+- **An INVITED user can preview the full participant view before deciding** (`getParticipantVinkView`'s
+  existing `status !== 'REMOVED'` boundary already permits this) — makes "View" on the Home
+  card meaningful from day one, at the cost of a not-yet-accepted invitee seeing the same detail
+  a joined participant would.
+- **Operational finding, not a code defect:** the server-side flag
+  (`VINKIN_INVITES_ENABLED`) and the client-side flag (`FeatureFlags.invitesEnabled`) must roll
+  out together, not the server alone first. Turning the server flag on while a client build
+  still lacks the Invites tab leaves an added member stuck `INVITED` with no UI to ever accept —
+  they can't pay, and the organizer's own Vink can't fund. Caught directly: running the existing
+  `e1_test.dart` regression against a server with the flag on (but a client build without it)
+  reproduced exactly this stuck state. Documented here rather than worked around in code, since
+  the fix is a deployment-sequencing rule, not a software gap — same "client flag only gates UI
+  visibility, server flag is the real behavior switch" pattern already established by
+  `VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL`, but this is the first case where the two flags being
+  out of sync produces a genuinely broken state rather than a merely-empty screen.
+- **Affected modules:** `packages/domain` (`entities.ts` — `Participant.invitedAt`/nullable
+  `joinedAt`; `domain-events.ts` — `ParticipantInvited`/`ParticipantInviteAccepted`/
+  `ParticipantInviteDeclined`), `packages/application` (`commands.ts` — `addParticipantCommand`;
+  new `invites.ts`; `support/guards.ts` — new `loadVink`), `apps/api` (migration `0014`,
+  `modules/vinks/store.ts`, `modules/vinks/routes.ts`, `config/env.ts`,
+  `realtime/message-mapping.ts`), `apps/mobile` (`app/nav_shell.dart`, `app/router.dart`, new
+  `features/invites/*`, new `design_system/components/pending_invite_card.dart`,
+  `features/home/home_screen.dart`, `core/repositories/vink_repository.dart`,
+  `core/config/feature_flags.dart`).
+- **Revisit trigger:** if the owner wants universal-acceptance-before-open, or wants "Not now"
+  to mean a real decline rather than dismiss-only, both are flagged above as adjustable defaults,
+  not settled product decisions.
+
+## D43 — Vink Details is aggregate-only for the organizer, own-data-only for a participant — never a per-participant roster
+
+- **Decision:** the organizer's Vink Details view (`VinkDetailsView`, `packages/application/
+  src/guest.ts`) exposes only a customer-safe AGGREGATE summary
+  (`confirmedAmountMinor`/`confirmedParticipantCount`/`totalParticipantCount`) — never a list of
+  every participant's own name/amount/status. A participant's own view exposes only their own
+  `assignedShareMinor`/`confirmedAmountMinor`/`contributionOutcomeLabel` plus the organizer's
+  identity — never another participant's data. This corrects Slice I6's own first-pass
+  implementation (built before this decision, never shipped), which read Phase 4 §11's "full
+  detail is appropriate here… not the guest privacy-scoped view" as license for a complete
+  per-participant roster visible to every viewer (organizer and every participant alike) — the
+  same widened view for everyone. The owner corrected this before the slice closed: Phase 4
+  §11's widening is about the ORGANIZER seeing more than a bare guest link would show, not about
+  every participant seeing every other participant's money.
+- **Date:** 2026-07-23
+- **Status:** ACCEPTED (Slice I6, owner-directed correction before ship)
+- **Reason:** a per-participant roster leaks one participant's payment status/amount to every
+  other participant on a screen with no access-control reason to show it — the same
+  "own-contribution-only" boundary D24/D25/D42 already enforce everywhere else in this app
+  (`ParticipantVinkView`, the participant activity feed). Vink Details had no principled reason
+  to be the one screen that widens this.
+- **Alternatives considered:** keeping the full per-participant roster for the organizer only,
+  hiding it from participants (rejected: still exposes every participant's money to the
+  organizer with no product requirement asking for it, and Phase 4 §11 never actually asked for
+  an organizer-facing roster either — the brief's own "customer-safe participant SUMMARY
+  (aggregate, not a per-participant breakdown)" language is explicit).
+- **Affected modules:** `packages/application` (`guest.ts` — `VinkDetailsView`/`getVinkDetails`
+  rewritten: `participants: VinkDetailsParticipantView[]` removed, replaced by `summary:
+  VinkDetailsSummary` + `viewerParticipant: VinkDetailsViewerParticipant | null`), `apps/api`
+  (`participant-inclusive-transport.integration.test.ts`), `apps/mobile`
+  (`core/models/vink.dart`, `features/vink_details/vink_details_screen.dart` and its tests).
+- **Revisit trigger:** a future product requirement that explicitly asks the organizer to see a
+  per-participant breakdown (e.g. for dispute resolution) would need its own decision, not a
+  silent re-widening of this screen.
+
+## D42 — Participant-safe activity filtering: milestone allowlist + own-contribution-only scoping + payload sanitization
+
+- **Decision:** a new `getParticipantVinkActivity` (`packages/application/src/guest.ts`) and
+  route (`GET /api/v1/vinks/:vinkId/participant-activity`, flag-gated identically to
+  `/participant-view`) give a signed-in participant their own customer-safe counterpart to the
+  organizer-only `/activity` feed. `listActivity`'s raw rows are filtered by a fixed rule, not
+  forwarded verbatim: every `'transition'` row is dropped outright (internal state-machine
+  diagnostics — `from`/`event`/`to`/`actor`/`correlationId` — never customer-facing for anyone);
+  an `'event'` row survives only if its `eventType` is a vink-wide milestone with no
+  participant-identifying copy (`VinkCreated`, `VinkOpened`, `ParticipantJoined`,
+  `ParticipantAllocationChanged`, `ParticipantRemoved`, `VinkFunded`, `TemporaryCardIssued`,
+  `MerchantAuthorizationApproved`, `PurchaseCaptured`, `VinkCompleted`, `VinkCancelled`,
+  `VinkExpired`) or a contribution/refund lifecycle event whose `payload.participantId` matches
+  the viewer's own participant id — the same "own contribution only" boundary
+  `ParticipantVinkView` already enforces (D24/D25). Everything else (internal timer states,
+  provider/organizer-only diagnostics, recovery/restriction internals) is dropped. Every
+  surviving entry's `detail` is reduced to `{ eventType }` only before it reaches the wire — no
+  `participantId`, `actor`, `correlationId`, or amount, even for the viewer's own contribution
+  event, since the copy that renders it needs nothing more. Client-side, `activityCopy()`
+  (`apps/mobile/lib/features/activity/activity_copy.dart`) gained an `isOrganizerViewer`
+  parameter (default `true`) so `VinkCreated`/`VinkCancelled` — the only two cases that name the
+  viewer as the actor ("You started"/"You cancelled") — render neutral phrasing for a
+  participant instead of a false claim.
+- **Date:** 2026-07-23
+- **Status:** ACCEPTED (Slice I2D, owner-directed closure of a gap I2B's own completion report
+  flagged as "a genuinely new read surface," a candidate for I3/I6)
+- **Reason:** the raw activity source mixes internal diagnostics and other participants'
+  financial detail; no existing projection could be reused as-is, unlike `ParticipantVinkView`
+  which already had one. This extends that exact precedent to a second read surface rather than
+  inventing a new privacy model.
+- **Alternatives considered:** enriching entries with participant names/amounts for a fuller
+  feed (rejected: the organizer's own feed doesn't do this either — cut from an earlier
+  milestone per `activity_copy.dart`'s own doc comment — not reintroduced here); showing
+  `VinkCreated`/`VinkCancelled` to a participant with the organizer's own "You..." copy
+  unchanged (rejected: factually false for a non-organizer viewer).
+- **Found and fixed in the same change, not a separate defect:** `recentActivityProvider`
+  (`apps/mobile/lib/features/activity/activity_providers.dart`) called the organizer-only
+  `getActivity` for every Vink `myVinksProvider` returns, including participant-role ones
+  (possible since I2A) — an unhandled 403 inside the merge loop failed the ENTIRE Activity feed,
+  not just the one vink's entries, for any user who is a participant on even one Vink. Fixed as
+  part of the same per-vink role branch this decision already required.
+- **Affected modules:** `packages/application` (`guest.ts`), `apps/api`
+  (`modules/vinks/routes.ts`), `apps/mobile` (`core/repositories/vink_repository.dart`,
+  `features/activity/activity_providers.dart`, `activity_screen.dart`, `activity_copy.dart`).
+- **Revisit trigger:** a future slice that wants to enrich the participant feed with
+  identifying detail would need its own, separate privacy review — not implied by this one.
+
 ## D41 — Participant WS transport reuses `getParticipantVinkView` verbatim; no wire-envelope discriminator
 
 - **Decision:** `GET /api/v1/vinks/:vinkId/live`'s JWT branch now falls back to

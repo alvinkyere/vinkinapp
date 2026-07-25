@@ -47,6 +47,12 @@ export type ExtensionEventName =
   | 'ContributionCancelled'
   | 'ContributionSettled'
   | 'RefundFailed'
-  | 'ParticipantRemoved'; // PV3: the catalog has ParticipantJoined but no removal event
+  | 'ParticipantRemoved' // PV3: the catalog has ParticipantJoined but no removal event
+  // Invites feature (2026-07-23, D44): an existing member added by the organizer now starts
+  // INVITED, not JOINED (flag-gated) — ParticipantJoined stays the event for every path that
+  // still joins immediately (organizer-at-create, guests, and the flag-off add-member path).
+  | 'ParticipantInvited'
+  | 'ParticipantInviteAccepted'
+  | 'ParticipantInviteDeclined';
 
 export type DomainEventName = PlanCoreEventName | ExtensionEventName;

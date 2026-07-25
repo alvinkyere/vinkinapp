@@ -3,6 +3,7 @@ import { createDb } from './db/client.ts';
 import { createRedis } from './redis/client.ts';
 import { buildApp } from './app.ts';
 import { startOtel } from './observability/otel.ts';
+import { startMetrics } from './observability/metrics.ts';
 import { startSweepScheduler } from './jobs/sweeps.ts';
 import { startOutboxPublisher } from './realtime/outbox-publisher.ts';
 import { RedisRealtimeHub } from './realtime/redis-hub.ts';
@@ -11,6 +12,7 @@ import { MockDeliveryProvider } from '../../../packages/delivery/src/index.ts';
 
 const env = loadEnv();
 const stopOtel = await startOtel(env);
+const { metrics, stop: stopMetrics } = await startMetrics(env);
 const sql = createDb(env);
 const redis = createRedis(env);
 // The only provider until the M0 gate admits a real adapter (master plan §28).
@@ -26,25 +28,46 @@ const realtimePub = createRedis(env);
 const realtimeSub = createRedis(env);
 const hub = new RedisRealtimeHub(realtimePub, realtimeSub);
 
+const checkDb = async (): Promise<void> => {
+  await sql`SELECT 1`;
+};
+const checkRedis = async (): Promise<void> => {
+  await redis.ping();
+};
+
 const app = await buildApp({
   env,
   sql,
   provider,
   deliveryProvider,
   hub,
-  checkDb: async () => {
-    await sql`SELECT 1`;
-  },
-  checkRedis: async () => {
-    await redis.ping();
-  },
+  metrics,
+  checkDb,
+  checkRedis,
+});
+
+// ENG4 Slice 4 ("health status" metric): reuses the exact same checks `/health/ready` already
+// runs, mirrored into a gauge — no new health-determination logic, just an additional way to
+// observe the one that already exists.
+metrics.registerObservableGauge('vinkin_health_status', async (observe) => {
+  for (const [check, run] of [
+    ['database', checkDb],
+    ['redis', checkRedis],
+  ] as const) {
+    try {
+      await run();
+      observe(1, { check });
+    } catch {
+      observe(0, { check });
+    }
+  }
 });
 
 const stopOutboxPublisher = startOutboxPublisher(sql, hub);
 
 let stopSweeps: (() => Promise<void>) | null = null;
 try {
-  stopSweeps = await startSweepScheduler(env, sql, provider);
+  stopSweeps = await startSweepScheduler(env, sql, provider, metrics);
   app.log.info('deadline sweep scheduler started');
 } catch (error) {
   app.log.warn({ err: error }, 'sweep scheduler not started (Redis unavailable?)');
@@ -63,6 +86,7 @@ async function shutdown(signal: string): Promise<void> {
   realtimePub.disconnect();
   realtimeSub.disconnect();
   await stopOtel();
+  await stopMetrics();
   process.exit(0);
 }
 process.on('SIGINT', () => void shutdown('SIGINT'));

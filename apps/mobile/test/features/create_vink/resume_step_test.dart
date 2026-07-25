@@ -17,6 +17,12 @@ VinkSnapshot _snapshot({required int unallocatedAmountMinor}) => VinkSnapshot(
   unallocatedAmountMinor: unallocatedAmountMinor,
   allowedActions: const [],
   card: null,
+  contributionProgress: const ContributionProgress(
+    confirmedAmountMinor: 0,
+    totalAmountMinor: 12000,
+    confirmedParticipantCount: 0,
+    totalParticipantCount: 0,
+  ),
 );
 
 void main() {

@@ -6,11 +6,23 @@ import '../vink_typography.dart';
 /// the signed-in organizer's own identity chip, `blue`-on-white elsewhere, keeping the
 /// palette to the same two colors used throughout.
 class VinkAvatar extends StatelessWidget {
-  const VinkAvatar({super.key, required this.name, this.size = 40, this.isSelf = false});
+  const VinkAvatar({
+    super.key,
+    required this.name,
+    this.size = 40,
+    this.isSelf = false,
+    this.filled = false,
+  });
 
   final String name;
   final double size;
   final bool isSelf;
+
+  /// Solid `blue`-on-`white` instead of the default low-alpha tint. Existing call sites are
+  /// untouched (defaults false); introduced for small-scale stacked contexts (Home's
+  /// participant-avatar stack) where the low-alpha tint's contrast against its own text was
+  /// found, via real-device screenshot, to be nearly illegible at that size.
+  final bool filled;
 
   String get _initials {
     final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
@@ -27,13 +39,18 @@ class VinkAvatar extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: isSelf ? VinkColors.ink : VinkColors.blue.withValues(alpha: 0.12),
+        color: isSelf
+            ? VinkColors.ink
+            : filled
+            ? VinkColors.blue
+            : VinkColors.blue.withValues(alpha: 0.12),
       ),
       child: Text(
         _initials,
         style: VinkTypography.label.copyWith(
-          color: isSelf ? VinkColors.paper : VinkColors.blue,
+          color: isSelf || filled ? VinkColors.white : VinkColors.blue,
           fontSize: size * 0.36,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );

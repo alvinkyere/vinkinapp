@@ -17,6 +17,7 @@ import '../../design_system/components/vink_bottom_sheet.dart';
 import '../../design_system/components/vink_buttons.dart';
 import '../../design_system/components/vink_empty_state.dart';
 import '../../design_system/components/vink_inline_error.dart';
+import '../../design_system/components/vink_numeric_keypad.dart';
 import '../../design_system/components/vink_participant_row.dart';
 import '../../design_system/components/vink_step_header.dart';
 import '../../design_system/components/vink_surface_card.dart';
@@ -540,7 +541,11 @@ class _CreateVinkScreenState extends ConsumerState<CreateVinkScreen> {
           }).toList(),
         ),
         const Spacer(),
-        VinkPrimaryButton(label: 'Continue', onPressed: () => setState(() => _step = _stepTotal)),
+        VinkPrimaryButton(
+          label: 'Continue',
+          trailingIcon: Icons.arrow_forward_rounded,
+          onPressed: () => setState(() => _step = _stepTotal),
+        ),
       ],
     );
   }
@@ -552,13 +557,25 @@ class _CreateVinkScreenState extends ConsumerState<CreateVinkScreen> {
         const VinkStepHeader(title: 'What\'s the total?', supportingText: 'The full amount everyone will split.'),
         const SizedBox(height: VinkSpacing.xxl),
         Center(child: VinkMoneyField(controller: _totalController, autofocus: true, errorText: _totalError)),
+        const SizedBox(height: VinkSpacing.xxl),
+        // Concept-image in-app keypad — additive alongside the OS keyboard the field already
+        // supports (autofocus above still opens it); this is a visual, tappable alternative,
+        // not a replacement.
+        VinkNumericKeypad(controller: _totalController, onChanged: (_) => setState(() {})),
         const Spacer(),
         if (_error != null) ...[VinkInlineError(message: _error!), const SizedBox(height: VinkSpacing.md)],
         Row(
           children: [
             Expanded(child: VinkSecondaryButton(label: 'Back', onPressed: () => setState(() => _step = _stepPurpose))),
             const SizedBox(width: VinkSpacing.sm),
-            Expanded(child: VinkPrimaryButton(label: 'Continue', loading: _busy, onPressed: _createVinkAndContinue)),
+            Expanded(
+              child: VinkPrimaryButton(
+                label: 'Continue',
+                trailingIcon: Icons.arrow_forward_rounded,
+                loading: _busy,
+                onPressed: _createVinkAndContinue,
+              ),
+            ),
           ],
         ),
       ],
@@ -629,7 +646,7 @@ class _CreateVinkScreenState extends ConsumerState<CreateVinkScreen> {
           ),
         ),
         const SizedBox(height: VinkSpacing.md),
-        VinkPrimaryButton(label: 'Continue', onPressed: _goToSplit),
+        VinkPrimaryButton(label: 'Continue', trailingIcon: Icons.arrow_forward_rounded, onPressed: _goToSplit),
       ],
     );
   }
@@ -783,7 +800,13 @@ class _CreateVinkScreenState extends ConsumerState<CreateVinkScreen> {
           ),
         ),
         const SizedBox(height: VinkSpacing.md),
-        VinkPrimaryButton(label: 'Open Vink', glow: true, loading: _busy, onPressed: _openVink),
+        VinkPrimaryButton(
+          label: 'Open Vink',
+          trailingIcon: Icons.arrow_forward_rounded,
+          glow: true,
+          loading: _busy,
+          onPressed: _openVink,
+        ),
       ],
     );
   }

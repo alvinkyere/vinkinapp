@@ -4,7 +4,7 @@
  * bindings over the engines (D13).
  */
 
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   ApplicationError,
@@ -27,6 +27,10 @@ import type { Sql } from '../../db/client.ts';
 import { simulatorRoutesPermitted } from '../../config/simulator-guard.ts';
 import { vinkAndContributionIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
+import { toCommandLogger } from '../../observability/command-logger.ts';
+import { withProviderLogging } from '../../observability/provider-logging.ts';
+import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
+import { tagActiveSpan } from '../../observability/tracing.ts';
 
 const scenarioSchema = z.enum(['SUCCESS', 'DECLINE']).optional();
 
@@ -50,15 +54,34 @@ export function registerRecoveryRoutes(
   env: Env,
   sql: Sql,
   provider: FinancialProvider,
+  metrics: Metrics = NOOP_METRICS,
 ): void {
   if (!simulatorRoutesPermitted(env.VINKIN_ENV)) return;
   const store = new PostgresVinkStore(sql);
 
-  function recoveryCtx(requestId: string): RecoveryCommandContext {
-    return { uow: store, clock: { now: () => new Date() }, correlationId: requestId, provider };
+  function recoveryCtx(request: FastifyRequest): RecoveryCommandContext {
+    const correlationId = String(request.id);
+    const logger = toCommandLogger(request.log);
+    tagActiveSpan({ 'correlation.id': correlationId });
+    return {
+      uow: store,
+      clock: { now: () => new Date() },
+      correlationId,
+      provider: withProviderLogging(provider, correlationId, logger, metrics),
+      logger,
+    };
   }
-  function refundCtx(requestId: string): RefundCommandContext {
-    return { uow: store, clock: { now: () => new Date() }, correlationId: requestId, provider };
+  function refundCtx(request: FastifyRequest): RefundCommandContext {
+    const correlationId = String(request.id);
+    const logger = toCommandLogger(request.log);
+    tagActiveSpan({ 'correlation.id': correlationId });
+    return {
+      uow: store,
+      clock: { now: () => new Date() },
+      correlationId,
+      provider: withProviderLogging(provider, correlationId, logger, metrics),
+      logger,
+    };
   }
 
   async function handle(
@@ -79,7 +102,7 @@ export function registerRecoveryRoutes(
     const { vinkId } = vinkIdParams.parse(request.params);
     const body = z.object({ scenario: scenarioSchema }).parse(request.body ?? {});
     return handle(reply, 200, async () => {
-      const result = await startRecoveryCommand(recoveryCtx(String(request.id)), {
+      const result = await startRecoveryCommand(recoveryCtx(request), {
         vinkId: vinkId as VinkId,
         ...(body.scenario !== undefined && { scenario: body.scenario }),
       });
@@ -96,7 +119,7 @@ export function registerRecoveryRoutes(
     const { vinkId } = vinkIdParams.parse(request.params);
     const body = z.object({ scenario: scenarioSchema }).parse(request.body ?? {});
     return handle(reply, 200, async () => {
-      const result = await retryRecoveryCommand(recoveryCtx(String(request.id)), {
+      const result = await retryRecoveryCommand(recoveryCtx(request), {
         vinkId: vinkId as VinkId,
         ...(body.scenario !== undefined && { scenario: body.scenario }),
       });
@@ -111,7 +134,7 @@ export function registerRecoveryRoutes(
   app.post('/internal/simulator/vinks/:vinkId/refund-failed-session', async (request, reply) => {
     const { vinkId } = vinkIdParams.parse(request.params);
     return handle(reply, 200, () =>
-      refundFailedSessionCommand(refundCtx(String(request.id)), { vinkId: vinkId as VinkId }),
+      refundFailedSessionCommand(refundCtx(request), { vinkId: vinkId as VinkId }),
     );
   });
 
@@ -120,7 +143,7 @@ export function registerRecoveryRoutes(
     async (request, reply) => {
       const params = vinkAndContributionIdParams.parse(request.params);
       return handle(reply, 200, async () => {
-        const contribution = await retryRefundCommand(refundCtx(String(request.id)), {
+        const contribution = await retryRefundCommand(refundCtx(request), {
           vinkId: params.vinkId as VinkId,
           contributionId: params.contributionId as ContributionId,
         });

@@ -72,7 +72,13 @@ export interface Participant {
   status: ParticipantStatus;
   allocatedAmount: Money;
   maximumApprovedAmount: Money;
-  joinedAt: string;
+  /** Always set at row creation (the "added to this Vink" moment) — same started/outcome
+   * timestamp-pair shape as `TemporaryCard.issuedAt`/`RecoveryObligation.dueAt`. */
+  invitedAt: string;
+  /** Null while `status === 'INVITED'`; set to the real acceptance moment once the
+   * participant becomes `JOINED` (immediately, for every path except an existing member
+   * added by the organizer — see `acceptInviteCommand`). */
+  joinedAt: string | null;
   updatedAt: string;
 }
 

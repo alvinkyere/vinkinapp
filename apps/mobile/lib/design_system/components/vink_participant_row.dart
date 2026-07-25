@@ -28,6 +28,9 @@ class VinkParticipantRow extends StatelessWidget {
     this.isSelf = false,
     this.roleLabel,
     this.trailingAction,
+    this.showAmount = true,
+    this.statusWord,
+    this.outlineIndicator = false,
   });
 
   final String name;
@@ -41,6 +44,19 @@ class VinkParticipantRow extends StatelessWidget {
   /// Overrides the default status indicator with an action (e.g. "Pay my $30" button) —
   /// used only for the signed-in organizer's own row when they haven't paid yet.
   final Widget? trailingAction;
+
+  /// Concept-image Live Vink people list shows no per-row amount, just name + status — opt
+  /// in per call site (default true preserves every existing row, e.g. the People+Split
+  /// allocation preview, which needs the amount).
+  final bool showAmount;
+
+  /// Concept-image status word ("In" / "Waiting") shown before the indicator — opt-in,
+  /// default none.
+  final String? statusWord;
+
+  /// Concept-image "waiting" indicator is an empty outline circle, not the site mockup's
+  /// muted "···" — opt-in per call site, default false (unchanged everywhere else).
+  final bool outlineIndicator;
 
   @override
   Widget build(BuildContext context) {
@@ -69,9 +85,15 @@ class VinkParticipantRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          MoneyText(amountMinor, style: VinkTypography.bodySmall.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(width: 12),
-          trailingAction ?? _StatusIndicator(state: paymentState),
+          if (showAmount) ...[
+            MoneyText(amountMinor, style: VinkTypography.bodySmall.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(width: 12),
+          ],
+          if (statusWord != null) ...[
+            Text(statusWord!, style: VinkTypography.bodySmallSecondary),
+            const SizedBox(width: 8),
+          ],
+          trailingAction ?? _StatusIndicator(state: paymentState, outline: outlineIndicator),
         ],
       ),
     );
@@ -79,9 +101,10 @@ class VinkParticipantRow extends StatelessWidget {
 }
 
 class _StatusIndicator extends StatelessWidget {
-  const _StatusIndicator({required this.state});
+  const _StatusIndicator({required this.state, this.outline = false});
 
   final VinkParticipantPaymentState state;
+  final bool outline;
 
   @override
   Widget build(BuildContext context) {
@@ -98,15 +121,42 @@ class _StatusIndicator extends StatelessWidget {
           ),
         );
       case VinkParticipantPaymentState.processing:
-        return Semantics(
-          label: 'Confirming payment',
-          child: Text('···', style: VinkTypography.monoIndicator.copyWith(color: VinkColors.blue)),
-        );
+        return outline
+            ? Semantics(
+                label: 'Confirming payment',
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: VinkColors.blue, width: 1.5),
+                  ),
+                ),
+              )
+            : Semantics(
+                label: 'Confirming payment',
+                child: Text('···', style: VinkTypography.monoIndicator.copyWith(color: VinkColors.blue)),
+              );
       case VinkParticipantPaymentState.waiting:
-        return Semantics(
-          label: 'Waiting',
-          child: Text('···', style: VinkTypography.monoIndicator.copyWith(color: VinkColors.smoke.withValues(alpha: 0.5))),
-        );
+        return outline
+            ? Semantics(
+                label: 'Waiting',
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: VinkColors.ink.withValues(alpha: 0.2), width: 1.5),
+                  ),
+                ),
+              )
+            : Semantics(
+                label: 'Waiting',
+                child: Text(
+                  '···',
+                  style: VinkTypography.monoIndicator.copyWith(color: VinkColors.smoke.withValues(alpha: 0.5)),
+                ),
+              );
     }
   }
 }

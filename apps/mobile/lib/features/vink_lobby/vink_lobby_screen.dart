@@ -9,6 +9,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/auth/auth_controller.dart';
 import '../../core/commands/command_state.dart';
+import '../../core/config/feature_flags.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/errors/failure_classifier.dart';
 import '../../core/models/vink.dart';
@@ -22,6 +23,7 @@ import '../../design_system/components/vink_empty_state.dart';
 import '../../design_system/components/vink_inline_error.dart';
 import '../../design_system/components/vink_participant_row.dart';
 import '../../design_system/components/vink_progress_indicator.dart';
+import '../../design_system/components/vink_progress_vessel.dart';
 import '../../design_system/components/vink_simulation_notice.dart';
 import '../../design_system/components/vink_status_badge.dart';
 import '../../design_system/components/vink_surface_card.dart';
@@ -47,7 +49,12 @@ const _simulationVisibleStates = {
 /// after, and this screen refetches the authoritative snapshot on every event rather than
 /// rebuilding financial state from the lean payload itself.
 class VinkLobbyScreen extends ConsumerStatefulWidget {
-  const VinkLobbyScreen({super.key, required this.vinkId, this.role});
+  const VinkLobbyScreen({
+    super.key,
+    required this.vinkId,
+    this.role,
+    this.inkProgressVessel = FeatureFlags.inkProgressVessel,
+  });
 
   final String vinkId;
 
@@ -55,6 +62,11 @@ class VinkLobbyScreen extends ConsumerStatefulWidget {
   /// other caller (deep links, the post-create-vink redirect, existing organizer navigation)
   /// omits it, which this screen treats identically to `'organizer'` (today's only behavior).
   final String? role;
+
+  /// I7 — gates the Ink Progress vessel replacing the linear `VinkProgressIndicator` on this
+  /// screen. Defaults to the real, `--dart-define`-driven flag; overridable for tests, same
+  /// convention as every other flagged screen in this app.
+  final bool inkProgressVessel;
 
   bool get isParticipantView => role == 'participant';
 
@@ -83,7 +95,6 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
     ref,
   );
 
-  bool get _cancelling => _cancelCommand.state.isInProgress;
   String? get _cancelError => switch (_cancelCommand.state) {
     CommandFailure(:final failure) => failure.message,
     _ => null,
@@ -282,6 +293,10 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
         card: current.card,
         contributionStatusByParticipant:
             current.contributionStatusByParticipant,
+        // Carried forward unchanged from the lean patch — the authoritative refetch just
+        // below corrects it moments later, same as every other field this patch doesn't
+        // itself carry a fresher value for.
+        contributionProgress: current.contributionProgress,
       );
     });
     unawaited(_refreshSnapshot());
@@ -339,6 +354,7 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
   Widget build(BuildContext context) {
     if (widget.isParticipantView) return _buildParticipantScaffold(context);
     final snapshot = _snapshot;
+    final canCancel = snapshot?.allowedActions.contains('CANCEL_VINK') ?? false;
     return Scaffold(
       backgroundColor: VinkColors.paper,
       appBar: AppBar(
@@ -349,6 +365,21 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
           icon: const Icon(Icons.arrow_back_rounded, color: VinkColors.ink),
           onPressed: () => context.go('/home'),
         ),
+        // Concept-image "..." overflow menu — Cancel Vink moves here from an always-visible
+        // destructive button at the bottom of the screen, matching the concept's own minimal
+        // top-level chrome. Same command, same confirmation-free single tap as before.
+        actions: [
+          if (canCancel)
+            PopupMenuButton<void>(
+              icon: const Icon(Icons.more_horiz_rounded, color: VinkColors.ink),
+              itemBuilder: (context) => [
+                PopupMenuItem<void>(
+                  onTap: _cancelVink,
+                  child: const Text('Cancel Vink', style: TextStyle(color: VinkColors.danger)),
+                ),
+              ],
+            ),
+        ],
       ),
       body: SafeArea(
         child: snapshot == null && _error == null
@@ -377,14 +408,11 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
               )
             : _LobbyBody(
                 snapshot: snapshot!,
-                cancelling: _cancelling,
                 cancelError: _cancelError,
                 contributing: _contributing,
                 contributionError: _contributionError,
-                onCancel: snapshot.allowedActions.contains('CANCEL_VINK')
-                    ? _cancelVink
-                    : null,
                 onPayShare: _payMyShare,
+                inkProgressVessel: widget.inkProgressVessel,
               ),
       ),
     );
@@ -439,6 +467,7 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
                 contributing: _participantContributing,
                 contributionError: _participantContributionError,
                 onPayShare: _payMyShareAsParticipant,
+                inkProgressVessel: widget.inkProgressVessel,
               ),
       ),
     );
@@ -501,12 +530,14 @@ class _ParticipantLobbyBody extends StatelessWidget {
     required this.contributing,
     required this.contributionError,
     required this.onPayShare,
+    required this.inkProgressVessel,
   });
 
   final ParticipantVinkView view;
   final bool contributing;
   final String? contributionError;
   final Future<void> Function() onPayShare;
+  final bool inkProgressVessel;
 
   @override
   Widget build(BuildContext context) {
@@ -520,6 +551,7 @@ class _ParticipantLobbyBody extends StatelessWidget {
         participant.allocatedAmountMinor > 0 &&
         (participant.contributionStatus == 'not_started' ||
             participant.contributionStatus == 'declined_retryable');
+    final justFunded = inkProgressVessel && vink.state == 'FUNDED';
 
     return ListView(
       padding: const EdgeInsets.all(VinkSpacing.lg),
@@ -533,7 +565,7 @@ class _ParticipantLobbyBody extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      purchaseCategoryLabel(vink.purchaseCategory),
+                      justFunded ? "Everyone's in!" : purchaseCategoryLabel(vink.purchaseCategory),
                       style: VinkTypography.cardTitle,
                     ),
                   ),
@@ -546,11 +578,28 @@ class _ParticipantLobbyBody extends StatelessWidget {
                 style: VinkTypography.amountLarge,
               ),
               const SizedBox(height: VinkSpacing.md),
-              VinkProgressIndicator(
-                fundedAmountLabel: MoneyText.format(vink.confirmedAmountMinor),
-                requiredAmountLabel: MoneyText.format(vink.requiredAmountMinor),
-                progress: progress,
-              ),
+              // I7 (Phase 8 §15) — D24/D25's privacy boundary means this view never has other
+              // participants' names, so its waiting clause is the count-only, disclosed
+              // adaptation (`participantSafeWaitingClause`), never the name-based one.
+              if (inkProgressVessel)
+                VinkVesselAmbientDots(
+                  child: VinkProgressVessel(
+                    confirmedAmountMinor: vink.confirmedAmountMinor,
+                    totalAmountMinor: vink.requiredAmountMinor,
+                    waitingClause: participantSafeWaitingClause(
+                      confirmedAmountMinor: vink.confirmedAmountMinor,
+                      totalAmountMinor: vink.requiredAmountMinor,
+                      confirmedParticipantCount: vink.confirmedParticipantCount,
+                      totalParticipantCount: vink.totalParticipantCount,
+                    ),
+                  ),
+                )
+              else
+                VinkProgressIndicator(
+                  fundedAmountLabel: MoneyText.format(vink.confirmedAmountMinor),
+                  requiredAmountLabel: MoneyText.format(vink.requiredAmountMinor),
+                  progress: progress,
+                ),
               const SizedBox(height: VinkSpacing.sm),
               Text(
                 '${vink.confirmedParticipantCount} of ${vink.totalParticipantCount} paid',
@@ -599,21 +648,19 @@ class _ParticipantLobbyBody extends StatelessWidget {
 class _LobbyBody extends StatelessWidget {
   const _LobbyBody({
     required this.snapshot,
-    required this.cancelling,
     required this.cancelError,
     required this.contributing,
     required this.contributionError,
-    required this.onCancel,
     required this.onPayShare,
+    required this.inkProgressVessel,
   });
 
   final VinkSnapshot snapshot;
-  final bool cancelling;
   final String? cancelError;
   final bool contributing;
   final String? contributionError;
-  final VoidCallback? onCancel;
   final Future<void> Function() onPayShare;
+  final bool inkProgressVessel;
 
   @override
   Widget build(BuildContext context) {
@@ -639,60 +686,76 @@ class _LobbyBody extends StatelessWidget {
         organizer.allocatedAmountMinor > 0 &&
         paymentStateFor(organizerStatus) != VinkParticipantPaymentState.paid;
     final joinUrl = '${ApiConfig.guestWebBaseUrl}/join/${vink.publicCode}';
+    // I7 (Phase 6 §12) — real names, already-visible data on the organizer's own Lobby
+    // (D24/D25's organizer-sees-all boundary); the organizer's own unpaid share appears by
+    // name too, no special exemption, per Phase 6 §12's own explicit rule.
+    final unconfirmedNames = [
+      for (final participant in snapshot.participants)
+        if (participant.allocatedAmountMinor > 0 &&
+            paymentStateFor(snapshot.contributionStatusByParticipant[participant.id]) !=
+                VinkParticipantPaymentState.paid)
+          participant.displayName,
+    ];
 
+    // Concept-image "Everyone's in!" — the one-time celebratory moment right as funding
+    // completes (FUNDED specifically, not every later state too: card provisioning/purchase/
+    // settlement have their own real status, and permanently overwriting the Vink's own title
+    // with a stale "Everyone's in!" would be a real usability regression, not a match to the
+    // concept). No "Pay now" button here — confirmed with the owner (ENG1 §7) that the
+    // organizer never triggers merchant payment in-app; a real terminal tap does. Adding one
+    // would misrepresent a capability that doesn't exist.
+    final justFunded = inkProgressVessel && vink.state == 'FUNDED';
+
+    // Concept-image Live Vink: the vessel is the hero, sitting directly on the page
+    // background with its own generous whitespace — not boxed in a white card the way every
+    // other section on this screen is. Title/badge stays a plain heading row above it.
     return ListView(
       padding: const EdgeInsets.all(VinkSpacing.lg),
       children: [
-        VinkSurfaceCard(
-          elevated: true,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      purchaseCategoryLabel(vink.purchaseCategory),
-                      style: VinkTypography.cardTitle,
-                    ),
-                  ),
-                  VinkStatusBadge(state: vink.state),
-                ],
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                justFunded ? "Everyone's in!" : purchaseCategoryLabel(vink.purchaseCategory),
+                style: VinkTypography.cardTitle,
               ),
-              const SizedBox(height: VinkSpacing.md),
-              MoneyText(
-                vink.requiredAmountMinor,
-                style: VinkTypography.amountLarge,
-              ),
-              const SizedBox(height: VinkSpacing.md),
-              VinkProgressIndicator(
-                fundedAmountLabel: MoneyText.format(vink.fundedAmountMinor),
-                requiredAmountLabel: MoneyText.format(vink.requiredAmountMinor),
-                progress: progress,
-              ),
-              const SizedBox(height: VinkSpacing.md),
-              Text(_stateCopy(vink.state), style: VinkTypography.bodySecondary),
-              if (vink.state == 'OPEN' &&
-                  _timeRemainingLabel(vink.submissionDeadline) != null) ...[
-                const SizedBox(height: VinkSpacing.sm),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.schedule_rounded,
-                      size: 16,
-                      color: VinkColors.smoke,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _timeRemainingLabel(vink.submissionDeadline)!,
-                      style: VinkTypography.bodySmallSecondary,
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
+            ),
+            VinkStatusBadge(state: vink.state),
+          ],
         ),
+        const SizedBox(height: VinkSpacing.xxl),
+        // I7 — driven by `contributionProgress` (D20/D24), never `fundedAmountMinor` (which
+        // only moves atomically at full resolution, D5) — the exact regression this slice
+        // exists to fix (P0-3: a bar that jumps 0→100% instead of rising per-contribution).
+        if (inkProgressVessel)
+          VinkVesselAmbientDots(
+            child: VinkProgressVessel(
+              confirmedAmountMinor: snapshot.contributionProgress.confirmedAmountMinor,
+              totalAmountMinor: snapshot.contributionProgress.totalAmountMinor,
+              waitingClause: organizerWaitingClause(
+                confirmedAmountMinor: snapshot.contributionProgress.confirmedAmountMinor,
+                totalAmountMinor: snapshot.contributionProgress.totalAmountMinor,
+                unconfirmedNames: unconfirmedNames,
+              ),
+            ),
+          )
+        else ...[
+          MoneyText(vink.requiredAmountMinor, style: VinkTypography.amountLarge),
+          const SizedBox(height: VinkSpacing.md),
+          VinkProgressIndicator(
+            fundedAmountLabel: MoneyText.format(vink.fundedAmountMinor),
+            requiredAmountLabel: MoneyText.format(vink.requiredAmountMinor),
+            progress: progress,
+          ),
+        ],
+        // Caught via self-screenshot: for OPEN, the vessel's own waiting clause ("Waiting for
+        // demouser1") already says this — `_stateCopy`'s "Waiting for everyone to pay their
+        // share" right underneath it was a visible, redundant duplicate. Every other state
+        // still shows it, since the vessel has no per-state messaging for those.
+        if (!(inkProgressVessel && vink.state == 'OPEN')) ...[
+          const SizedBox(height: VinkSpacing.lg),
+          Text(_stateCopy(vink.state), style: VinkTypography.bodySecondary, textAlign: TextAlign.center),
+        ],
         if (showsSimulationNotice) ...[
           const SizedBox(height: VinkSpacing.md),
           const VinkSimulationNotice(),
@@ -739,74 +802,127 @@ class _LobbyBody extends StatelessWidget {
           ),
           child: Column(
             children: [
+              // I7 (Phase 8 §13/§27) — participant-row consolidation: the organizer's own row
+              // is skipped here when the standalone "Your share" card above is already
+              // showing it (with the actionable Pay button) — the same status/amount was
+              // being rendered twice. Still shown here once that card is gone (already paid,
+              // or the vink isn't OPEN), since it's then the only place that information lives.
               for (final participant in snapshot.participants)
-                VinkParticipantRow(
-                  name: participant.displayName,
-                  amountMinor: participant.allocatedAmountMinor,
-                  paymentState: paymentStateFor(
-                    snapshot.contributionStatusByParticipant[participant.id],
+                if (!(organizerCanPay && participant.isOrganizer))
+                  VinkParticipantRow(
+                    name: participant.displayName,
+                    amountMinor: participant.allocatedAmountMinor,
+                    paymentState: paymentStateFor(
+                      snapshot.contributionStatusByParticipant[participant.id],
+                    ),
+                    isSelf: participant.isOrganizer,
+                    roleLabel: participant.isOrganizer
+                        ? 'Organizer'
+                        : (participant.isGuest ? 'Guest' : null),
+                    // Concept-image People list: a status word + plain circle, no per-row
+                    // amount (the organizer already sees the total via the vessel above).
+                    showAmount: false,
+                    outlineIndicator: true,
+                    statusWord: switch (paymentStateFor(
+                      snapshot.contributionStatusByParticipant[participant.id],
+                    )) {
+                      VinkParticipantPaymentState.paid => 'In',
+                      VinkParticipantPaymentState.processing => 'Confirming…',
+                      VinkParticipantPaymentState.waiting => 'Waiting',
+                    },
                   ),
-                  isSelf: participant.isOrganizer,
-                  roleLabel: participant.isOrganizer
-                      ? 'Organizer'
-                      : (participant.isGuest ? 'Guest' : null),
-                ),
             ],
           ),
         ),
-        const SizedBox(height: VinkSpacing.xxl),
-        Text('Invite people', style: VinkTypography.cardTitle),
-        const SizedBox(height: VinkSpacing.sm),
-        VinkSurfaceCard(
-          child: Column(
+        if (vink.state == 'OPEN' && _timeRemainingLabel(vink.submissionDeadline) != null) ...[
+          const SizedBox(height: VinkSpacing.lg),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: VinkSecondaryButton(
-                      label: 'Copy link',
-                      onPressed: () async {
-                        await Clipboard.setData(ClipboardData(text: joinUrl));
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Link copied.')),
-                          );
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: VinkSpacing.sm),
-                  Expanded(
-                    child: VinkSecondaryButton(
-                      label: 'Share',
-                      onPressed: () => Share.share(joinUrl),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: VinkSpacing.sm),
-              VinkTextButton(
-                label: 'Show QR code',
-                onPressed: () => showVinkBottomSheet<void>(
-                  context: context,
-                  builder: (_) => _JoinQrSheet(joinUrl: joinUrl),
-                ),
+              Icon(Icons.schedule_rounded, size: 16, color: VinkColors.smoke),
+              const SizedBox(width: 4),
+              Text(
+                // `_timeRemainingLabel` already reads "21h left" — prefixing "Closes in"
+                // produced a real, visible "Closes in 21h left" redundancy, caught via
+                // self-screenshot.
+                _timeRemainingLabel(vink.submissionDeadline)!,
+                style: VinkTypography.bodySmallSecondary,
               ),
             ],
           ),
-        ),
-        if (onCancel != null) ...[
-          const SizedBox(height: VinkSpacing.xxl),
-          VinkDestructiveButton(
-            label: 'Cancel Vink',
-            loading: cancelling,
-            onPressed: onCancel,
-          ),
-          if (cancelError != null) ...[
-            const SizedBox(height: VinkSpacing.sm),
-            VinkInlineError(message: cancelError!),
-          ],
         ],
+        const SizedBox(height: VinkSpacing.lg),
+        // Concept-image: one outlined "Share Invite" action, not three separate buttons —
+        // Copy link/Share/Show QR are all still reachable, now offered from one sheet
+        // (no capability removed, just consolidated per the concept's own minimal chrome).
+        VinkSecondaryButton(
+          label: 'Share Invite',
+          leadingIcon: Icons.link_rounded,
+          onPressed: () => showVinkBottomSheet<void>(
+            context: context,
+            builder: (sheetContext) => _ShareInviteSheet(joinUrl: joinUrl),
+          ),
+        ),
+        if (cancelError != null) ...[
+          const SizedBox(height: VinkSpacing.sm),
+          VinkInlineError(message: cancelError!),
+        ],
+      ],
+    );
+  }
+}
+
+/// Concept-image "Share Invite" consolidates what used to be three always-visible buttons
+/// (Copy link / Share / Show QR) into one sheet — same three capabilities, reached from a
+/// single outlined action per the concept's own minimal-chrome Live Vink composition.
+class _ShareInviteSheet extends StatelessWidget {
+  const _ShareInviteSheet({required this.joinUrl});
+
+  final String joinUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Share Invite', style: VinkTypography.title),
+        const SizedBox(height: VinkSpacing.lg),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.copy_rounded, color: VinkColors.blue),
+          title: const Text('Copy link'),
+          onTap: () async {
+            await Clipboard.setData(ClipboardData(text: joinUrl));
+            if (context.mounted) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('Link copied.')));
+            }
+          },
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.ios_share_rounded, color: VinkColors.blue),
+          title: const Text('Share'),
+          onTap: () {
+            Navigator.of(context).pop();
+            Share.share(joinUrl);
+          },
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.qr_code_rounded, color: VinkColors.blue),
+          title: const Text('Show QR code'),
+          onTap: () {
+            Navigator.of(context).pop();
+            showVinkBottomSheet<void>(
+              context: context,
+              builder: (_) => _JoinQrSheet(joinUrl: joinUrl),
+            );
+          },
+        ),
       ],
     );
   }

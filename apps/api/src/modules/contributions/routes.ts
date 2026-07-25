@@ -37,6 +37,10 @@ import {
 } from '../../middleware/params.ts';
 import { GUEST_TOKEN_PREFIX, hashGuestToken } from '../../auth/guest-tokens.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
+import { toCommandLogger } from '../../observability/command-logger.ts';
+import { withProviderLogging } from '../../observability/provider-logging.ts';
+import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
+import { tagActiveSpan } from '../../observability/tracing.ts';
 
 const scenarioSchema = z.enum(['SUCCESS', 'DECLINE', 'DELAYED']);
 const authorizeSchema = z.object({ scenario: scenarioSchema.optional() });
@@ -82,16 +86,24 @@ export function registerContributionRoutes(
   env: Env,
   sql: Sql,
   provider: FinancialProvider,
+  metrics: Metrics = NOOP_METRICS,
 ): void {
   const store = new PostgresVinkStore(sql);
   const simulatorAllowed = simulatorRoutesPermitted(env.VINKIN_ENV);
 
   function contextFor(request: FastifyRequest): ContributionCommandContext {
+    const correlationId = String(request.id);
+    const logger = toCommandLogger(request.log);
+    // ENG4 Slice 5: tags the real per-request auto-instrumented HTTP span (when OTel is
+    // enabled) so it can be found in a trace backend by the same correlation id every log
+    // line and DB history row already carries.
+    tagActiveSpan({ 'correlation.id': correlationId });
     return {
       uow: store,
       clock: { now: () => new Date() },
-      correlationId: String(request.id),
-      provider,
+      correlationId,
+      provider: withProviderLogging(provider, correlationId, logger, metrics),
+      logger,
     };
   }
 

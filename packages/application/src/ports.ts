@@ -228,16 +228,26 @@ export interface VinkReader {
    * per-participant "paid / processing / waiting" view; commands use
    * `VinkTx.listContributionsForUpdate` instead. */
   listContributionsByVink(vinkId: VinkId): Promise<Contribution[]>;
+  /** Slice I6 — plain reads for Vink Details' `merchantSettlementDetail`, same relationship
+   * to `VinkTx.listPurchaseAuthorizationsForUpdate`/`listSettlementsForUpdate` that
+   * `listContributionsByVink` already has to `listContributionsForUpdate`. */
+  listPurchaseAuthorizations(vinkId: VinkId): Promise<PurchaseAuthorization[]>;
+  listSettlements(vinkId: VinkId): Promise<Settlement[]>;
   listActivity(vinkId: VinkId): Promise<ActivityEntry[]>;
   /** Newest first — the organizer's own vink history (Plan §20 "Vink history"). */
   listVinksByOrganizer(organizerUserId: string): Promise<Vink[]>;
-  /** Newest first — every Vink where this user has a non-removed participant row, by
-   * `userId` (member or organizer — a `Participant.userId` match, never a guest's
-   * `guestIdentityId`). Deliberately overlaps with `listVinksByOrganizer` — the organizer is
-   * also a participant of their own Vink (Phase 0 §3) — the caller (`queries.ts`) dedupes
-   * and attributes a role, this port method just answers "is this user a participant here at
-   * all" (docs/design/phase-10-implementation-readiness.md Slice I2). */
+  /** Newest first — every Vink where this user has a JOINED participant row, by `userId`
+   * (member or organizer — a `Participant.userId` match, never a guest's `guestIdentityId`).
+   * Deliberately overlaps with `listVinksByOrganizer` — the organizer is also a participant
+   * of their own Vink (Phase 0 §3) — the caller (`queries.ts`) dedupes and attributes a role,
+   * this port method just answers "is this user really a participant here"
+   * (docs/design/phase-10-implementation-readiness.md Slice I2). Deliberately `JOINED`-only,
+   * not "non-removed" — a still-`INVITED` participant belongs to `listVinksByPendingInvite`
+   * instead (Invites feature, 2026-07-23). */
   listVinksByParticipant(userId: string): Promise<Vink[]>;
+  /** Newest-invited-first — every Vink where this user has a still-pending (`INVITED`)
+   * participant row, not yet accepted or declined. Invites feature (2026-07-23). */
+  listVinksByPendingInvite(userId: string): Promise<Vink[]>;
   /** Resolves a guest access-token hash to its participant, or null (expired/unknown). */
   findGuestParticipant(
     accessTokenHash: string,
@@ -272,6 +282,17 @@ export interface VinkTimers {
   processingGraceSeconds: number;
 }
 
+/** ENG4 Slice 3 ("structured logging") — a minimal, dependency-free logging capability
+ * commands and their callers can use, deliberately not the real Pino type: the application
+ * layer stays "pure orchestration" (no logging library dependency); `apps/api` supplies a
+ * real implementation adapting its Pino/Fastify logger. Optional everywhere, same "omit to
+ * get pre-existing behavior" convention as `timers`/`invitesEnabled` — every existing test and
+ * internal caller that never sets it is unaffected. */
+export interface CommandLogger {
+  info(event: string, data?: Record<string, unknown>): void;
+  error(event: string, data?: Record<string, unknown>): void;
+}
+
 export interface CommandContext {
   uow: UnitOfWork;
   clock: Clock;
@@ -280,6 +301,14 @@ export interface CommandContext {
   /** Request/trace correlation id for history rows. */
   correlationId: string;
   timers?: VinkTimers;
+  /** New Invites feature (2026-07-23 decision) — when true, `addParticipantCommand` inserts
+   * an existing member as `INVITED` (requiring `acceptInviteCommand`) instead of today's
+   * immediate `JOINED`. Defaults to false (today's exact behavior) everywhere the flag isn't
+   * explicitly threaded in, matching `timers`' own "omit to get pre-existing behavior"
+   * convention. */
+  invitesEnabled?: boolean;
+  /** ENG4 Slice 3. */
+  logger?: CommandLogger;
 }
 
 /** Context for unauthenticated public commands (guest join) — no actor user exists. */
@@ -287,4 +316,6 @@ export interface PublicCommandContext {
   uow: UnitOfWork;
   clock: Clock;
   correlationId: string;
+  /** ENG4 Slice 3. */
+  logger?: CommandLogger;
 }

@@ -9,17 +9,22 @@ import { z } from 'zod';
 import {
   ApplicationError,
   GUEST_TOKEN_TTL_DAYS,
+  acceptInviteCommand,
   addParticipantCommand,
   cancelVinkCommand,
   claimGuestDeliverySlot,
   configureVinkCommand,
   coverRemainingCommand,
   createVinkCommand,
+  declineInviteCommand,
   editGuestParticipantCommand,
+  getParticipantVinkActivity,
   getParticipantVinkView,
   getVinkActivity,
+  getVinkDetails,
   getVinkSnapshot,
   inviteGuestCommand,
+  listMyPendingInvites,
   listMyVinks,
   listMyVinksWithRole,
   openVinkCommand,
@@ -45,6 +50,9 @@ import type { Sql } from '../../db/client.ts';
 import { requireUser } from '../../auth/http.ts';
 import { vinkAndParticipantIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from './store.ts';
+import { toCommandLogger } from '../../observability/command-logger.ts';
+import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
+import { tagActiveSpan, withSpan } from '../../observability/tracing.ts';
 
 const PURCHASE_CATEGORIES = [
   'GROCERY',
@@ -212,7 +220,8 @@ function errorStatus(error: unknown): { status: number; body: Record<string, unk
           ? 403
           : error.code === 'VINK_VERSION_CONFLICT' ||
               error.code === 'PARTICIPANT_ALREADY_ADDED' ||
-              error.code === 'INVITE_ALREADY_SENT'
+              error.code === 'INVITE_ALREADY_SENT' ||
+              error.code === 'INVITE_ALREADY_RESOLVED'
             ? 409
             : 422;
     return { status, body: { error: error.code, message: error.message } };
@@ -234,19 +243,23 @@ export function registerVinkRoutes(
   env: Env,
   sql: Sql,
   deliveryProvider?: DeliveryProvider,
+  metrics: Metrics = NOOP_METRICS,
 ): void {
   const store = new PostgresVinkStore(sql);
 
   function contextFor(request: FastifyRequest, actorUserId: string): DeliveryCommandContext {
+    tagActiveSpan({ 'correlation.id': String(request.id) });
     return {
       uow: store,
       clock: { now: () => new Date() },
       actorUserId,
       correlationId: String(request.id),
+      logger: toCommandLogger(request.log),
       timers: {
         openDurationSeconds: env.VINK_OPEN_DURATION_SECONDS,
         processingGraceSeconds: env.VINK_PROCESSING_GRACE_SECONDS,
       },
+      invitesEnabled: env.VINKIN_INVITES_ENABLED === '1',
       // Slice I4 — member-only automatic dispatch (see packages/application/src/delivery.ts
       // for why guest dispatch isn't wired here). `enabled` is the actual gate; a provider
       // being present doesn't matter if the flag is off (boot-refused outside dev/test
@@ -292,19 +305,26 @@ export function registerVinkRoutes(
     // batch call site) produce at most one real send per guest.
     const claimed = await claimGuestDeliverySlot(ctx, guest.guestIdentityId, tokenHash, expiresAt);
     if (!claimed) return undefined;
-    const result = await ctx.delivery.provider.send({
-      destination: guest.contactDestination,
-      method: guest.contactMethod,
-      template: {
-        kind: 'guest_invite',
-        organizerName: organizerDisplayName,
-        // Slice I5B (D39): real purpose when the vink has one, else the category fallback.
-        purpose: vink.purpose ?? vink.purchaseCategory,
-        yourShareMinor: guest.allocatedAmountMinor,
-        deadline: vink.submissionDeadline,
-        link: guestJoinUrl(token),
-      },
-    });
+    // ENG4 Slice 5 ("propagate trace context through… delivery"): nests under whatever
+    // HTTP-request span is active (the VINK_OPENED batch dispatch, or an in-request invite).
+    const result = await withSpan(
+      'delivery.send',
+      { 'vink.id': vink.id, 'correlation.id': ctx.correlationId, method: guest.contactMethod },
+      () =>
+        ctx.delivery!.provider.send({
+          destination: guest.contactDestination,
+          method: guest.contactMethod,
+          template: {
+            kind: 'guest_invite',
+            organizerName: organizerDisplayName,
+            // Slice I5B (D39): real purpose when the vink has one, else the category fallback.
+            purpose: vink.purpose ?? vink.purchaseCategory,
+            yourShareMinor: guest.allocatedAmountMinor,
+            deadline: vink.submissionDeadline,
+            link: guestJoinUrl(token),
+          },
+        }),
+    );
     await recordGuestInvitationDeliveryResult(ctx, {
       participantId: guest.participantId,
       status: result.accepted ? 'SENT' : 'FAILED',
@@ -314,6 +334,12 @@ export function registerVinkRoutes(
         providerMessageId: result.providerMessageId,
       }),
       ...(result.failureReason !== undefined && { failureReason: result.failureReason }),
+    });
+    // ENG4 Slice 4 ("invitation delivery" metric) — same outcome the audit row above already
+    // records, mirrored into a counter.
+    metrics.recordInvitationDelivery({
+      outcome: result.accepted ? 'SENT' : 'FAILED',
+      method: guest.contactMethod,
     });
     return { accepted: result.accepted };
   }
@@ -338,6 +364,7 @@ export function registerVinkRoutes(
         { err: error, participantId: guest.participantId },
         'guest invitation dispatch failed unexpectedly',
       );
+      metrics.recordInvitationDelivery({ outcome: 'FAILED', method: guest.contactMethod });
       return undefined;
     }
   }
@@ -422,6 +449,85 @@ export function registerVinkRoutes(
     return handle(reply, 200, () =>
       getParticipantVinkView(store, vinkId as VinkId, claims.userId, new Date()),
     );
+  });
+
+  // Slice I2D — the customer-safe counterpart to the organizer-only `/activity` route below,
+  // same reasoning as `/participant-view` above: a distinct, statically-knowable URL rather
+  // than branching the organizer route's shape on caller identity.
+  app.get('/api/v1/vinks/:vinkId/participant-activity', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    if (env.VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL !== '1') {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
+    }
+    const { vinkId } = vinkIdParams.parse(request.params);
+    return handle(reply, 200, () =>
+      getParticipantVinkActivity(store, vinkId as VinkId, claims.userId),
+    );
+  });
+
+  // Slice I6 — Vink Details (D29/D31, never "receipt"). A third, deliberately broader access
+  // shape: organizer OR any active participant, unlike the organizer-only snapshot above and
+  // unlike `/participant-view`'s participant-only check — Phase 4 §11's own explicit widening
+  // for this one read-only, historical screen (every participant's own outcome visible to
+  // every other participant, once the vink is history).
+  app.get('/api/v1/vinks/:vinkId/details', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    if (env.VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL !== '1') {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
+    }
+    const { vinkId } = vinkIdParams.parse(request.params);
+    return handle(reply, 200, () => getVinkDetails(store, vinkId as VinkId, claims.userId));
+  });
+
+  // Invites feature (2026-07-23, D44) — the invitee's own accept/decline of a pending
+  // `INVITED` participant row (see `addParticipantCommand`, flag-gated on the same
+  // VINKIN_INVITES_ENABLED). 404 when off, same pattern as `/participant-view` above.
+  app.post('/api/v1/vinks/:vinkId/participants/me/accept', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    if (env.VINKIN_INVITES_ENABLED !== '1') {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
+    }
+    const { vinkId } = vinkIdParams.parse(request.params);
+    const body = lifecycleSchema.parse(request.body ?? {});
+    return handle(reply, 200, () =>
+      acceptInviteCommand(contextFor(request, claims.userId), {
+        ...body,
+        vinkId: vinkId as VinkId,
+      }),
+    );
+  });
+
+  app.post('/api/v1/vinks/:vinkId/participants/me/decline', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    if (env.VINKIN_INVITES_ENABLED !== '1') {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
+    }
+    const { vinkId } = vinkIdParams.parse(request.params);
+    const body = lifecycleSchema.parse(request.body ?? {});
+    return handle(reply, 200, () =>
+      declineInviteCommand(contextFor(request, claims.userId), {
+        ...body,
+        vinkId: vinkId as VinkId,
+      }),
+    );
+  });
+
+  // Invites feature — "my pending invites," deliberately a separate endpoint from
+  // `GET /api/v1/vinks` (see `listVinksByPendingInvite`'s own doc comment in ports.ts for
+  // why an INVITED row must never be mixed into that list's `role` shape).
+  app.get('/api/v1/invites', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    if (env.VINKIN_INVITES_ENABLED !== '1') {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
+    }
+    return handle(reply, 200, async () => ({
+      invites: await listMyPendingInvites(store, claims.userId),
+    }));
   });
 
   app.patch('/api/v1/vinks/:vinkId', async (request, reply) => {

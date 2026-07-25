@@ -6,6 +6,11 @@
 // the Lobby screen renders and updates from it — full funding/settlement is already proven,
 // repeatedly, by e1_test.dart. Requires the real local backend started with
 // VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL=1 in addition to the usual CORS env vars.
+//
+// Slice I2D extension: after the live Lobby proof, this same participant visits the Activity
+// tab — the concrete on-device proof of the crash-bug fix found while building I2D
+// (`recentActivityProvider` used to 403 the ENTIRE feed for any user who is a participant on
+// even one Vink, unhandled inside its own merge loop).
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -127,5 +132,19 @@ void main() {
       reason: 'the participant Lobby should reflect the organizer\'s contribution live, with no manual reload',
     );
     await binding.takeScreenshot('i2c-03-participant-lobby-live-update');
+
+    // --- Slice I2D: the same participant's Activity tab renders, not the crash the bug ------
+    // caused — this vink has real VinkCreated/ParticipantJoined/VinkOpened milestone events by
+    // now, none of which should error or produce the organizer-only "You..." framing.
+    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Activity'));
+    await tester.pumpAndSettle();
+    await binding.takeScreenshot('i2d-04-participant-activity');
+
+    expect(find.text('Nothing here yet'), findsNothing, reason: 'real activity exists for this vink');
+    expect(find.text("Couldn't load activity."), findsNothing, reason: 'the crash-bug regression proof');
+    expect(find.textContaining('is open for contributions'), findsWidgets);
+    expect(find.textContaining('You started'), findsNothing, reason: 'organizer-only framing must never reach a participant');
   });
 }
