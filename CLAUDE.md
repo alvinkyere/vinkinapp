@@ -823,6 +823,15 @@ startup schema check and `/health/ready` fail closed. Topology is code-complete 
 provisioned: Railway/GitHub access, variables, generated domains, cost controls, and DNS are
 external actions. Next infrastructure slices: 6/7/8/9, then 10.
 
+**ENG4 hosted activation verified** (2026-07-25): Railway API, Guest Web, Operations Console,
+PostgreSQL, and Redis are live behind `api.vinkin.org`, `join.vinkin.org`, and `ops.vinkin.org`.
+`/health/ready` reports both dependencies healthy. Hosted smoke record
+`0d899263-bc2b-43e9-8078-57c8d35c3488` completed register → create → manual guest → equal split
+→ open → organizer contribution → guest contribution → `FUNDED`; Guest Web and Ops returned
+HTTP 200. Runtime deliberately remains `VINKIN_ENV=demo` until a real provider is certified.
+Mobile hosted-pilot endpoints and flags are now checked into `apps/mobile/config/pilot.json`
+(non-secret) for `--dart-define-from-file`.
+
 ## Hard rules (from the Spec — never relax to make something pass)
 
 - Ledger is append-only, balanced, integer minor units; DB triggers enforce it

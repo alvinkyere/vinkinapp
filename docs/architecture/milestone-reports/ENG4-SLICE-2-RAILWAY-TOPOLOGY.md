@@ -1,7 +1,7 @@
 # ENG4 Slice 2 — Railway deployment topology
 
 **Date:** 2026-07-25  
-**Status:** code-complete; external provisioning pending
+**Status:** provisioned and hosted smoke-tested
 
 ## Decision
 
@@ -26,14 +26,36 @@ allowlist correctly refuses simulator-backed financial routes in a true producti
 - Documented exact service variables, Railway references, domain activation, staging isolation,
   cost control, and rollback.
 
-## External actions remaining
+## Hosted verification
 
-1. Push the deployment configuration to GitHub.
-2. Create the Railway project and five services.
-3. Set each source service's Config File Path.
-4. Add variables and generate temporary public domains.
-5. Deploy and smoke-test.
-6. Attach the three `vinkin.org` custom domains.
-7. Configure spending controls and database backups.
+Railway is provisioned at:
 
-No Railway resource, DNS record, or secret was created from the local repository.
+- `https://api.vinkin.org`
+- `https://join.vinkin.org`
+- `https://ops.vinkin.org`
+
+The API readiness endpoint reported PostgreSQL and Redis healthy. A real hosted smoke flow then
+registered a clearly labeled test organizer, created a $12 Vink, added a manual guest, applied
+an equal split, opened the Vink, authorized both shares through the demo adapter, and reached
+`FUNDED`. The generated `join.vinkin.org/g/...` page and Operations Console root both returned
+HTTP 200.
+
+Smoke record identifiers:
+
+```text
+username: codexsmoke_dfd36b0c
+vink_id: 0d899263-bc2b-43e9-8078-57c8d35c3488
+```
+
+No real money or provider credential was involved; `VINKIN_ENV=demo` and the mock provider
+handled both contribution authorizations.
+
+## Remaining actions
+
+1. Configure and verify Railway spending controls.
+2. Configure and rehearse PostgreSQL backup/restore.
+3. Add the isolated staging environment before automatic production deployments.
+4. Replace the demo adapter and switch to `VINKIN_ENV=production` only after provider contract
+   certification.
+
+Secrets remain Railway-managed and are not recorded in the repository.
