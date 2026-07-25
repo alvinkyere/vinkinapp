@@ -14,17 +14,21 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
-      channel,
-      (call) async => call.method == 'read' ? null : true,
-    );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (call) async => call.method == 'read' ? null : true,
+        );
   });
 
   tearDown(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
   });
 
-  testWidgets('boots to the Welcome screen with no stored session', (tester) async {
+  testWidgets('boots to the Welcome screen with no stored session', (
+    tester,
+  ) async {
     await tester.pumpWidget(const ProviderScope(child: VinkinApp()));
     await tester.pumpAndSettle();
 

@@ -21,13 +21,28 @@ class WelcomeScreen extends StatelessWidget {
             children: [
               const VinkWordmark(fontSize: 32),
               const SizedBox(height: VinkSpacing.lg),
-              Text('Everyone In. One Purchase.', style: VinkTypography.heroDisplay, textAlign: TextAlign.center),
+              Text(
+                'Everyone In. One Purchase.',
+                style: VinkTypography.heroDisplay,
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: VinkSpacing.sm),
-              Text('Pay together before anyone pays.', style: VinkTypography.bodySecondary, textAlign: TextAlign.center),
+              Text(
+                'Pay together before anyone pays.',
+                style: VinkTypography.bodySecondary,
+                textAlign: TextAlign.center,
+              ),
               const Spacer(),
-              VinkPrimaryButton(label: 'Create an account', glow: true, onPressed: () => context.push('/register')),
+              VinkPrimaryButton(
+                label: 'Create an account',
+                glow: true,
+                onPressed: () => context.push('/register'),
+              ),
               const SizedBox(height: VinkSpacing.sm),
-              VinkSecondaryButton(label: 'I already have an account', onPressed: () => context.push('/login')),
+              VinkSecondaryButton(
+                label: 'I already have an account',
+                onPressed: () => context.push('/login'),
+              ),
               const SizedBox(height: VinkSpacing.md),
             ],
           ),

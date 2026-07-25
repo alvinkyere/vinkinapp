@@ -22,14 +22,21 @@ class _FakeVinkRepository extends VinkRepository {
     this.participantActivity = const [],
     this.activityByVinkId = const {},
     this.failingVinkIds = const {},
-  }) : super(ApiClient(tokenStore: SecureTokenStore(), appVersion: Future.value('test')));
+  }) : super(
+         ApiClient(
+           tokenStore: SecureTokenStore(),
+           appVersion: Future.value('test'),
+         ),
+       );
 
   final List<Vink> vinks;
   final List<ActivityEntry> organizerActivity;
   final List<ActivityEntry> participantActivity;
+
   /// Slice I6 — per-vink override, for tests (like `vinkOutcomesProvider`'s own) that need a
   /// DIFFERENT activity feed per vink rather than one shared list for the whole role.
   final Map<String, List<ActivityEntry>> activityByVinkId;
+
   /// Slice I6 — any vinkId in this set throws when its own activity is fetched, simulating a
   /// transient per-vink failure for the partial-failure-resilience regression tests.
   final Set<String> failingVinkIds;
@@ -40,42 +47,57 @@ class _FakeVinkRepository extends VinkRepository {
   Future<List<Vink>> listMyVinks({dynamic cancelToken}) async => vinks;
 
   @override
-  Future<List<ActivityEntry>> getActivity(String vinkId, {dynamic cancelToken}) async {
+  Future<List<ActivityEntry>> getActivity(
+    String vinkId, {
+    dynamic cancelToken,
+  }) async {
     organizerCalls++;
-    if (failingVinkIds.contains(vinkId)) throw Exception('simulated failure for $vinkId');
+    if (failingVinkIds.contains(vinkId))
+      throw Exception('simulated failure for $vinkId');
     return activityByVinkId[vinkId] ?? organizerActivity;
   }
 
   @override
-  Future<List<ActivityEntry>> getParticipantActivity(String vinkId, {dynamic cancelToken}) async {
+  Future<List<ActivityEntry>> getParticipantActivity(
+    String vinkId, {
+    dynamic cancelToken,
+  }) async {
     participantCalls++;
-    if (failingVinkIds.contains(vinkId)) throw Exception('simulated failure for $vinkId');
+    if (failingVinkIds.contains(vinkId))
+      throw Exception('simulated failure for $vinkId');
     return activityByVinkId[vinkId] ?? participantActivity;
   }
 }
 
-Vink _vink(String id, {String? role, String state = 'OPEN', String? purpose}) => Vink(
-  id: id,
-  publicCode: 'code-$id',
-  purchaseCategory: 'GROCERY',
-  state: state,
-  requiredAmountMinor: 8000,
-  fundedAmountMinor: 0,
-  version: 1,
-  organizerUserId: 'someone',
-  role: role,
-  purpose: purpose,
-);
+Vink _vink(String id, {String? role, String state = 'OPEN', String? purpose}) =>
+    Vink(
+      id: id,
+      publicCode: 'code-$id',
+      purchaseCategory: 'GROCERY',
+      state: state,
+      requiredAmountMinor: 8000,
+      fundedAmountMinor: 0,
+      version: 1,
+      organizerUserId: 'someone',
+      role: role,
+      purpose: purpose,
+    );
 
-ActivityEntry _entry(String eventType) =>
-    ActivityEntry(kind: 'event', at: DateTime.utc(2026, 1, 1), detail: {'eventType': eventType});
+ActivityEntry _entry(String eventType) => ActivityEntry(
+  kind: 'event',
+  at: DateTime.utc(2026, 1, 1),
+  detail: {'eventType': eventType},
+);
 
 void main() {
   test(
     'REGRESSION: a mixed organizer-role + participant-role vink list no longer throws — both feeds merge',
     () async {
       final repository = _FakeVinkRepository(
-        vinks: [_vink('organizer-vink', role: 'organizer'), _vink('participant-vink', role: 'participant')],
+        vinks: [
+          _vink('organizer-vink', role: 'organizer'),
+          _vink('participant-vink', role: 'participant'),
+        ],
         organizerActivity: [_entry('VinkOpened')],
         participantActivity: [_entry('VinkFunded')],
       );
@@ -88,43 +110,68 @@ void main() {
 
       expect(result.entries, hasLength(2));
       expect(result.failedCount, 0);
-      expect(repository.organizerCalls, 1, reason: 'only the organizer-role vink used getActivity');
-      expect(repository.participantCalls, 1, reason: 'only the participant-role vink used getParticipantActivity');
+      expect(
+        repository.organizerCalls,
+        1,
+        reason: 'only the organizer-role vink used getActivity',
+      );
+      expect(
+        repository.participantCalls,
+        1,
+        reason: 'only the participant-role vink used getParticipantActivity',
+      );
     },
   );
 
-  test('each entry carries the correct isOrganizerRole for its own source vink, not a global flag', () async {
-    final repository = _FakeVinkRepository(
-      vinks: [_vink('organizer-vink', role: 'organizer'), _vink('participant-vink', role: 'participant')],
-      organizerActivity: [_entry('VinkCreated')],
-      participantActivity: [_entry('VinkCreated')],
-    );
-    final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
-    addTearDown(container.dispose);
+  test(
+    'each entry carries the correct isOrganizerRole for its own source vink, not a global flag',
+    () async {
+      final repository = _FakeVinkRepository(
+        vinks: [
+          _vink('organizer-vink', role: 'organizer'),
+          _vink('participant-vink', role: 'participant'),
+        ],
+        organizerActivity: [_entry('VinkCreated')],
+        participantActivity: [_entry('VinkCreated')],
+      );
+      final container = ProviderContainer(
+        overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+      );
+      addTearDown(container.dispose);
 
-    final result = await container.read(recentActivityProvider.future);
+      final result = await container.read(recentActivityProvider.future);
 
-    final organizerEntry = result.entries.firstWhere((e) => e.vinkId == 'organizer-vink');
-    final participantEntry = result.entries.firstWhere((e) => e.vinkId == 'participant-vink');
-    expect(organizerEntry.isOrganizerRole, isTrue);
-    expect(participantEntry.isOrganizerRole, isFalse);
-  });
+      final organizerEntry = result.entries.firstWhere(
+        (e) => e.vinkId == 'organizer-vink',
+      );
+      final participantEntry = result.entries.firstWhere(
+        (e) => e.vinkId == 'participant-vink',
+      );
+      expect(organizerEntry.isOrganizerRole, isTrue);
+      expect(participantEntry.isOrganizerRole, isFalse);
+    },
+  );
 
-  test('a vink with no role (pre-I2B/flag-off shape) is treated as organizer, unchanged', () async {
-    final repository = _FakeVinkRepository(
-      vinks: [_vink('legacy-vink')], // role: null
-      organizerActivity: [_entry('VinkOpened')],
-      participantActivity: [],
-    );
-    final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
-    addTearDown(container.dispose);
+  test(
+    'a vink with no role (pre-I2B/flag-off shape) is treated as organizer, unchanged',
+    () async {
+      final repository = _FakeVinkRepository(
+        vinks: [_vink('legacy-vink')], // role: null
+        organizerActivity: [_entry('VinkOpened')],
+        participantActivity: [],
+      );
+      final container = ProviderContainer(
+        overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+      );
+      addTearDown(container.dispose);
 
-    final result = await container.read(recentActivityProvider.future);
+      final result = await container.read(recentActivityProvider.future);
 
-    expect(result.entries, hasLength(1));
-    expect(repository.organizerCalls, 1);
-    expect(repository.participantCalls, 0);
-  });
+      expect(result.entries, hasLength(1));
+      expect(repository.organizerCalls, 1);
+      expect(repository.participantCalls, 0);
+    },
+  );
 
   test(
     "PARTIAL-FAILURE RESILIENCE: one vink's activity fetch failing doesn't crash the others — "
@@ -138,7 +185,9 @@ void main() {
         organizerActivity: [_entry('VinkOpened')],
         failingVinkIds: {'bad-vink'},
       );
-      final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
+      final container = ProviderContainer(
+        overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+      );
       addTearDown(container.dispose);
 
       final result = await container.read(recentActivityProvider.future);
@@ -150,25 +199,30 @@ void main() {
   );
 
   group('vinkOutcomesProvider (Slice I6, Phase 3 §4/D29)', () {
-    test('includes only terminal-state vinks — OPEN is excluded, not yet an outcome', () async {
-      final repository = _FakeVinkRepository(
-        vinks: [
-          _vink('open-vink', state: 'OPEN'),
-          _vink('done-vink', state: 'COMPLETED'),
-        ],
-        activityByVinkId: {
-          'done-vink': [_entry('VinkCompleted')],
-        },
-      );
-      final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
-      addTearDown(container.dispose);
+    test(
+      'includes only terminal-state vinks — OPEN is excluded, not yet an outcome',
+      () async {
+        final repository = _FakeVinkRepository(
+          vinks: [
+            _vink('open-vink', state: 'OPEN'),
+            _vink('done-vink', state: 'COMPLETED'),
+          ],
+          activityByVinkId: {
+            'done-vink': [_entry('VinkCompleted')],
+          },
+        );
+        final container = ProviderContainer(
+          overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+        );
+        addTearDown(container.dispose);
 
-      final result = await container.read(vinkOutcomesProvider.future);
-      final outcomes = result.summaries;
+        final result = await container.read(vinkOutcomesProvider.future);
+        final outcomes = result.summaries;
 
-      expect(outcomes.map((o) => o.vinkId), ['done-vink']);
-      expect(outcomes.single.outcomeLabel, 'completed');
-    });
+        expect(outcomes.map((o) => o.vinkId), ['done-vink']);
+        expect(outcomes.single.outcomeLabel, 'completed');
+      },
+    );
 
     test('maps CANCELLED/EXPIRED to their own outcome labels', () async {
       final repository = _FakeVinkRepository(
@@ -181,7 +235,9 @@ void main() {
           'expired-vink': [_entry('VinkExpired')],
         },
       );
-      final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
+      final container = ProviderContainer(
+        overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+      );
       addTearDown(container.dispose);
 
       final result = await container.read(vinkOutcomesProvider.future);
@@ -192,40 +248,56 @@ void main() {
       expect(byId['expired-vink'], 'expired');
     });
 
-    test('date comes from the milestone event\'s own timestamp, not the fetch time', () async {
-      final milestoneAt = DateTime.utc(2026, 3, 15, 10, 30);
-      final repository = _FakeVinkRepository(
-        vinks: [_vink('done-vink', state: 'COMPLETED')],
-        activityByVinkId: {
-          'done-vink': [
-            ActivityEntry(kind: 'event', at: milestoneAt, detail: {'eventType': 'VinkCompleted'}),
+    test(
+      'date comes from the milestone event\'s own timestamp, not the fetch time',
+      () async {
+        final milestoneAt = DateTime.utc(2026, 3, 15, 10, 30);
+        final repository = _FakeVinkRepository(
+          vinks: [_vink('done-vink', state: 'COMPLETED')],
+          activityByVinkId: {
+            'done-vink': [
+              ActivityEntry(
+                kind: 'event',
+                at: milestoneAt,
+                detail: {'eventType': 'VinkCompleted'},
+              ),
+            ],
+          },
+        );
+        final container = ProviderContainer(
+          overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+        );
+        addTearDown(container.dispose);
+
+        final result = await container.read(vinkOutcomesProvider.future);
+        final outcomes = result.summaries;
+
+        expect(outcomes.single.date, milestoneAt);
+      },
+    );
+
+    test(
+      'vinkTitle prefers the real purpose (D39) over the category label',
+      () async {
+        final repository = _FakeVinkRepository(
+          vinks: [
+            _vink('done-vink', state: 'COMPLETED', purpose: 'Team Lunch'),
           ],
-        },
-      );
-      final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
-      addTearDown(container.dispose);
+          activityByVinkId: {
+            'done-vink': [_entry('VinkCompleted')],
+          },
+        );
+        final container = ProviderContainer(
+          overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+        );
+        addTearDown(container.dispose);
 
-      final result = await container.read(vinkOutcomesProvider.future);
-      final outcomes = result.summaries;
+        final result = await container.read(vinkOutcomesProvider.future);
+        final outcomes = result.summaries;
 
-      expect(outcomes.single.date, milestoneAt);
-    });
-
-    test('vinkTitle prefers the real purpose (D39) over the category label', () async {
-      final repository = _FakeVinkRepository(
-        vinks: [_vink('done-vink', state: 'COMPLETED', purpose: 'Team Lunch')],
-        activityByVinkId: {
-          'done-vink': [_entry('VinkCompleted')],
-        },
-      );
-      final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
-      addTearDown(container.dispose);
-
-      final result = await container.read(vinkOutcomesProvider.future);
-      final outcomes = result.summaries;
-
-      expect(outcomes.single.vinkTitle, 'Team Lunch');
-    });
+        expect(outcomes.single.vinkTitle, 'Team Lunch');
+      },
+    );
 
     test('falls back to the category label when purpose is null', () async {
       final repository = _FakeVinkRepository(
@@ -234,7 +306,9 @@ void main() {
           'done-vink': [_entry('VinkCompleted')],
         },
       );
-      final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
+      final container = ProviderContainer(
+        overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+      );
       addTearDown(container.dispose);
 
       final result = await container.read(vinkOutcomesProvider.future);
@@ -252,17 +326,34 @@ void main() {
           _vink('newer-vink', state: 'COMPLETED'),
         ],
         activityByVinkId: {
-          'older-vink': [ActivityEntry(kind: 'event', at: older, detail: {'eventType': 'VinkCompleted'})],
-          'newer-vink': [ActivityEntry(kind: 'event', at: newer, detail: {'eventType': 'VinkCompleted'})],
+          'older-vink': [
+            ActivityEntry(
+              kind: 'event',
+              at: older,
+              detail: {'eventType': 'VinkCompleted'},
+            ),
+          ],
+          'newer-vink': [
+            ActivityEntry(
+              kind: 'event',
+              at: newer,
+              detail: {'eventType': 'VinkCompleted'},
+            ),
+          ],
         },
       );
-      final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
+      final container = ProviderContainer(
+        overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+      );
       addTearDown(container.dispose);
 
       final result = await container.read(vinkOutcomesProvider.future);
       final outcomes = result.summaries;
 
-      expect(outcomes.map((o) => o.vinkId).toList(), ['newer-vink', 'older-vink']);
+      expect(outcomes.map((o) => o.vinkId).toList(), [
+        'newer-vink',
+        'older-vink',
+      ]);
     });
 
     test(
@@ -279,7 +370,9 @@ void main() {
           },
           failingVinkIds: {'bad-vink'},
         );
-        final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
+        final container = ProviderContainer(
+          overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+        );
         addTearDown(container.dispose);
 
         final result = await container.read(vinkOutcomesProvider.future);

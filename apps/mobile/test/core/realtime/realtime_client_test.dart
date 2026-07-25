@@ -35,23 +35,32 @@ void main() {
       expect(d2, const Duration(milliseconds: 4000));
     });
 
-    test('delay never exceeds the 30s cap, however large the attempt number', () {
-      final delay = reconnectDelay(20, random: _FixedRandom(0.5));
-      expect(delay.inSeconds, lessThanOrEqualTo(30));
-    });
+    test(
+      'delay never exceeds the 30s cap, however large the attempt number',
+      () {
+        final delay = reconnectDelay(20, random: _FixedRandom(0.5));
+        expect(delay.inSeconds, lessThanOrEqualTo(30));
+      },
+    );
 
-    test('jitter stays within ±20% of the exponential value at both extremes', () {
-      const attempt = 3; // exponential base: 8000ms
-      final low = reconnectDelay(attempt, random: _FixedRandom(0.0));
-      final high = reconnectDelay(attempt, random: _FixedRandom(1.0));
-      expect(low, const Duration(milliseconds: 6400)); // 8000 * 0.8
-      expect(high, const Duration(milliseconds: 9600)); // 8000 * 1.2
-    });
+    test(
+      'jitter stays within ±20% of the exponential value at both extremes',
+      () {
+        const attempt = 3; // exponential base: 8000ms
+        final low = reconnectDelay(attempt, random: _FixedRandom(0.0));
+        final high = reconnectDelay(attempt, random: _FixedRandom(1.0));
+        expect(low, const Duration(milliseconds: 6400)); // 8000 * 0.8
+        expect(high, const Duration(milliseconds: 9600)); // 8000 * 1.2
+      },
+    );
 
-    test('never produces a zero or negative delay even at attempt 0 with minimum jitter', () {
-      final delay = reconnectDelay(0, random: _FixedRandom(0.0));
-      expect(delay.inMilliseconds, greaterThan(0));
-    });
+    test(
+      'never produces a zero or negative delay even at attempt 0 with minimum jitter',
+      () {
+        final delay = reconnectDelay(0, random: _FixedRandom(0.0));
+        expect(delay.inMilliseconds, greaterThan(0));
+      },
+    );
   });
 
   group('ENG3: shouldReconnectOnConnectivityChange', () {
@@ -62,19 +71,25 @@ void main() {
       );
     });
 
-    test('an online→offline transition does not reconnect (nothing to reconnect to)', () {
-      expect(
-        shouldReconnectOnConnectivityChange(wasOnline: true, isOnline: false),
-        isFalse,
-      );
-    });
+    test(
+      'an online→offline transition does not reconnect (nothing to reconnect to)',
+      () {
+        expect(
+          shouldReconnectOnConnectivityChange(wasOnline: true, isOnline: false),
+          isFalse,
+        );
+      },
+    );
 
-    test('staying online (e.g. Wi-Fi→cellular, still connected) does not force a reconnect', () {
-      expect(
-        shouldReconnectOnConnectivityChange(wasOnline: true, isOnline: true),
-        isFalse,
-      );
-    });
+    test(
+      'staying online (e.g. Wi-Fi→cellular, still connected) does not force a reconnect',
+      () {
+        expect(
+          shouldReconnectOnConnectivityChange(wasOnline: true, isOnline: true),
+          isFalse,
+        );
+      },
+    );
 
     test('staying offline does not reconnect', () {
       expect(
@@ -83,15 +98,18 @@ void main() {
       );
     });
 
-    test('no prior reading yet (wasOnline == null) never counts as a transition', () {
-      expect(
-        shouldReconnectOnConnectivityChange(wasOnline: null, isOnline: true),
-        isFalse,
-      );
-      expect(
-        shouldReconnectOnConnectivityChange(wasOnline: null, isOnline: false),
-        isFalse,
-      );
-    });
+    test(
+      'no prior reading yet (wasOnline == null) never counts as a transition',
+      () {
+        expect(
+          shouldReconnectOnConnectivityChange(wasOnline: null, isOnline: true),
+          isFalse,
+        );
+        expect(
+          shouldReconnectOnConnectivityChange(wasOnline: null, isOnline: false),
+          isFalse,
+        );
+      },
+    );
   });
 }

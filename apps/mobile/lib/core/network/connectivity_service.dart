@@ -19,7 +19,8 @@ class ConnectivityService {
     Future<List<ConnectivityResult>> Function()? checkConnectivity,
     Stream<List<ConnectivityResult>> Function()? connectivityChanges,
   }) : _check = checkConnectivity ?? Connectivity().checkConnectivity,
-       _changes = connectivityChanges ?? (() => Connectivity().onConnectivityChanged);
+       _changes =
+           connectivityChanges ?? (() => Connectivity().onConnectivityChanged);
 
   final Future<List<ConnectivityResult>> Function() _check;
   final Stream<List<ConnectivityResult>> Function() _changes;
@@ -32,7 +33,9 @@ class ConnectivityService {
   Stream<bool> get onlineChanges => _changes().map(isOnline);
 }
 
-final connectivityServiceProvider = Provider<ConnectivityService>((ref) => ConnectivityService());
+final connectivityServiceProvider = Provider<ConnectivityService>(
+  (ref) => ConnectivityService(),
+);
 
 /// The current online/offline signal, correct from its very first emitted value (an explicit
 /// [ConnectivityService.checkIsOnline] call) and live thereafter (`onlineChanges`) — never a

@@ -34,15 +34,21 @@ class InvitesScreen extends ConsumerWidget {
         child: RefreshIndicator(
           onRefresh: () => ref.refresh(invitesProvider.future),
           child: invitesAsync.when(
-            loading: () => const VinkLoadingState(message: 'Loading your invites…'),
+            loading: () =>
+                const VinkLoadingState(message: 'Loading your invites…'),
             error: (error, _) => ListView(
               padding: const EdgeInsets.all(VinkSpacing.lg),
               children: [
                 VinkInlineError(
-                  message: error is ApiException ? humanErrorMessage(error) : "Couldn't load invites.",
+                  message: error is ApiException
+                      ? humanErrorMessage(error)
+                      : "Couldn't load invites.",
                 ),
                 const SizedBox(height: VinkSpacing.md),
-                VinkSecondaryButton(label: 'Try again', onPressed: () => ref.invalidate(invitesProvider)),
+                VinkSecondaryButton(
+                  label: 'Try again',
+                  onPressed: () => ref.invalidate(invitesProvider),
+                ),
               ],
             ),
             data: (invites) {
@@ -51,7 +57,8 @@ class InvitesScreen extends ConsumerWidget {
                   children: [
                     const VinkEmptyState(
                       title: 'No pending invites',
-                      message: "When someone adds you to a Vink, it'll show up here.",
+                      message:
+                          "When someone adds you to a Vink, it'll show up here.",
                       action: SizedBox.shrink(),
                     ),
                   ],
@@ -60,8 +67,10 @@ class InvitesScreen extends ConsumerWidget {
               return ListView.separated(
                 padding: const EdgeInsets.all(VinkSpacing.lg),
                 itemCount: invites.length,
-                separatorBuilder: (_, _) => const SizedBox(height: VinkSpacing.md),
-                itemBuilder: (context, index) => _PendingInviteRow(invite: invites[index]),
+                separatorBuilder: (_, _) =>
+                    const SizedBox(height: VinkSpacing.md),
+                itemBuilder: (context, index) =>
+                    _PendingInviteRow(invite: invites[index]),
               );
             },
           ),
@@ -91,8 +100,10 @@ class _PendingInviteRowState extends ConsumerState<_PendingInviteRow> {
   @override
   Widget build(BuildContext context) {
     final invite = widget.invite;
-    final title = invite.purpose ?? purchaseCategoryLabel(invite.purchaseCategory);
-    final busy = _acceptCommand.state.isInProgress || _declineCommand.state.isInProgress;
+    final title =
+        invite.purpose ?? purchaseCategoryLabel(invite.purchaseCategory);
+    final busy =
+        _acceptCommand.state.isInProgress || _declineCommand.state.isInProgress;
 
     return VinkSurfaceCard(
       child: Column(
@@ -100,10 +111,16 @@ class _PendingInviteRowState extends ConsumerState<_PendingInviteRow> {
         children: [
           Text(title, style: VinkTypography.cardTitle),
           const SizedBox(height: 2),
-          Text('Organized by ${invite.organizerDisplayName}', style: VinkTypography.bodySmallSecondary),
+          Text(
+            'Organized by ${invite.organizerDisplayName}',
+            style: VinkTypography.bodySmallSecondary,
+          ),
           const SizedBox(height: VinkSpacing.sm),
           Text('Your share', style: VinkTypography.bodySmallSecondary),
-          MoneyText(invite.assignedShareMinor, style: VinkTypography.amountMedium),
+          MoneyText(
+            invite.assignedShareMinor,
+            style: VinkTypography.amountMedium,
+          ),
           if (_acceptCommand.state case CommandFailure(:final failure)) ...[
             const SizedBox(height: VinkSpacing.sm),
             VinkInlineError(message: failure.message),
@@ -121,7 +138,13 @@ class _PendingInviteRowState extends ConsumerState<_PendingInviteRow> {
                   loading: _declineCommand.state.isInProgress,
                   onPressed: busy
                       ? null
-                      : () => _declineCommand.run(() => ref.read(vinkRepositoryProvider).declineInvite(invite.vinkId), onSuccess: (_) async => ref.invalidate(invitesProvider)),
+                      : () => _declineCommand.run(
+                          () => ref
+                              .read(vinkRepositoryProvider)
+                              .declineInvite(invite.vinkId),
+                          onSuccess: (_) async =>
+                              ref.invalidate(invitesProvider),
+                        ),
                 ),
               ),
               const SizedBox(width: VinkSpacing.sm),
@@ -132,7 +155,9 @@ class _PendingInviteRowState extends ConsumerState<_PendingInviteRow> {
                   onPressed: busy
                       ? null
                       : () => _acceptCommand.run(
-                          () => ref.read(vinkRepositoryProvider).acceptInvite(invite.vinkId),
+                          () => ref
+                              .read(vinkRepositoryProvider)
+                              .acceptInvite(invite.vinkId),
                           onSuccess: (_) async {
                             ref.invalidate(invitesProvider);
                             ref.invalidate(myVinksProvider);

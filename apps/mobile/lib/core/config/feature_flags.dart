@@ -16,7 +16,7 @@ class FeatureFlags {
   /// five-step wizard is formally retired in a later, separate cleanup slice — not this one.
   static const bool canonicalCreateFlow = bool.fromEnvironment(
     'CANONICAL_CREATE_FLOW',
-    defaultValue: false,
+    defaultValue: true,
   );
 
   /// Slice I6 (Phase 10 §I6) — gates Home's two-section redesign, Activity's outcome-summary
@@ -27,7 +27,7 @@ class FeatureFlags {
   /// for rollback.
   static const bool homeActivityV2 = bool.fromEnvironment(
     'HOME_ACTIVITY_V2',
-    defaultValue: false,
+    defaultValue: true,
   );
 
   /// Invites feature (D44, 2026-07-23) — gates the 4th "Invites" tab, the Home pending-invite
@@ -36,7 +36,10 @@ class FeatureFlags {
   /// real behavior switch (whether `addParticipantCommand` inserts INVITED rows at all) —
   /// this client flag only controls UI visibility; a build with it on talking to a server
   /// with it off just sees an always-empty Invites tab, safely, not broken.
-  static const bool invitesEnabled = bool.fromEnvironment('INVITES_ENABLED', defaultValue: false);
+  static const bool invitesEnabled = bool.fromEnvironment(
+    'INVITES_ENABLED',
+    defaultValue: true,
+  );
 
   /// I7 (Phase 10 §I7, Phase 8 §15) — gates the Ink Progress vessel replacing
   /// `VinkProgressIndicator` on the Lobby (organizer + participant) and Home's compact card,
@@ -44,6 +47,6 @@ class FeatureFlags {
   /// rollback (same discipline as every prior flagged slice).
   static const bool inkProgressVessel = bool.fromEnvironment(
     'INK_PROGRESS_VESSEL',
-    defaultValue: false,
+    defaultValue: true,
   );
 }

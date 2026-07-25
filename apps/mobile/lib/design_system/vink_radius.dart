@@ -10,7 +10,7 @@ class VinkRadius {
   static const xxxl = 24.0;
 
   /// The site's Vink-card mockup radius (`rounded-[2rem]`) — used for `VinkSurfaceCard`.
-  static const card = 32.0;
+  static const card = 20.0;
 
   /// Every button on the site is a pill.
   static const pill = 9999.0;

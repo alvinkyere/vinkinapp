@@ -36,15 +36,18 @@ class CanonicalAddPersonSheet extends ConsumerStatefulWidget {
   final String vinkId;
 
   @override
-  ConsumerState<CanonicalAddPersonSheet> createState() => _CanonicalAddPersonSheetState();
+  ConsumerState<CanonicalAddPersonSheet> createState() =>
+      _CanonicalAddPersonSheetState();
 }
 
-class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonSheet> {
+class _CanonicalAddPersonSheetState
+    extends ConsumerState<CanonicalAddPersonSheet> {
   _Phase _phase = _Phase.username;
   final _usernameController = TextEditingController();
   final _guestNameController = TextEditingController();
   final _destinationController = TextEditingController();
-  DeliveryMode _deliveryMode = DeliveryMode.manual; // never inferred — an explicit default
+  DeliveryMode _deliveryMode =
+      DeliveryMode.manual; // never inferred — an explicit default
   bool _busy = false;
   String? _error;
   String? _destinationError;
@@ -110,14 +113,21 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
   bool get _canSubmitGuestDetails {
     if (_guestNameController.text.trim().isEmpty) return false;
     if (_deliveryMode == DeliveryMode.manual) return true;
-    return validateContactDestination(_deliveryMode, _destinationController.text) == null;
+    return validateContactDestination(
+          _deliveryMode,
+          _destinationController.text,
+        ) ==
+        null;
   }
 
   Future<void> _addAsGuest() async {
     final displayName = _guestNameController.text.trim();
     if (displayName.isEmpty) return;
     final destination = _destinationController.text.trim();
-    final destinationError = validateContactDestination(_deliveryMode, destination);
+    final destinationError = validateContactDestination(
+      _deliveryMode,
+      destination,
+    );
     if (destinationError != null) {
       setState(() => _destinationError = destinationError);
       return;
@@ -135,7 +145,8 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
         body: {
           'displayName': displayName,
           'deliveryMode': _deliveryMode.wireValue,
-          if (_deliveryMode != DeliveryMode.manual) 'contactDestination': destination,
+          if (_deliveryMode != DeliveryMode.manual)
+            'contactDestination': destination,
           'invitationIdempotencyKey': _guestInviteIdempotencyKey,
         },
       );
@@ -147,7 +158,9 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
         isOrganizer: false,
         guestJoinUrl: response['joinUrl'] as String?,
         deliveryMode: _deliveryMode.wireValueUppercase,
-        contactDestination: _deliveryMode == DeliveryMode.manual ? null : destination,
+        contactDestination: _deliveryMode == DeliveryMode.manual
+            ? null
+            : destination,
       );
       setState(() {
         _readyGuest = guest;
@@ -192,7 +205,10 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
       children: [
         Text('Add someone', style: VinkTypography.title),
         const SizedBox(height: VinkSpacing.xs),
-        Text('Enter their VinkIn username.', style: VinkTypography.bodySecondary),
+        Text(
+          'Enter their VinkIn username.',
+          style: VinkTypography.bodySecondary,
+        ),
         const SizedBox(height: VinkSpacing.lg),
         VinkTextField(
           label: 'Username',
@@ -201,9 +217,16 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
           textInputAction: TextInputAction.done,
           onSubmitted: (_) => _lookupAndAdd(),
         ),
-        if (_error != null) ...[const SizedBox(height: VinkSpacing.sm), VinkInlineError(message: _error!)],
+        if (_error != null) ...[
+          const SizedBox(height: VinkSpacing.sm),
+          VinkInlineError(message: _error!),
+        ],
         const SizedBox(height: VinkSpacing.lg),
-        VinkPrimaryButton(label: 'Add', loading: _busy, onPressed: _lookupAndAdd),
+        VinkPrimaryButton(
+          label: 'Add',
+          loading: _busy,
+          onPressed: _lookupAndAdd,
+        ),
       ],
     );
   }
@@ -252,7 +275,10 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
       children: [
         Text('Add as guest', style: VinkTypography.title),
         const SizedBox(height: VinkSpacing.xs),
-        Text('No account needed — just a name and how to reach them.', style: VinkTypography.bodySecondary),
+        Text(
+          'No account needed — just a name and how to reach them.',
+          style: VinkTypography.bodySecondary,
+        ),
         const SizedBox(height: VinkSpacing.lg),
         // Display name stays a distinct field from the contact destination below — never
         // pre-filled from a phone/email, never used as a fallback destination.
@@ -274,11 +300,17 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
             return ChoiceChip(
               label: Text(mode.label),
               selected: selected,
-              labelStyle: VinkTypography.label.copyWith(color: selected ? VinkColors.white : VinkColors.ink),
+              labelStyle: VinkTypography.label.copyWith(
+                color: selected ? VinkColors.white : VinkColors.ink,
+              ),
               selectedColor: VinkColors.blue,
               backgroundColor: VinkColors.white,
               shape: const StadiumBorder(),
-              side: BorderSide(color: selected ? VinkColors.blue : VinkColors.ink.withValues(alpha: 0.12)),
+              side: BorderSide(
+                color: selected
+                    ? VinkColors.blue
+                    : VinkColors.ink.withValues(alpha: 0.12),
+              ),
               onSelected: (_) => setState(() {
                 _deliveryMode = mode;
                 _destinationError = null;
@@ -287,17 +319,24 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
           }).toList(),
         ),
         const SizedBox(height: VinkSpacing.sm),
-        Text(_deliveryMode.expectationCaption, style: VinkTypography.bodySmallSecondary),
+        Text(
+          _deliveryMode.expectationCaption,
+          style: VinkTypography.bodySmallSecondary,
+        ),
         if (_deliveryMode != DeliveryMode.manual) ...[
           const SizedBox(height: VinkSpacing.md),
           VinkTextField(
-            label: _deliveryMode == DeliveryMode.sms ? 'Phone number' : 'Email address',
+            label: _deliveryMode == DeliveryMode.sms
+                ? 'Phone number'
+                : 'Email address',
             controller: _destinationController,
             keyboardType: _deliveryMode == DeliveryMode.sms
                 ? TextInputType.phone
                 : TextInputType.emailAddress,
             autofillHints: [
-              _deliveryMode == DeliveryMode.sms ? AutofillHints.telephoneNumber : AutofillHints.email,
+              _deliveryMode == DeliveryMode.sms
+                  ? AutofillHints.telephoneNumber
+                  : AutofillHints.email,
             ],
             textInputAction: TextInputAction.done,
             errorText: _destinationError,
@@ -305,7 +344,10 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
             onSubmitted: (_) => _addAsGuest(),
           ),
         ],
-        if (_error != null) ...[const SizedBox(height: VinkSpacing.sm), VinkInlineError(message: _error!)],
+        if (_error != null) ...[
+          const SizedBox(height: VinkSpacing.sm),
+          VinkInlineError(message: _error!),
+        ],
         const SizedBox(height: VinkSpacing.lg),
         VinkPrimaryButton(
           label: 'Add guest',
@@ -313,7 +355,10 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
           onPressed: _canSubmitGuestDetails ? _addAsGuest : null,
         ),
         const SizedBox(height: VinkSpacing.sm),
-        VinkTextButton(label: 'Back', onPressed: () => setState(() => _phase = _Phase.notFound)),
+        VinkTextButton(
+          label: 'Back',
+          onPressed: () => setState(() => _phase = _Phase.notFound),
+        ),
       ],
     );
   }
@@ -327,25 +372,42 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
       children: [
         Text('${guest.displayName} is in', style: VinkTypography.title),
         const SizedBox(height: VinkSpacing.xs),
-        Text('Send them this link so they can join and pay their share — no account needed.', style: VinkTypography.bodySecondary),
+        Text(
+          'Send them this link so they can join and pay their share — no account needed.',
+          style: VinkTypography.bodySecondary,
+        ),
         const SizedBox(height: VinkSpacing.lg),
         Center(
           child: DecoratedBox(
-            decoration: BoxDecoration(color: VinkColors.white, borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(
+              color: VinkColors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(VinkSpacing.md),
-              child: QrImageView(data: link, size: 160, backgroundColor: VinkColors.white),
+              child: QrImageView(
+                data: link,
+                size: 160,
+                backgroundColor: VinkColors.white,
+              ),
             ),
           ),
         ),
         const SizedBox(height: VinkSpacing.md),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.md, vertical: VinkSpacing.sm + 2),
+          padding: const EdgeInsets.symmetric(
+            horizontal: VinkSpacing.md,
+            vertical: VinkSpacing.sm + 2,
+          ),
           decoration: BoxDecoration(
             color: VinkColors.ink.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Text(link, style: VinkTypography.bodySmall, overflow: TextOverflow.ellipsis),
+          child: Text(
+            link,
+            style: VinkTypography.bodySmall,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
         const SizedBox(height: VinkSpacing.md),
         Row(
@@ -356,19 +418,27 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: link));
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied.')));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Link copied.')),
+                    );
                   }
                 },
               ),
             ),
             const SizedBox(width: VinkSpacing.sm),
             Expanded(
-              child: VinkSecondaryButton(label: 'Share', onPressed: () => Share.share(link)),
+              child: VinkSecondaryButton(
+                label: 'Share',
+                onPressed: () => Share.share(link),
+              ),
             ),
           ],
         ),
         const SizedBox(height: VinkSpacing.md),
-        VinkPrimaryButton(label: 'Done', onPressed: () => Navigator.of(context).pop(guest)),
+        VinkPrimaryButton(
+          label: 'Done',
+          onPressed: () => Navigator.of(context).pop(guest),
+        ),
       ],
     );
   }
@@ -383,9 +453,15 @@ class _CanonicalAddPersonSheetState extends ConsumerState<CanonicalAddPersonShee
         const SizedBox(height: VinkSpacing.xs),
         // Customer-safe expectation only — no provider acceptance, attempt history, or
         // delivery diagnostics during Create (explicitly deferred to I7).
-        Text(_deliveryMode.expectationCaption, style: VinkTypography.bodySecondary),
+        Text(
+          _deliveryMode.expectationCaption,
+          style: VinkTypography.bodySecondary,
+        ),
         const SizedBox(height: VinkSpacing.lg),
-        VinkPrimaryButton(label: 'Done', onPressed: () => Navigator.of(context).pop(guest)),
+        VinkPrimaryButton(
+          label: 'Done',
+          onPressed: () => Navigator.of(context).pop(guest),
+        ),
       ],
     );
   }

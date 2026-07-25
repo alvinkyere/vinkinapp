@@ -30,21 +30,30 @@ Future<void> _pump(WidgetTester tester, {required bool invitesEnabled}) async {
       authControllerProvider.overrideWith(_FakeAuthController.new),
       myVinksProvider.overrideWith((ref) async => const <Vink>[]),
       activeVinksProvider.overrideWith((ref) async => const <ActiveVink>[]),
-      recentActivityProvider.overrideWith((ref) async => (entries: <VinkActivity>[], failedCount: 0)),
+      recentActivityProvider.overrideWith(
+        (ref) async => (entries: <VinkActivity>[], failedCount: 0),
+      ),
       invitesProvider.overrideWith((ref) async => const <PendingInvite>[]),
     ],
   );
   addTearDown(container.dispose);
-  final router = container.read(Provider((ref) => buildRouter(ref, invitesEnabled: invitesEnabled)));
+  final router = container.read(
+    Provider((ref) => buildRouter(ref, invitesEnabled: invitesEnabled)),
+  );
   router.go('/home');
   await tester.pumpWidget(
-    UncontrolledProviderScope(container: container, child: MaterialApp.router(routerConfig: router)),
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp.router(routerConfig: router),
+    ),
   );
   await tester.pumpAndSettle();
 }
 
 void main() {
-  testWidgets('flag off: exactly 3 tabs — Home, Activity, Me — no Invites', (tester) async {
+  testWidgets('flag off: exactly 3 tabs — Home, Activity, Me — no Invites', (
+    tester,
+  ) async {
     await _pump(tester, invitesEnabled: false);
 
     expect(find.text('Home'), findsOneWidget);
@@ -53,7 +62,9 @@ void main() {
     expect(find.text('Invites'), findsNothing);
   });
 
-  testWidgets('flag on: a 4th Invites tab appears, and is reachable', (tester) async {
+  testWidgets('flag on: a 4th Invites tab appears, and is reachable', (
+    tester,
+  ) async {
     await _pump(tester, invitesEnabled: true);
 
     expect(find.text('Invites'), findsOneWidget);
@@ -65,12 +76,17 @@ void main() {
     expect(find.text('No pending invites'), findsOneWidget);
   });
 
-  testWidgets('flag on: Me still reachable at its shifted tab position', (tester) async {
+  testWidgets('flag on: Me still reachable at its shifted tab position', (
+    tester,
+  ) async {
     await _pump(tester, invitesEnabled: true);
 
     await tester.tap(find.text('Me'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Home'), findsOneWidget); // the tab bar itself still renders
+    expect(
+      find.text('Home'),
+      findsOneWidget,
+    ); // the tab bar itself still renders
   });
 }

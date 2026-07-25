@@ -10,7 +10,11 @@ import '../vink_typography.dart';
 /// reads from, through the same 2-decimal-place rule (`^\d*\.?\d{0,2}`) that field's own
 /// `inputFormatters` already enforce, so behavior never diverges between the two input paths.
 class VinkNumericKeypad extends StatelessWidget {
-  const VinkNumericKeypad({super.key, required this.controller, this.onChanged});
+  const VinkNumericKeypad({
+    super.key,
+    required this.controller,
+    this.onChanged,
+  });
 
   final TextEditingController controller;
   final ValueChanged<String>? onChanged;
@@ -49,7 +53,11 @@ class VinkNumericKeypad extends StatelessWidget {
                 Expanded(
                   child: Semantics(
                     button: true,
-                    label: key == '⌫' ? 'Delete' : key == '.' ? 'Decimal point' : key,
+                    label: key == '⌫'
+                        ? 'Delete'
+                        : key == '.'
+                        ? 'Decimal point'
+                        : key,
                     child: InkWell(
                       borderRadius: BorderRadius.circular(16),
                       onTap: () => _tap(key),
@@ -57,7 +65,11 @@ class VinkNumericKeypad extends StatelessWidget {
                         height: 56,
                         alignment: Alignment.center,
                         child: key == '⌫'
-                            ? const Icon(Icons.backspace_outlined, color: VinkColors.ink, size: 22)
+                            ? const Icon(
+                                Icons.backspace_outlined,
+                                color: VinkColors.ink,
+                                size: 22,
+                              )
                             : Text(key, style: VinkTypography.title),
                       ),
                     ),

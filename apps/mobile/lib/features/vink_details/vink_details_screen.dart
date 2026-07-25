@@ -28,7 +28,10 @@ import 'vink_details_providers.dart';
 /// recorded data is real, but naming it a receipt overstates its provenance while the
 /// provider is still mocked (M0 gate open). See `test/features/vink_details/` for the
 /// regression test proving this.
-const _supportContactUrl = String.fromEnvironment('SUPPORT_CONTACT_URL', defaultValue: '');
+const _supportContactUrl = String.fromEnvironment(
+  'SUPPORT_CONTACT_URL',
+  defaultValue: '',
+);
 
 class VinkDetailsScreen extends ConsumerStatefulWidget {
   const VinkDetailsScreen({super.key, required this.vinkId});
@@ -44,7 +47,9 @@ class _VinkDetailsScreenState extends ConsumerState<VinkDetailsScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(analyticsProvider).track('vink_details_opened', const {}, widget.vinkId);
+      ref
+          .read(analyticsProvider)
+          .track('vink_details_opened', const {}, widget.vinkId);
     });
   }
 
@@ -65,7 +70,8 @@ class _VinkDetailsScreenState extends ConsumerState<VinkDetailsScreen> {
       ),
       body: SafeArea(
         child: detailsAsync.when(
-          loading: () => const VinkLoadingState(message: 'Loading Vink details…'),
+          loading: () =>
+              const VinkLoadingState(message: 'Loading Vink details…'),
           error: (error, _) => Padding(
             padding: const EdgeInsets.all(VinkSpacing.lg),
             child: Column(
@@ -79,7 +85,8 @@ class _VinkDetailsScreenState extends ConsumerState<VinkDetailsScreen> {
                 const SizedBox(height: VinkSpacing.md),
                 VinkSecondaryButton(
                   label: 'Try again',
-                  onPressed: () => ref.invalidate(vinkDetailsProvider(widget.vinkId)),
+                  onPressed: () =>
+                      ref.invalidate(vinkDetailsProvider(widget.vinkId)),
                 ),
               ],
             ),
@@ -96,7 +103,8 @@ class _VinkDetailsBody extends StatelessWidget {
 
   final VinkDetailsView details;
 
-  String get _title => details.purpose ?? purchaseCategoryLabel(details.purchaseCategory);
+  String get _title =>
+      details.purpose ?? purchaseCategoryLabel(details.purchaseCategory);
 
   /// Neutral, third-person copy — this screen is shared between the organizer and every
   /// participant (Phase 4 §11's own widening), so no "you"-framed phrasing (matching D34's
@@ -105,7 +113,8 @@ class _VinkDetailsBody extends StatelessWidget {
   /// timeline (which the earlier draft of this screen did before D43 corrected the whole
   /// privacy model).
   String get _outcomeStatement => switch (details.vinkOutcome) {
-    'completed' => 'The merchant was paid ${MoneyText.format(details.totalMinor)}.',
+    'completed' =>
+      'The merchant was paid ${MoneyText.format(details.totalMinor)}.',
     'cancelled' => 'This Vink was cancelled. No one was charged.',
     'expired' => 'This Vink expired before everyone joined.',
     'recovery_required' => "We're resolving a shortfall on this Vink.",
@@ -125,23 +134,40 @@ class _VinkDetailsBody extends StatelessWidget {
           child: Container(
             width: 56,
             height: 56,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: VinkColors.blue),
-            child: Icon(purchaseCategoryIcon(details.purchaseCategory), color: VinkColors.white, size: 26),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: VinkColors.blue,
+            ),
+            child: Icon(
+              purchaseCategoryIcon(details.purchaseCategory),
+              color: VinkColors.white,
+              size: 26,
+            ),
           ),
         ),
         const SizedBox(height: VinkSpacing.sm),
-        Text(_title, textAlign: TextAlign.center, style: VinkTypography.cardTitle),
+        Text(
+          _title,
+          textAlign: TextAlign.center,
+          style: VinkTypography.cardTitle,
+        ),
         const SizedBox(height: VinkSpacing.xs),
         Center(
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.sm, vertical: 4),
+            padding: const EdgeInsets.symmetric(
+              horizontal: VinkSpacing.sm,
+              vertical: 4,
+            ),
             decoration: BoxDecoration(
               color: VinkColors.blue.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(999),
             ),
             child: Text(
               outcomeLabelCopy(details.vinkOutcome),
-              style: VinkTypography.bodySmall.copyWith(color: VinkColors.blue, fontWeight: FontWeight.w700),
+              style: VinkTypography.bodySmall.copyWith(
+                color: VinkColors.blue,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ),
@@ -149,9 +175,17 @@ class _VinkDetailsBody extends StatelessWidget {
         // The fuller sentence stays too (quieter, below the badge) — genuinely useful detail
         // the concept's own compact badge doesn't carry on its own (e.g. "No one was
         // charged" for a cancelled Vink).
-        Text(_outcomeStatement, textAlign: TextAlign.center, style: VinkTypography.bodySmallSecondary),
+        Text(
+          _outcomeStatement,
+          textAlign: TextAlign.center,
+          style: VinkTypography.bodySmallSecondary,
+        ),
         const SizedBox(height: VinkSpacing.xl),
-        _DetailRow(label: 'Total', value: MoneyText.format(details.totalMinor), emphasized: true),
+        _DetailRow(
+          label: 'Total',
+          value: MoneyText.format(details.totalMinor),
+          emphasized: true,
+        ),
         const SizedBox(height: VinkSpacing.sm),
         // Slice I6 (D43): a customer-safe AGGREGATE only — never a per-participant
         // breakdown, for either the organizer or a participant.
@@ -164,7 +198,10 @@ class _VinkDetailsBody extends StatelessWidget {
         ),
         if (details.merchantSettlementDetail != null) ...[
           const SizedBox(height: VinkSpacing.sm),
-          Text(details.merchantSettlementDetail!, style: VinkTypography.bodySmallSecondary),
+          Text(
+            details.merchantSettlementDetail!,
+            style: VinkTypography.bodySmallSecondary,
+          ),
         ],
         const SizedBox(height: VinkSpacing.xl),
         if (details.isOrganizerViewer) ...[
@@ -180,13 +217,22 @@ class _VinkDetailsBody extends StatelessWidget {
             children: [
               VinkAvatar(name: details.organizerDisplayName, size: 32),
               const SizedBox(width: VinkSpacing.sm),
-              Text('Organized by ${details.organizerDisplayName}', style: VinkTypography.bodySmallSecondary),
+              Text(
+                'Organized by ${details.organizerDisplayName}',
+                style: VinkTypography.bodySmallSecondary,
+              ),
             ],
           ),
           const SizedBox(height: VinkSpacing.sm),
-          _DetailRow(label: 'Assigned', value: MoneyText.format(viewer.assignedShareMinor)),
+          _DetailRow(
+            label: 'Assigned',
+            value: MoneyText.format(viewer.assignedShareMinor),
+          ),
           const SizedBox(height: VinkSpacing.sm),
-          _DetailRow(label: 'Your outcome', value: _outcomeCopy(viewer.contributionOutcomeLabel)),
+          _DetailRow(
+            label: 'Your outcome',
+            value: _outcomeCopy(viewer.contributionOutcomeLabel),
+          ),
         ],
         if (details.timeline.isNotEmpty) ...[
           const SizedBox(height: VinkSpacing.xl),
@@ -198,12 +244,20 @@ class _VinkDetailsBody extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.check_circle_rounded, size: 18, color: VinkColors.blue),
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    size: 18,
+                    color: VinkColors.blue,
+                  ),
                   const SizedBox(width: VinkSpacing.sm),
                   Expanded(
                     child: Text(
                       activityCopy(
-                        ActivityEntry(kind: 'event', at: entry.at, detail: {'eventType': entry.eventType}),
+                        ActivityEntry(
+                          kind: 'event',
+                          at: entry.at,
+                          detail: {'eventType': entry.eventType},
+                        ),
                         vinkTitle: _title,
                         isOrganizerViewer: false,
                       ),
@@ -223,7 +277,9 @@ class _VinkDetailsBody extends StatelessWidget {
             label: 'Get help',
             leadingIcon: Icons.help_outline_rounded,
             onPressed: () async {
-              await Clipboard.setData(const ClipboardData(text: _supportContactUrl));
+              await Clipboard.setData(
+                const ClipboardData(text: _supportContactUrl),
+              );
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Support link copied')),
@@ -239,7 +295,11 @@ class _VinkDetailsBody extends StatelessWidget {
 
 /// Plain label-left/value-right row — the concept's own Total/Your share/Your payment rhythm.
 class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.label, required this.value, this.emphasized = false});
+  const _DetailRow({
+    required this.label,
+    required this.value,
+    this.emphasized = false,
+  });
 
   final String label;
   final String value;
@@ -266,13 +326,14 @@ class _DetailRow extends StatelessWidget {
 /// invents a parallel one) — every value gets explicit copy here, unlike the Lobby's own
 /// `_participantStatusCopy` (which leaves `not_started`/`declined_retryable` blank because a
 /// button fills that space there; this is a read-only historical screen with no button).
-String _outcomeCopy(String contributionOutcomeLabel) => switch (contributionOutcomeLabel) {
-  'confirmed' => 'Paid',
-  'processing' => 'Processing…',
-  'not_started' => "Didn't pay",
-  'declined_retryable' || 'declined_final' => 'Payment declined',
-  'return_pending' => 'Refund in progress',
-  'returned' => 'Refunded',
-  'recovery_required' => 'Resolving a shortfall',
-  _ => contributionOutcomeLabel,
-};
+String _outcomeCopy(String contributionOutcomeLabel) =>
+    switch (contributionOutcomeLabel) {
+      'confirmed' => 'Paid',
+      'processing' => 'Processing…',
+      'not_started' => "Didn't pay",
+      'declined_retryable' || 'declined_final' => 'Payment declined',
+      'return_pending' => 'Refund in progress',
+      'returned' => 'Refunded',
+      'recovery_required' => 'Resolving a shortfall',
+      _ => contributionOutcomeLabel,
+    };

@@ -29,15 +29,25 @@ class ProfileScreen extends ConsumerWidget {
               VinkSurfaceCard(
                 child: Row(
                   children: [
-                    VinkAvatar(name: user?.displayName ?? '?', size: 56, isSelf: true),
+                    VinkAvatar(
+                      name: user?.displayName ?? '?',
+                      size: 56,
+                      isSelf: true,
+                    ),
                     const SizedBox(width: VinkSpacing.md),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(user?.displayName ?? '', style: VinkTypography.cardTitle),
+                          Text(
+                            user?.displayName ?? '',
+                            style: VinkTypography.cardTitle,
+                          ),
                           const SizedBox(height: 2),
-                          Text('@${user?.username ?? ''}', style: VinkTypography.bodySecondary),
+                          Text(
+                            '@${user?.username ?? ''}',
+                            style: VinkTypography.bodySecondary,
+                          ),
                         ],
                       ),
                     ),
@@ -47,7 +57,8 @@ class ProfileScreen extends ConsumerWidget {
               const SizedBox(height: VinkSpacing.xxl),
               VinkDestructiveButton(
                 label: 'Sign out',
-                onPressed: () => ref.read(authControllerProvider.notifier).logout(),
+                onPressed: () =>
+                    ref.read(authControllerProvider.notifier).logout(),
               ),
             ],
           ),

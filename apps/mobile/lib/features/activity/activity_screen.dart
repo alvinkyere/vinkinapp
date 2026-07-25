@@ -36,7 +36,10 @@ extension on _OutcomeFilter {
 }
 
 class ActivityScreen extends ConsumerStatefulWidget {
-  const ActivityScreen({super.key, this.homeActivityV2 = FeatureFlags.homeActivityV2});
+  const ActivityScreen({
+    super.key,
+    this.homeActivityV2 = FeatureFlags.homeActivityV2,
+  });
 
   /// Slice I6 — gates the outcome-summary list (one row per terminal Vink, tappable into Vink
   /// Details) as one unit with Home's own redesign. See `HomeScreen.homeActivityV2`'s own doc
@@ -69,7 +72,9 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
                       context: context,
                       backgroundColor: VinkColors.paper,
                       shape: const RoundedRectangleBorder(
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(24),
+                        ),
                       ),
                       builder: (sheetContext) => SafeArea(
                         child: Column(
@@ -80,15 +85,20 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
                               ListTile(
                                 title: Text(option.label),
                                 trailing: option == _filter
-                                    ? const Icon(Icons.check_rounded, color: VinkColors.blue)
+                                    ? const Icon(
+                                        Icons.check_rounded,
+                                        color: VinkColors.blue,
+                                      )
                                     : null,
-                                onTap: () => Navigator.of(sheetContext).pop(option),
+                                onTap: () =>
+                                    Navigator.of(sheetContext).pop(option),
                               ),
                           ],
                         ),
                       ),
                     );
-                    if (selected != null && mounted) setState(() => _filter = selected);
+                    if (selected != null && mounted)
+                      setState(() => _filter = selected);
                   },
                 ),
               ]
@@ -121,26 +131,38 @@ class _ActivityOutcomeList extends ConsumerWidget {
       color: VinkColors.blue,
       onRefresh: () => ref.refresh(vinkOutcomesProvider.future),
       child: outcomesAsync.when(
-        loading: () => const VinkLoadingState(message: 'Gathering your Vink history…'),
+        loading: () =>
+            const VinkLoadingState(message: 'Gathering your Vink history…'),
         error: (error, _) => ListView(
           padding: const EdgeInsets.all(VinkSpacing.lg),
           children: [
             VinkInlineError(
-              message: error is ApiException ? humanErrorMessage(error) : "Couldn't load activity.",
+              message: error is ApiException
+                  ? humanErrorMessage(error)
+                  : "Couldn't load activity.",
             ),
             const SizedBox(height: VinkSpacing.md),
-            VinkSecondaryButton(label: 'Try again', onPressed: () => ref.invalidate(vinkOutcomesProvider)),
+            VinkSecondaryButton(
+              label: 'Try again',
+              onPressed: () => ref.invalidate(vinkOutcomesProvider),
+            ),
           ],
         ),
         data: (result) {
-          final outcomes = result.summaries.where((item) => filter.matches(item.outcomeLabel)).toList();
+          final outcomes = result.summaries
+              .where((item) => filter.matches(item.outcomeLabel))
+              .toList();
           if (result.summaries.isEmpty && result.failedCount == 0) {
             return ListView(
               children: [
                 VinkEmptyState(
                   title: 'Nothing here yet',
-                  message: 'Once a Vink you\'re part of wraps up — completed, cancelled, expired — it\'ll show up here.',
-                  action: VinkPrimaryButton(label: 'Start a Vink', onPressed: () => context.go('/home')),
+                  message:
+                      'Once a Vink you\'re part of wraps up — completed, cancelled, expired — it\'ll show up here.',
+                  action: VinkPrimaryButton(
+                    label: 'Start a Vink',
+                    onPressed: () => context.go('/home'),
+                  ),
                 ),
               ],
             );
@@ -164,7 +186,10 @@ class _ActivityOutcomeList extends ConsumerWidget {
               children: [
                 ?banner,
                 if (filter != _OutcomeFilter.all)
-                  Text('No ${filter.label.toLowerCase()} activity yet.', style: VinkTypography.bodySecondary),
+                  Text(
+                    'No ${filter.label.toLowerCase()} activity yet.',
+                    style: VinkTypography.bodySecondary,
+                  ),
               ],
             );
           }
@@ -193,7 +218,9 @@ class _ActivityOutcomeList extends ConsumerWidget {
                 child: InkWell(
                   borderRadius: BorderRadius.circular(20),
                   onTap: () {
-                    _analytics(ref).track('activity_row_opened', const {}, item.vinkId);
+                    _analytics(
+                      ref,
+                    ).track('activity_row_opened', const {}, item.vinkId);
                     context.push('/activity/${item.vinkId}');
                   },
                   child: Row(
@@ -217,7 +244,10 @@ class _ActivityOutcomeList extends ConsumerWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(item.vinkTitle, style: VinkTypography.body),
-                            Text(outcomeLabelCopy(item.outcomeLabel), style: VinkTypography.bodySmallSecondary),
+                            Text(
+                              outcomeLabelCopy(item.outcomeLabel),
+                              style: VinkTypography.bodySmallSecondary,
+                            ),
                           ],
                         ),
                       ),
@@ -227,9 +257,14 @@ class _ActivityOutcomeList extends ConsumerWidget {
                         children: [
                           Text(
                             MoneyText.format(item.amountMinor),
-                            style: VinkTypography.bodySmall.copyWith(fontWeight: FontWeight.w700),
+                            style: VinkTypography.bodySmall.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                          Text(_shortDate(item.date), style: VinkTypography.bodySmallSecondary),
+                          Text(
+                            _shortDate(item.date),
+                            style: VinkTypography.bodySmallSecondary,
+                          ),
                         ],
                       ),
                     ],
@@ -255,15 +290,21 @@ class _ActivityEventList extends ConsumerWidget {
       color: VinkColors.blue,
       onRefresh: () => ref.refresh(recentActivityProvider.future),
       child: activityAsync.when(
-        loading: () => const VinkLoadingState(message: 'Gathering recent activity…'),
+        loading: () =>
+            const VinkLoadingState(message: 'Gathering recent activity…'),
         error: (error, _) => ListView(
           padding: const EdgeInsets.all(VinkSpacing.lg),
           children: [
             VinkInlineError(
-              message: error is ApiException ? humanErrorMessage(error) : "Couldn't load activity.",
+              message: error is ApiException
+                  ? humanErrorMessage(error)
+                  : "Couldn't load activity.",
             ),
             const SizedBox(height: VinkSpacing.md),
-            VinkSecondaryButton(label: 'Try again', onPressed: () => ref.invalidate(recentActivityProvider)),
+            VinkSecondaryButton(
+              label: 'Try again',
+              onPressed: () => ref.invalidate(recentActivityProvider),
+            ),
           ],
         ),
         data: (result) {
@@ -273,8 +314,12 @@ class _ActivityEventList extends ConsumerWidget {
               children: [
                 VinkEmptyState(
                   title: 'Nothing here yet',
-                  message: 'Once a Vink you\'re part of starts moving — joins, payments, completion — it\'ll show up here.',
-                  action: VinkPrimaryButton(label: 'Start a Vink', onPressed: () => context.go('/home')),
+                  message:
+                      'Once a Vink you\'re part of starts moving — joins, payments, completion — it\'ll show up here.',
+                  action: VinkPrimaryButton(
+                    label: 'Start a Vink',
+                    onPressed: () => context.go('/home'),
+                  ),
                 ),
               ],
             );
@@ -306,7 +351,10 @@ class _ActivityEventList extends ConsumerWidget {
               }
               final item = entries[index];
               return VinkSurfaceCard(
-                padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.md, vertical: VinkSpacing.sm + 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: VinkSpacing.md,
+                  vertical: VinkSpacing.sm + 4,
+                ),
                 child: Row(
                   children: [
                     Expanded(
@@ -320,7 +368,10 @@ class _ActivityEventList extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(width: VinkSpacing.sm),
-                    Text(_relativeTime(item.entry.at), style: VinkTypography.bodySmallSecondary),
+                    Text(
+                      _relativeTime(item.entry.at),
+                      style: VinkTypography.bodySmallSecondary,
+                    ),
                   ],
                 ),
               );
@@ -341,7 +392,18 @@ String _relativeTime(DateTime at) {
 }
 
 const _monthAbbrev = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 /// Concept-image Activity list shows a calendar date ("Jul 4"), not a relative-time string —

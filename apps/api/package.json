@@ -9,10 +9,11 @@
   },
   "scripts": {
     "dev": "node --watch src/server.ts",
-    "start": "node src/server.ts",
+    "start": "node src/db/check-schema.ts && node src/server.ts",
     "migrate": "node src/db/migrate.ts",
     "seed": "node src/seed.ts",
-    "worker": "node src/jobs/worker.ts",
+    "worker": "node src/db/check-schema.ts && node src/jobs/worker.ts",
+    "schema:check": "node src/db/check-schema.ts",
     "test": "node --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },

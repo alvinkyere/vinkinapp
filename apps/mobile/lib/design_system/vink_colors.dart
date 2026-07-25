@@ -6,12 +6,14 @@ import 'package:flutter/widgets.dart';
 class VinkColors {
   const VinkColors._();
 
-  static const ink = Color(0xFF0A0A0B);
-  static const paper = Color(0xFFF7F3EB);
-  static const smoke = Color(0xFF6E6A61);
-  static const blue = Color(0xFF315CFF);
-  static const blueDeep = Color(0xFF2247D6);
+  static const ink = Color(0xFF080B1A);
+  static const paper = Color(0xFFFCFBF8);
+  static const smoke = Color(0xFF6F7280);
+  static const blue = Color(0xFF063EF5);
+  static const blueDeep = Color(0xFF002EC7);
   static const white = Color(0xFFFFFFFF);
+  static const line = Color(0xFFE3E4E8);
+  static const blueSoft = Color(0xFFE8EDFF);
 
   /// App-derived (docs/design/vinkin-design-system.md's "Buttons" section flags this
   /// explicitly): the site has no destructive/error palette to source from — its own

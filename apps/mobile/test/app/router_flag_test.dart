@@ -26,7 +26,8 @@ class _FakeAuthController extends AuthController {
 }
 
 final _testRouterProvider = Provider.family<GoRouter, bool?>(
-  (ref, canonicalCreateFlow) => buildRouter(ref, canonicalCreateFlow: canonicalCreateFlow),
+  (ref, canonicalCreateFlow) =>
+      buildRouter(ref, canonicalCreateFlow: canonicalCreateFlow),
 );
 
 /// Both screens' `resumeVinkId != null` constructor path fires a real `GET
@@ -65,10 +66,18 @@ FakeApiClient _resumeStubClient() => FakeApiClient((method, path, body) async {
       },
     };
   }
-  throw ApiException(statusCode: 404, code: 'UNEXPECTED_CALL', message: '$method $path');
+  throw ApiException(
+    statusCode: 404,
+    code: 'UNEXPECTED_CALL',
+    message: '$method $path',
+  );
 });
 
-Future<GoRouter> _pumpRouter(WidgetTester tester, {required bool? canonicalCreateFlow, required String location}) async {
+Future<GoRouter> _pumpRouter(
+  WidgetTester tester, {
+  required bool? canonicalCreateFlow,
+  required String location,
+}) async {
   final container = ProviderContainer(
     overrides: [
       authControllerProvider.overrideWith(_FakeAuthController.new),
@@ -79,34 +88,67 @@ Future<GoRouter> _pumpRouter(WidgetTester tester, {required bool? canonicalCreat
   final router = container.read(_testRouterProvider(canonicalCreateFlow));
   router.go(location);
   await tester.pumpWidget(
-    UncontrolledProviderScope(container: container, child: MaterialApp.router(routerConfig: router)),
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp.router(routerConfig: router),
+    ),
   );
   await tester.pumpAndSettle();
   return router;
 }
 
 void main() {
-  testWidgets('flag off: /create-vink builds the five-step wizard, unchanged (rollback contract)', (tester) async {
-    await _pumpRouter(tester, canonicalCreateFlow: false, location: '/create-vink');
-    expect(find.byType(CreateVinkScreen), findsOneWidget);
-    expect(find.byType(CanonicalCreateVinkScreen), findsNothing);
-  });
+  testWidgets(
+    'flag off: /create-vink builds the five-step wizard, unchanged (rollback contract)',
+    (tester) async {
+      await _pumpRouter(
+        tester,
+        canonicalCreateFlow: false,
+        location: '/create-vink',
+      );
+      expect(find.byType(CreateVinkScreen), findsOneWidget);
+      expect(find.byType(CanonicalCreateVinkScreen), findsNothing);
+    },
+  );
 
-  testWidgets('flag on: /create-vink builds the canonical two-screen flow', (tester) async {
-    await _pumpRouter(tester, canonicalCreateFlow: true, location: '/create-vink');
+  testWidgets('flag on: /create-vink builds the canonical two-screen flow', (
+    tester,
+  ) async {
+    await _pumpRouter(
+      tester,
+      canonicalCreateFlow: true,
+      location: '/create-vink',
+    );
     expect(find.byType(CanonicalCreateVinkScreen), findsOneWidget);
     expect(find.byType(CreateVinkScreen), findsNothing);
   });
 
-  testWidgets('flag off: the resume route also builds the five-step wizard', (tester) async {
-    await _pumpRouter(tester, canonicalCreateFlow: false, location: '/create-vink/resume/vink-1');
-    final widget = tester.widget<CreateVinkScreen>(find.byType(CreateVinkScreen));
+  testWidgets('flag off: the resume route also builds the five-step wizard', (
+    tester,
+  ) async {
+    await _pumpRouter(
+      tester,
+      canonicalCreateFlow: false,
+      location: '/create-vink/resume/vink-1',
+    );
+    final widget = tester.widget<CreateVinkScreen>(
+      find.byType(CreateVinkScreen),
+    );
     expect(widget.resumeVinkId, 'vink-1');
   });
 
-  testWidgets('flag on: the resume route builds the canonical flow with the same vinkId', (tester) async {
-    await _pumpRouter(tester, canonicalCreateFlow: true, location: '/create-vink/resume/vink-1');
-    final widget = tester.widget<CanonicalCreateVinkScreen>(find.byType(CanonicalCreateVinkScreen));
-    expect(widget.resumeVinkId, 'vink-1');
-  });
+  testWidgets(
+    'flag on: the resume route builds the canonical flow with the same vinkId',
+    (tester) async {
+      await _pumpRouter(
+        tester,
+        canonicalCreateFlow: true,
+        location: '/create-vink/resume/vink-1',
+      );
+      final widget = tester.widget<CanonicalCreateVinkScreen>(
+        find.byType(CanonicalCreateVinkScreen),
+      );
+      expect(widget.resumeVinkId, 'vink-1');
+    },
+  );
 }

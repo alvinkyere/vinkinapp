@@ -13,13 +13,16 @@ import 'package:vinkin_mobile/core/auth/auth_controller.dart';
 import 'package:vinkin_mobile/core/networking/api_config.dart';
 import 'package:vinkin_mobile/core/storage/secure_token_store.dart';
 
-Finder _fieldByLabel(String label) =>
-    find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.labelText == label);
+Finder _fieldByLabel(String label) => find.byWidgetPredicate(
+  (widget) => widget is TextField && widget.decoration?.labelText == label,
+);
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('Ink Progress vessel rises per-contribution, not 0->100 at the end', (tester) async {
+  testWidgets('Ink Progress vessel rises per-contribution, not 0->100 at the end', (
+    tester,
+  ) async {
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final organizerUsername = 'vessel_organizer_$stamp';
     final backend = Dio(BaseOptions(baseUrl: ApiConfig.baseUrl));
@@ -33,7 +36,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(_fieldByLabel('Your name'), 'Vessel Organizer');
     await tester.enterText(_fieldByLabel('Username'), organizerUsername);
-    await tester.enterText(_fieldByLabel('Password (10+ characters)'), 'integration-test-password-1');
+    await tester.enterText(
+      _fieldByLabel('Password (10+ characters)'),
+      'integration-test-password-1',
+    );
     await tester.tap(find.text('CREATE ACCOUNT'));
     await tester.pumpAndSettle();
 
@@ -82,13 +88,17 @@ void main() {
     );
     await binding.takeScreenshot('vessel-02-half');
 
-    final container = ProviderScope.containerOf(tester.element(find.byType(VinkinApp)));
-    final organizerToken = (container.read(authControllerProvider) as AuthSignedIn).accessToken;
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(VinkinApp)),
+    );
+    final organizerToken =
+        (container.read(authControllerProvider) as AuthSignedIn).accessToken;
     final myVinks = await backend.get(
       '/api/v1/vinks',
       options: Options(headers: {'Authorization': 'Bearer $organizerToken'}),
     );
-    final vinkId = ((myVinks.data as Map)['vinks'] as List).first['id'] as String;
+    final vinkId =
+        ((myVinks.data as Map)['vinks'] as List).first['id'] as String;
 
     final memberResponse = await backend.post(
       '/api/v1/auth/login',
@@ -105,7 +115,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 250));
       fullySeen = find.text(r'$80.00 of $80.00 ready').evaluate().isNotEmpty;
     }
-    expect(fullySeen, isTrue, reason: 'the vessel should reach full, live, without navigating away');
+    expect(
+      fullySeen,
+      isTrue,
+      reason: 'the vessel should reach full, live, without navigating away',
+    );
     await binding.takeScreenshot('vessel-03-full');
   });
 }

@@ -28,8 +28,14 @@ final _organizerView = VinkDetailsView(
     totalParticipantCount: 3,
   ),
   timeline: [
-    VinkDetailsTimelineEntry(eventType: 'VinkOpened', at: DateTime.utc(2026, 1, 1)),
-    VinkDetailsTimelineEntry(eventType: 'VinkCompleted', at: DateTime.utc(2026, 1, 2)),
+    VinkDetailsTimelineEntry(
+      eventType: 'VinkOpened',
+      at: DateTime.utc(2026, 1, 1),
+    ),
+    VinkDetailsTimelineEntry(
+      eventType: 'VinkCompleted',
+      at: DateTime.utc(2026, 1, 2),
+    ),
   ],
   merchantSettlementDetail: 'Corner Grocer — settled',
   viewerParticipant: null,
@@ -49,8 +55,14 @@ final _participantView = VinkDetailsView(
     totalParticipantCount: 3,
   ),
   timeline: [
-    VinkDetailsTimelineEntry(eventType: 'VinkOpened', at: DateTime.utc(2026, 1, 1)),
-    VinkDetailsTimelineEntry(eventType: 'VinkCompleted', at: DateTime.utc(2026, 1, 2)),
+    VinkDetailsTimelineEntry(
+      eventType: 'VinkOpened',
+      at: DateTime.utc(2026, 1, 1),
+    ),
+    VinkDetailsTimelineEntry(
+      eventType: 'VinkCompleted',
+      at: DateTime.utc(2026, 1, 2),
+    ),
   ],
   merchantSettlementDetail: 'Corner Grocer — settled',
   viewerParticipant: VinkDetailsViewerParticipant(
@@ -81,20 +93,26 @@ Widget _wrap(String vinkId, VinkDetailsView details) => ProviderScope(
 
 void main() {
   group('D43: organizer view', () {
-    testWidgets('shows only the customer-safe aggregate — never a participant name', (
+    testWidgets(
+      'shows only the customer-safe aggregate — never a participant name',
+      (tester) async {
+        await tester.pumpWidget(_wrap('vink-1', _organizerView));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.textContaining('9000'),
+          findsNothing,
+        ); // sanity: rendered as money, not raw
+        expect(find.text('You organized this Vink'), findsOneWidget);
+        expect(find.textContaining('3 of 3 paid'), findsOneWidget);
+        // No participant identity ever appears for the organizer's own aggregate-only view.
+        expect(find.text('Org'), findsNothing);
+      },
+    );
+
+    testWidgets('shows the merchant settlement detail when present', (
       tester,
     ) async {
-      await tester.pumpWidget(_wrap('vink-1', _organizerView));
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('9000'), findsNothing); // sanity: rendered as money, not raw
-      expect(find.text('You organized this Vink'), findsOneWidget);
-      expect(find.textContaining('3 of 3 paid'), findsOneWidget);
-      // No participant identity ever appears for the organizer's own aggregate-only view.
-      expect(find.text('Org'), findsNothing);
-    });
-
-    testWidgets('shows the merchant settlement detail when present', (tester) async {
       await tester.pumpWidget(_wrap('vink-1', _organizerView));
       await tester.pumpAndSettle();
 
@@ -111,20 +129,24 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Organized by Org'), findsOneWidget);
-        expect(find.text('Paid'), findsOneWidget); // the viewer's own outcome copy
+        expect(
+          find.text('Paid'),
+          findsOneWidget,
+        ); // the viewer's own outcome copy
         expect(find.text('You organized this Vink'), findsNothing);
       },
     );
   });
 
-  testWidgets('D31 REGRESSION: never renders "receipt"/"Receipt" anywhere on this screen', (
-    tester,
-  ) async {
-    await tester.pumpWidget(_wrap('vink-1', _organizerView));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'D31 REGRESSION: never renders "receipt"/"Receipt" anywhere on this screen',
+    (tester) async {
+      await tester.pumpWidget(_wrap('vink-1', _organizerView));
+      await tester.pumpAndSettle();
 
-    expect(find.textContaining('eceipt', findRichText: true), findsNothing);
-  });
+      expect(find.textContaining('eceipt', findRichText: true), findsNothing);
+    },
+  );
 
   testWidgets(
     'D31 REGRESSION holds even with an unclear/recovery-required outcome (support link path)',
@@ -160,29 +182,35 @@ void main() {
     },
   );
 
-  testWidgets('an error surfaces a retry affordance rather than a blank screen', (tester) async {
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          analyticsProvider.overrideWithValue(DebugAnalytics()),
-          vinkDetailsProvider('vink-err').overrideWith((ref) async => throw Exception('boom')),
-        ],
-        child: MaterialApp.router(
-          routerConfig: GoRouter(
-            initialLocation: '/activity/vink-err',
-            routes: [
-              GoRoute(
-                path: '/activity/:vinkId',
-                builder: (context, state) =>
-                    VinkDetailsScreen(vinkId: state.pathParameters['vinkId']!),
-              ),
-            ],
+  testWidgets(
+    'an error surfaces a retry affordance rather than a blank screen',
+    (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            analyticsProvider.overrideWithValue(DebugAnalytics()),
+            vinkDetailsProvider(
+              'vink-err',
+            ).overrideWith((ref) async => throw Exception('boom')),
+          ],
+          child: MaterialApp.router(
+            routerConfig: GoRouter(
+              initialLocation: '/activity/vink-err',
+              routes: [
+                GoRoute(
+                  path: '/activity/:vinkId',
+                  builder: (context, state) => VinkDetailsScreen(
+                    vinkId: state.pathParameters['vinkId']!,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Try again'), findsOneWidget);
-  });
+      expect(find.text('Try again'), findsOneWidget);
+    },
+  );
 }

@@ -18,7 +18,10 @@ Duration reconnectDelay(int attempt, {Random? random}) {
   final rand = random ?? Random();
   final exponentialMs =
       _reconnectBaseDelay.inMilliseconds * pow(2, attempt).clamp(1, 1 << 30);
-  final cappedMs = min(exponentialMs.toDouble(), _reconnectMaxDelay.inMilliseconds.toDouble());
+  final cappedMs = min(
+    exponentialMs.toDouble(),
+    _reconnectMaxDelay.inMilliseconds.toDouble(),
+  );
   final jitteredMs = cappedMs * (0.8 + rand.nextDouble() * 0.4); // ±20%
   return Duration(milliseconds: jitteredMs.round());
 }
@@ -32,8 +35,10 @@ Duration reconnectDelay(int attempt, {Random? random}) {
 /// actually happened) is left to the existing heartbeat/onDone path, since the socket may
 /// still be perfectly healthy across it. A pure, top-level function for the same reason
 /// [reconnectDelay] above is one — unit-testable without any socket/stream involved.
-bool shouldReconnectOnConnectivityChange({required bool? wasOnline, required bool isOnline}) =>
-    isOnline && wasOnline == false;
+bool shouldReconnectOnConnectivityChange({
+  required bool? wasOnline,
+  required bool isOnline,
+}) => isOnline && wasOnline == false;
 
 /// One WebSocket connection per vink lobby screen (Plan §14 channel `vink:{vinkId}`,
 /// PV8's `GET /api/v1/vinks/:vinkId/live`). The client's reconnection duty is small by
@@ -64,8 +69,10 @@ class RealtimeClient {
       onPause: _pauseForBackground,
       onResume: _resumeFromBackground,
     );
-    _connectivitySubscription = (connectivityChanges ?? ConnectivityService().onlineChanges)
-        .listen(_onConnectivityChanged);
+    _connectivitySubscription =
+        (connectivityChanges ?? ConnectivityService().onlineChanges).listen(
+          _onConnectivityChanged,
+        );
   }
 
   final String vinkId;
@@ -102,12 +109,17 @@ class RealtimeClient {
 
   void connect() {
     if (_disposed || _pausedInBackground) return;
-    final uri = Uri.parse('${ApiConfig.wsBaseUrl}/api/v1/vinks/$vinkId/live?token=$accessToken');
+    final uri = Uri.parse(
+      '${ApiConfig.wsBaseUrl}/api/v1/vinks/$vinkId/live?token=$accessToken',
+    );
     // Bounded: without an explicit connectTimeout, WebSocketChannel.connect never times out
     // on its own — a stalled TCP handshake (unreachable host, dropped packets) falls through
     // to the OS's own connect timeout, which can take minutes. ENG1 #1 traced VinkIn's
     // reported indefinite "Connecting…" hang to exactly this.
-    final channel = IOWebSocketChannel.connect(uri, connectTimeout: const Duration(seconds: 8));
+    final channel = IOWebSocketChannel.connect(
+      uri,
+      connectTimeout: const Duration(seconds: 8),
+    );
     _channel = channel;
     channel.ready
         .then((_) {
@@ -181,7 +193,8 @@ class RealtimeClient {
 
   void _resumeFromBackground() {
     _pausedInBackground = false;
-    _attempt = 0; // a resume is a fresh start, not a retry of whatever failed before
+    _attempt =
+        0; // a resume is a fresh start, not a retry of whatever failed before
     connect();
   }
 

@@ -60,7 +60,9 @@ class VinkParticipantRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final nameColor = paymentState == VinkParticipantPaymentState.paid ? VinkColors.ink : VinkColors.smoke.withValues(alpha: 0.85);
+    final nameColor = paymentState == VinkParticipantPaymentState.paid
+        ? VinkColors.ink
+        : VinkColors.smoke.withValues(alpha: 0.85);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
@@ -73,27 +75,38 @@ class VinkParticipantRow extends StatelessWidget {
                 Flexible(
                   child: Text(
                     isSelf ? '$name · You' : name,
-                    style: VinkTypography.participantName.copyWith(color: nameColor),
+                    style: VinkTypography.participantName.copyWith(
+                      color: nameColor,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 if (roleLabel != null) ...[
                   const SizedBox(width: 6),
-                  Text('· $roleLabel', style: VinkTypography.bodySmallSecondary),
+                  Text(
+                    '· $roleLabel',
+                    style: VinkTypography.bodySmallSecondary,
+                  ),
                 ],
               ],
             ),
           ),
           const SizedBox(width: 8),
           if (showAmount) ...[
-            MoneyText(amountMinor, style: VinkTypography.bodySmall.copyWith(fontWeight: FontWeight.w600)),
+            MoneyText(
+              amountMinor,
+              style: VinkTypography.bodySmall.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(width: 12),
           ],
           if (statusWord != null) ...[
             Text(statusWord!, style: VinkTypography.bodySmallSecondary),
             const SizedBox(width: 8),
           ],
-          trailingAction ?? _StatusIndicator(state: paymentState, outline: outlineIndicator),
+          trailingAction ??
+              _StatusIndicator(state: paymentState, outline: outlineIndicator),
         ],
       ),
     );
@@ -116,8 +129,18 @@ class _StatusIndicator extends StatelessWidget {
             width: 22,
             height: 22,
             alignment: Alignment.center,
-            decoration: const BoxDecoration(shape: BoxShape.circle, color: VinkColors.blue),
-            child: const Text('✓', style: TextStyle(color: VinkColors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: VinkColors.blue,
+            ),
+            child: const Text(
+              '✓',
+              style: TextStyle(
+                color: VinkColors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         );
       case VinkParticipantPaymentState.processing:
@@ -135,7 +158,12 @@ class _StatusIndicator extends StatelessWidget {
               )
             : Semantics(
                 label: 'Confirming payment',
-                child: Text('···', style: VinkTypography.monoIndicator.copyWith(color: VinkColors.blue)),
+                child: Text(
+                  '···',
+                  style: VinkTypography.monoIndicator.copyWith(
+                    color: VinkColors.blue,
+                  ),
+                ),
               );
       case VinkParticipantPaymentState.waiting:
         return outline
@@ -146,7 +174,10 @@ class _StatusIndicator extends StatelessWidget {
                   height: 22,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: VinkColors.ink.withValues(alpha: 0.2), width: 1.5),
+                    border: Border.all(
+                      color: VinkColors.ink.withValues(alpha: 0.2),
+                      width: 1.5,
+                    ),
                   ),
                 ),
               )
@@ -154,7 +185,9 @@ class _StatusIndicator extends StatelessWidget {
                 label: 'Waiting',
                 child: Text(
                   '···',
-                  style: VinkTypography.monoIndicator.copyWith(color: VinkColors.smoke.withValues(alpha: 0.5)),
+                  style: VinkTypography.monoIndicator.copyWith(
+                    color: VinkColors.smoke.withValues(alpha: 0.5),
+                  ),
                 ),
               );
     }

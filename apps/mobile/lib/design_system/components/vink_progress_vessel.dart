@@ -35,14 +35,16 @@ class VinkProgressVessel extends StatefulWidget {
   /// text of its own (the caller's own card already shows the amount and a people caption).
   final bool compact;
 
-  double get _fraction =>
-      totalAmountMinor == 0 ? 0.0 : (confirmedAmountMinor / totalAmountMinor).clamp(0.0, 1.0);
+  double get _fraction => totalAmountMinor == 0
+      ? 0.0
+      : (confirmedAmountMinor / totalAmountMinor).clamp(0.0, 1.0);
 
   @override
   State<VinkProgressVessel> createState() => _VinkProgressVesselState();
 }
 
-class _VinkProgressVesselState extends State<VinkProgressVessel> with TickerProviderStateMixin {
+class _VinkProgressVesselState extends State<VinkProgressVessel>
+    with TickerProviderStateMixin {
   late final AnimationController _waveController;
   late final AnimationController _celebrationController;
   bool _celebrated = false;
@@ -50,8 +52,13 @@ class _VinkProgressVesselState extends State<VinkProgressVessel> with TickerProv
   @override
   void initState() {
     super.initState();
-    _waveController = AnimationController(vsync: this, duration: const Duration(seconds: 4))
-      ..repeat();
+    // The approved reference is a calm, still ink vessel. Keeping this controller
+    // stationary also avoids a permanently animating screen (and lets accessibility
+    // tooling/tests reach a settled frame); only the one-shot completion celebration moves.
+    _waveController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    );
     _celebrationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -64,7 +71,8 @@ class _VinkProgressVesselState extends State<VinkProgressVessel> with TickerProv
     super.didUpdateWidget(old);
     if (widget._fraction >= 1.0 && !_celebrated) {
       _celebrated = true;
-      final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+      final reduceMotion =
+          MediaQuery.maybeOf(context)?.disableAnimations ?? false;
       if (!reduceMotion) _celebrationController.forward(from: 0);
     } else if (widget._fraction < 1.0) {
       _celebrated = false;
@@ -80,7 +88,8 @@ class _VinkProgressVesselState extends State<VinkProgressVessel> with TickerProv
 
   @override
   Widget build(BuildContext context) {
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final headline =
         '${MoneyText.format(widget.confirmedAmountMinor)} of ${MoneyText.format(widget.totalAmountMinor)} ready';
     final semanticsLabel = widget.waitingClause == null
@@ -106,13 +115,20 @@ class _VinkProgressVesselState extends State<VinkProgressVessel> with TickerProv
                 Container(color: VinkColors.ink.withValues(alpha: 0.08)),
                 TweenAnimationBuilder<double>(
                   tween: Tween(begin: visualFraction, end: visualFraction),
-                  duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 700),
+                  duration: reduceMotion
+                      ? Duration.zero
+                      : const Duration(milliseconds: 700),
                   curve: Curves.easeOutCubic,
-                  builder: (context, level, child) =>
-                      FractionallySizedBox(widthFactor: level, alignment: Alignment.centerLeft, child: child),
+                  builder: (context, level, child) => FractionallySizedBox(
+                    widthFactor: level,
+                    alignment: Alignment.centerLeft,
+                    child: child,
+                  ),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(colors: [VinkColors.blue, VinkColors.blueDeep]),
+                      gradient: LinearGradient(
+                        colors: [VinkColors.blue, VinkColors.blueDeep],
+                      ),
                     ),
                   ),
                 ),
@@ -133,15 +149,22 @@ class _VinkProgressVesselState extends State<VinkProgressVessel> with TickerProv
             aspectRatio: 1.15,
             child: TweenAnimationBuilder<double>(
               tween: Tween(begin: visualFraction, end: visualFraction),
-              duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 700),
+              duration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 700),
               curve: Curves.easeOutCubic,
               builder: (context, level, _) => AnimatedBuilder(
-                animation: Listenable.merge([_waveController, _celebrationController]),
+                animation: Listenable.merge([
+                  _waveController,
+                  _celebrationController,
+                ]),
                 builder: (context, _) => CustomPaint(
                   size: Size.infinite,
                   painter: _InkBowlPainter(
                     level: level,
-                    wavePhase: reduceMotion ? 0 : _waveController.value * 2 * math.pi,
+                    wavePhase: reduceMotion
+                        ? 0
+                        : _waveController.value * 2 * math.pi,
                     sparkle: _celebrationController.value,
                     animateWave: !reduceMotion,
                   ),
@@ -179,10 +202,7 @@ class _VinkProgressVesselState extends State<VinkProgressVessel> with TickerProv
         vessel,
         if (widget.waitingClause != null) ...[
           const SizedBox(height: 12),
-          Text(
-            widget.waitingClause!,
-            style: VinkTypography.bodySmallSecondary,
-          ),
+          Text(widget.waitingClause!, style: VinkTypography.bodySmallSecondary),
         ],
       ],
     );
@@ -222,7 +242,12 @@ class _InkBowlPainter extends CustomPainter {
     path.lineTo(w - topRadius, 0);
     path.quadraticBezierTo(w, 0, w, topRadius);
     path.lineTo(w, h - bottomRadius);
-    path.quadraticBezierTo(w, h - bottomRadius * 0.3, w - sideInset, h - bottomRadius * 0.15);
+    path.quadraticBezierTo(
+      w,
+      h - bottomRadius * 0.3,
+      w - sideInset,
+      h - bottomRadius * 0.15,
+    );
     path.quadraticBezierTo(w / 2, h, sideInset, h - bottomRadius * 0.15);
     path.quadraticBezierTo(0, h - bottomRadius * 0.3, 0, h - bottomRadius);
     path.close();
@@ -235,7 +260,10 @@ class _InkBowlPainter extends CustomPainter {
 
     canvas.save();
     canvas.clipPath(bowl);
-    canvas.drawRect(Offset.zero & size, Paint()..color = VinkColors.ink.withValues(alpha: 0.03));
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = VinkColors.ink.withValues(alpha: 0.03),
+    );
 
     final waveHeight = animateWave ? size.height * 0.05 : 0.0;
     final waveLength = size.width / 1.5;
@@ -247,7 +275,8 @@ class _InkBowlPainter extends CustomPainter {
       final y =
           baseY +
           math.sin((x / waveLength * 2 * math.pi) + wavePhase) * waveHeight +
-          math.sin((x / waveLength * 2 * math.pi * 1.7) - wavePhase * 1.3) * (waveHeight * 0.4);
+          math.sin((x / waveLength * 2 * math.pi * 1.7) - wavePhase * 1.3) *
+              (waveHeight * 0.4);
       liquid.lineTo(x, y);
     }
     liquid.lineTo(size.width, size.height);
@@ -266,7 +295,8 @@ class _InkBowlPainter extends CustomPainter {
     // A light droplet accent, only mid-fill (not empty, not full) — matches the reference
     // design's floating-droplet texture without ever reading as a physics simulation.
     if (level > 0.06 && level < 0.98) {
-      final dropletPaint = Paint()..color = VinkColors.white.withValues(alpha: 0.55);
+      final dropletPaint = Paint()
+        ..color = VinkColors.white.withValues(alpha: 0.55);
       for (var i = 0; i < 4; i++) {
         final dx = size.width * (0.16 + i * 0.22);
         final bob = math.sin(wavePhase + i * 1.7) * size.height * 0.025;
@@ -281,12 +311,14 @@ class _InkBowlPainter extends CustomPainter {
     // across `_celebrationController`'s single forward run, never a repeating flourish.
     if (sparkle > 0) {
       final sparkleOpacity = (math.sin(sparkle * math.pi)).clamp(0.0, 1.0);
-      final sparklePaint = Paint()..color = VinkColors.white.withValues(alpha: sparkleOpacity * 0.85);
+      final sparklePaint = Paint()
+        ..color = VinkColors.white.withValues(alpha: sparkleOpacity * 0.85);
       for (var i = 0; i < 6; i++) {
         final angle = (i / 6) * 2 * math.pi;
         final radius = size.width * (0.2 + sparkle * 0.18);
         final center = Offset(size.width / 2, size.height * 0.4);
-        final point = center + Offset(math.cos(angle), math.sin(angle) * 0.7) * radius;
+        final point =
+            center + Offset(math.cos(angle), math.sin(angle) * 0.7) * radius;
         canvas.drawCircle(point, size.width * 0.016, sparklePaint);
       }
     }
@@ -335,7 +367,10 @@ class VinkVesselAmbientDots extends StatelessWidget {
   Widget _dot(double size, double opacity) => Container(
     width: size,
     height: size,
-    decoration: BoxDecoration(shape: BoxShape.circle, color: VinkColors.blue.withValues(alpha: opacity)),
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: VinkColors.blue.withValues(alpha: opacity),
+    ),
   );
 }
 
@@ -348,9 +383,11 @@ String organizerWaitingClause({
   required int totalAmountMinor,
   required List<String> unconfirmedNames,
 }) {
-  if (confirmedAmountMinor >= totalAmountMinor && totalAmountMinor > 0) return "Everyone's ready";
+  if (confirmedAmountMinor >= totalAmountMinor && totalAmountMinor > 0)
+    return "Everyone's ready";
   if (unconfirmedNames.isEmpty) return 'Waiting for everyone';
-  if (unconfirmedNames.length == 1) return 'Waiting for ${unconfirmedNames.first}';
+  if (unconfirmedNames.length == 1)
+    return 'Waiting for ${unconfirmedNames.first}';
   if (unconfirmedNames.length == 2) {
     return 'Waiting for ${unconfirmedNames[0]} and ${unconfirmedNames[1]}';
   }
@@ -367,7 +404,8 @@ String participantSafeWaitingClause({
   required int confirmedParticipantCount,
   required int totalParticipantCount,
 }) {
-  if (confirmedAmountMinor >= totalAmountMinor && totalAmountMinor > 0) return "Everyone's ready";
+  if (confirmedAmountMinor >= totalAmountMinor && totalAmountMinor > 0)
+    return "Everyone's ready";
   final remaining = totalParticipantCount - confirmedParticipantCount;
   if (confirmedParticipantCount == 0) return 'Waiting for everyone';
   if (remaining <= 0) return "Everyone's ready";

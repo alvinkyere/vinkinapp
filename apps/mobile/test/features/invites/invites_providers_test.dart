@@ -12,7 +12,12 @@ import 'package:vinkin_mobile/features/invites/invites_providers.dart';
 
 class _FakeVinkRepository extends VinkRepository {
   _FakeVinkRepository({this.invites, this.error})
-    : super(ApiClient(tokenStore: SecureTokenStore(), appVersion: Future.value('test')));
+    : super(
+        ApiClient(
+          tokenStore: SecureTokenStore(),
+          appVersion: Future.value('test'),
+        ),
+      );
 
   final List<PendingInvite>? invites;
   final Object? error;
@@ -36,7 +41,9 @@ PendingInvite _invite(String vinkId) => PendingInvite(
 void main() {
   test('returns the repository\'s own pending invites', () async {
     final repository = _FakeVinkRepository(invites: [_invite('vink-1')]);
-    final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
+    final container = ProviderContainer(
+      overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+    );
     addTearDown(container.dispose);
 
     final result = await container.read(invitesProvider.future);
@@ -47,7 +54,9 @@ void main() {
 
   test('an empty list is a valid, non-error result', () async {
     final repository = _FakeVinkRepository(invites: const []);
-    final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
+    final container = ProviderContainer(
+      overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+    );
     addTearDown(container.dispose);
 
     final result = await container.read(invitesProvider.future);
@@ -57,20 +66,27 @@ void main() {
 
   test('a failing fetch surfaces as a provider error, not a crash', () async {
     final repository = _FakeVinkRepository(error: Exception('boom'));
-    final container = ProviderContainer(overrides: [vinkRepositoryProvider.overrideWithValue(repository)]);
+    final container = ProviderContainer(
+      overrides: [vinkRepositoryProvider.overrideWithValue(repository)],
+    );
     addTearDown(container.dispose);
 
     await expectLater(container.read(invitesProvider.future), throwsException);
   });
 
-  test('dismissedInviteIdsProvider starts empty and accumulates dismissed ids', () {
-    final container = ProviderContainer();
-    addTearDown(container.dispose);
+  test(
+    'dismissedInviteIdsProvider starts empty and accumulates dismissed ids',
+    () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
 
-    expect(container.read(dismissedInviteIdsProvider), isEmpty);
+      expect(container.read(dismissedInviteIdsProvider), isEmpty);
 
-    container.read(dismissedInviteIdsProvider.notifier).update((state) => {...state, 'vink-1'});
+      container
+          .read(dismissedInviteIdsProvider.notifier)
+          .update((state) => {...state, 'vink-1'});
 
-    expect(container.read(dismissedInviteIdsProvider), {'vink-1'});
-  });
+      expect(container.read(dismissedInviteIdsProvider), {'vink-1'});
+    },
+  );
 }

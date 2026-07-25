@@ -6,7 +6,12 @@ import '../vink_typography.dart';
 /// header, relying on spacing and the fixed/transparent-to-solid scroll transition instead.
 /// This app keeps it simplest: flat, no elevation, ink title text.
 class VinkAppBar extends StatelessWidget implements PreferredSizeWidget {
-  const VinkAppBar({super.key, required this.title, this.leading, this.actions});
+  const VinkAppBar({
+    super.key,
+    required this.title,
+    this.leading,
+    this.actions,
+  });
 
   final String title;
   final Widget? leading;

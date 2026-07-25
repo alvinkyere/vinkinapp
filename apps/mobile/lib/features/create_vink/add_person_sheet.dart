@@ -62,7 +62,10 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
     });
     try {
       final client = ref.read(apiClientProvider);
-      final participant = await client.post('/api/v1/vinks/${widget.vinkId}/participants', body: {'username': username});
+      final participant = await client.post(
+        '/api/v1/vinks/${widget.vinkId}/participants',
+        body: {'username': username},
+      );
       if (!mounted) return;
       Navigator.of(context).pop(
         PersonEntry(
@@ -106,7 +109,10 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
       _guestInviteIdempotencyKey ??= newIdempotencyKey();
       final response = await client.post(
         '/api/v1/vinks/${widget.vinkId}/guests',
-        body: {'displayName': displayName, 'invitationIdempotencyKey': _guestInviteIdempotencyKey},
+        body: {
+          'displayName': displayName,
+          'invitationIdempotencyKey': _guestInviteIdempotencyKey,
+        },
       );
       final participant = response['participant'] as Map<String, dynamic>;
       setState(() {
@@ -152,7 +158,10 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
       children: [
         Text('Add someone', style: VinkTypography.title),
         const SizedBox(height: VinkSpacing.xs),
-        Text('Enter their VinkIn username.', style: VinkTypography.bodySecondary),
+        Text(
+          'Enter their VinkIn username.',
+          style: VinkTypography.bodySecondary,
+        ),
         const SizedBox(height: VinkSpacing.lg),
         VinkTextField(
           label: 'Username',
@@ -161,9 +170,16 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
           textInputAction: TextInputAction.done,
           onSubmitted: (_) => _lookupAndAdd(),
         ),
-        if (_error != null) ...[const SizedBox(height: VinkSpacing.sm), VinkInlineError(message: _error!)],
+        if (_error != null) ...[
+          const SizedBox(height: VinkSpacing.sm),
+          VinkInlineError(message: _error!),
+        ],
         const SizedBox(height: VinkSpacing.lg),
-        VinkPrimaryButton(label: 'Add', loading: _busy, onPressed: _lookupAndAdd),
+        VinkPrimaryButton(
+          label: 'Add',
+          loading: _busy,
+          onPressed: _lookupAndAdd,
+        ),
       ],
     );
   }
@@ -222,11 +238,21 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
           textInputAction: TextInputAction.done,
           onSubmitted: (_) => _addAsGuest(),
         ),
-        if (_error != null) ...[const SizedBox(height: VinkSpacing.sm), VinkInlineError(message: _error!)],
+        if (_error != null) ...[
+          const SizedBox(height: VinkSpacing.sm),
+          VinkInlineError(message: _error!),
+        ],
         const SizedBox(height: VinkSpacing.lg),
-        VinkPrimaryButton(label: 'Add guest', loading: _busy, onPressed: _addAsGuest),
+        VinkPrimaryButton(
+          label: 'Add guest',
+          loading: _busy,
+          onPressed: _addAsGuest,
+        ),
         const SizedBox(height: VinkSpacing.sm),
-        VinkTextButton(label: 'Back', onPressed: () => setState(() => _phase = _Phase.notFound)),
+        VinkTextButton(
+          label: 'Back',
+          onPressed: () => setState(() => _phase = _Phase.notFound),
+        ),
       ],
     );
   }
@@ -240,25 +266,42 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
       children: [
         Text('${guest.displayName} is in', style: VinkTypography.title),
         const SizedBox(height: VinkSpacing.xs),
-        Text('Send them this link so they can join and pay their share — no account needed.', style: VinkTypography.bodySecondary),
+        Text(
+          'Send them this link so they can join and pay their share — no account needed.',
+          style: VinkTypography.bodySecondary,
+        ),
         const SizedBox(height: VinkSpacing.lg),
         Center(
           child: DecoratedBox(
-            decoration: BoxDecoration(color: VinkColors.white, borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(
+              color: VinkColors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(VinkSpacing.md),
-              child: QrImageView(data: link, size: 160, backgroundColor: VinkColors.white),
+              child: QrImageView(
+                data: link,
+                size: 160,
+                backgroundColor: VinkColors.white,
+              ),
             ),
           ),
         ),
         const SizedBox(height: VinkSpacing.md),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.md, vertical: VinkSpacing.sm + 2),
+          padding: const EdgeInsets.symmetric(
+            horizontal: VinkSpacing.md,
+            vertical: VinkSpacing.sm + 2,
+          ),
           decoration: BoxDecoration(
             color: VinkColors.ink.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Text(link, style: VinkTypography.bodySmall, overflow: TextOverflow.ellipsis),
+          child: Text(
+            link,
+            style: VinkTypography.bodySmall,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
         const SizedBox(height: VinkSpacing.md),
         Row(
@@ -269,19 +312,27 @@ class _AddPersonSheetState extends ConsumerState<AddPersonSheet> {
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: link));
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied.')));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Link copied.')),
+                    );
                   }
                 },
               ),
             ),
             const SizedBox(width: VinkSpacing.sm),
             Expanded(
-              child: VinkSecondaryButton(label: 'Share', onPressed: () => Share.share(link)),
+              child: VinkSecondaryButton(
+                label: 'Share',
+                onPressed: () => Share.share(link),
+              ),
             ),
           ],
         ),
         const SizedBox(height: VinkSpacing.md),
-        VinkPrimaryButton(label: 'Done', onPressed: () => Navigator.of(context).pop(guest)),
+        VinkPrimaryButton(
+          label: 'Done',
+          onPressed: () => Navigator.of(context).pop(guest),
+        ),
       ],
     );
   }

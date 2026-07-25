@@ -15,9 +15,15 @@ import 'package:vinkin_mobile/core/storage/secure_token_store.dart';
 class FakeApiClient extends ApiClient {
   FakeApiClient(this.handler) : super(tokenStore: SecureTokenStore());
 
-  final Future<Map<String, dynamic>> Function(String method, String path, Map<String, dynamic>? body) handler;
+  final Future<Map<String, dynamic>> Function(
+    String method,
+    String path,
+    Map<String, dynamic>? body,
+  )
+  handler;
 
-  final List<({String method, String path, Map<String, dynamic>? body})> calls = [];
+  final List<({String method, String path, Map<String, dynamic>? body})> calls =
+      [];
 
   // ENG3: `cancelToken` is accepted (matching `ApiClient`'s real signature, required for a
   // valid override) but never consulted — this fake bypasses `Dio` entirely, so there is no
@@ -29,24 +35,41 @@ class FakeApiClient extends ApiClient {
       _dispatch('GET', path, null);
 
   @override
-  Future<Map<String, dynamic>> post(String path, {Map<String, dynamic>? body, CancelToken? cancelToken}) =>
-      _dispatch('POST', path, body);
+  Future<Map<String, dynamic>> post(
+    String path, {
+    Map<String, dynamic>? body,
+    CancelToken? cancelToken,
+  }) => _dispatch('POST', path, body);
 
   @override
-  Future<Map<String, dynamic>> put(String path, {Map<String, dynamic>? body, CancelToken? cancelToken}) =>
-      _dispatch('PUT', path, body);
+  Future<Map<String, dynamic>> put(
+    String path, {
+    Map<String, dynamic>? body,
+    CancelToken? cancelToken,
+  }) => _dispatch('PUT', path, body);
 
   @override
-  Future<Map<String, dynamic>> patch(String path, {Map<String, dynamic>? body, CancelToken? cancelToken}) =>
-      _dispatch('PATCH', path, body);
+  Future<Map<String, dynamic>> patch(
+    String path, {
+    Map<String, dynamic>? body,
+    CancelToken? cancelToken,
+  }) => _dispatch('PATCH', path, body);
 
   @override
-  Future<void> delete(String path, {CancelToken? cancelToken}) => _dispatch('DELETE', path, null).then((_) {});
+  Future<void> delete(String path, {CancelToken? cancelToken}) =>
+      _dispatch('DELETE', path, null).then((_) {});
 
   @override
-  Future<List<dynamic>> getList(String path, {CancelToken? cancelToken}) async => const [];
+  Future<List<dynamic>> getList(
+    String path, {
+    CancelToken? cancelToken,
+  }) async => const [];
 
-  Future<Map<String, dynamic>> _dispatch(String method, String path, Map<String, dynamic>? body) async {
+  Future<Map<String, dynamic>> _dispatch(
+    String method,
+    String path,
+    Map<String, dynamic>? body,
+  ) async {
     calls.add((method: method, path: path, body: body));
     return handler(method, path, body);
   }

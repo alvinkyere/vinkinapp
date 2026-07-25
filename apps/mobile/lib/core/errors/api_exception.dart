@@ -2,7 +2,11 @@
 /// DomainError handlers — apps/api/src/app.ts, modules/*/routes.ts) into one exception
 /// type screens can branch on by `code`, never by parsing prose.
 class ApiException implements Exception {
-  const ApiException({required this.statusCode, required this.code, this.message});
+  const ApiException({
+    required this.statusCode,
+    required this.code,
+    this.message,
+  });
 
   final int statusCode;
   final String code;

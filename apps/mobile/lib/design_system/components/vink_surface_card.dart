@@ -13,7 +13,12 @@ import '../vink_spacing.dart';
 /// the single most important card on a screen (the live lobby's Vink card); every other
 /// card uses the quieter default.
 class VinkSurfaceCard extends StatelessWidget {
-  const VinkSurfaceCard({super.key, required this.child, this.elevated = false, this.padding});
+  const VinkSurfaceCard({
+    super.key,
+    required this.child,
+    this.elevated = false,
+    this.padding,
+  });
 
   final Widget child;
   final bool elevated;
@@ -24,8 +29,9 @@ class VinkSurfaceCard extends StatelessWidget {
     return Container(
       padding: padding ?? const EdgeInsets.all(VinkSpacing.cardPadding),
       decoration: BoxDecoration(
-        color: VinkColors.white,
+        color: VinkColors.paper,
         borderRadius: BorderRadius.circular(VinkRadius.card),
+        border: Border.all(color: VinkColors.line),
         boxShadow: elevated ? VinkShadows.cardElevated : VinkShadows.card,
       ),
       child: child,

@@ -37,9 +37,13 @@ class _CapturingAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     lastOptions = options;
-    return ResponseBody.fromString('{}', 200, headers: {
-      Headers.contentTypeHeader: [Headers.jsonContentType],
-    });
+    return ResponseBody.fromString(
+      '{}',
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
   }
 
   @override
@@ -68,75 +72,112 @@ void main() {
     buildSignature: '',
   );
 
-  test('ENG3: every request carries the running app version in x-app-version', () async {
-    final adapter = _CapturingAdapter();
-    final dio = Dio(BaseOptions(baseUrl: 'http://localhost'))..httpClientAdapter = adapter;
-    final client = ApiClient(
-      tokenStore: SecureTokenStore(),
-      dio: dio,
-      appVersion: Future.value('1.4.2'),
-    );
+  test(
+    'ENG3: every request carries the running app version in x-app-version',
+    () async {
+      final adapter = _CapturingAdapter();
+      final dio = Dio(BaseOptions(baseUrl: 'http://localhost'))
+        ..httpClientAdapter = adapter;
+      final client = ApiClient(
+        tokenStore: SecureTokenStore(),
+        dio: dio,
+        appVersion: Future.value('1.4.2'),
+      );
 
-    await client.get('/api/v1/vinks');
+      await client.get('/api/v1/vinks');
 
-    expect(adapter.lastOptions?.headers['x-app-version'], '1.4.2');
-  });
+      expect(adapter.lastOptions?.headers['x-app-version'], '1.4.2');
+    },
+  );
 
-  test('ENG3: a cancelled request maps to ApiException.isCancelled — never a raw DioException', () async {
-    final dio = Dio(BaseOptions(baseUrl: 'http://localhost'))
-      ..httpClientAdapter = _NeverRespondingAdapter();
-    final client = ApiClient(tokenStore: SecureTokenStore(), dio: dio);
-    final cancelToken = CancelToken();
+  test(
+    'ENG3: a cancelled request maps to ApiException.isCancelled — never a raw DioException',
+    () async {
+      final dio = Dio(BaseOptions(baseUrl: 'http://localhost'))
+        ..httpClientAdapter = _NeverRespondingAdapter();
+      final client = ApiClient(tokenStore: SecureTokenStore(), dio: dio);
+      final cancelToken = CancelToken();
 
-    final future = client.get('/api/v1/vinks', cancelToken: cancelToken);
-    cancelToken.cancel();
+      final future = client.get('/api/v1/vinks', cancelToken: cancelToken);
+      cancelToken.cancel();
 
-    await expectLater(
-      future,
-      throwsA(
-        isA<ApiException>()
-            .having((error) => error.isCancelled, 'isCancelled', isTrue)
-            .having((error) => error.isAuthError, 'isAuthError', isFalse),
-      ),
-    );
-  });
+      await expectLater(
+        future,
+        throwsA(
+          isA<ApiException>()
+              .having((error) => error.isCancelled, 'isCancelled', isTrue)
+              .having((error) => error.isAuthError, 'isAuthError', isFalse),
+        ),
+      );
+    },
+  );
 
-  test('ENG3: cancellation is threaded through post/put/patch/delete/getList too', () async {
-    final dio = Dio(BaseOptions(baseUrl: 'http://localhost'))
-      ..httpClientAdapter = _NeverRespondingAdapter();
-    final client = ApiClient(tokenStore: SecureTokenStore(), dio: dio);
+  test(
+    'ENG3: cancellation is threaded through post/put/patch/delete/getList too',
+    () async {
+      final dio = Dio(BaseOptions(baseUrl: 'http://localhost'))
+        ..httpClientAdapter = _NeverRespondingAdapter();
+      final client = ApiClient(tokenStore: SecureTokenStore(), dio: dio);
 
-    Future<void> expectCancelled(Future<Object?> Function(CancelToken token) start) async {
-      final token = CancelToken();
-      final future = start(token);
-      token.cancel();
-      await expectLater(future, throwsA(isA<ApiException>().having((e) => e.isCancelled, 'isCancelled', isTrue)));
-    }
+      Future<void> expectCancelled(
+        Future<Object?> Function(CancelToken token) start,
+      ) async {
+        final token = CancelToken();
+        final future = start(token);
+        token.cancel();
+        await expectLater(
+          future,
+          throwsA(
+            isA<ApiException>().having(
+              (e) => e.isCancelled,
+              'isCancelled',
+              isTrue,
+            ),
+          ),
+        );
+      }
 
-    await expectCancelled((token) => client.post('/api/v1/vinks', cancelToken: token));
-    await expectCancelled((token) => client.put('/api/v1/vinks/x', cancelToken: token));
-    await expectCancelled((token) => client.patch('/api/v1/vinks/x', cancelToken: token));
-    await expectCancelled((token) => client.delete('/api/v1/vinks/x', cancelToken: token));
-    await expectCancelled((token) => client.getList('/api/v1/vinks/x/activity', cancelToken: token));
-  });
+      await expectCancelled(
+        (token) => client.post('/api/v1/vinks', cancelToken: token),
+      );
+      await expectCancelled(
+        (token) => client.put('/api/v1/vinks/x', cancelToken: token),
+      );
+      await expectCancelled(
+        (token) => client.patch('/api/v1/vinks/x', cancelToken: token),
+      );
+      await expectCancelled(
+        (token) => client.delete('/api/v1/vinks/x', cancelToken: token),
+      );
+      await expectCancelled(
+        (token) =>
+            client.getList('/api/v1/vinks/x/activity', cancelToken: token),
+      );
+    },
+  );
 
-  test('ENG3: omitting cancelToken never spuriously classifies a failure as cancelled', () async {
-    // Whatever this request actually fails with in a bare (non-widget) test environment —
-    // `flutter_secure_storage`'s platform channel has no test binding here, so the token-read
-    // interceptor itself is the realistic failure source, not the adapter this test doesn't
-    // even reach — the one thing that must never be true is `isCancelled`, since nothing
-    // cancelled anything.
-    final dio = Dio(BaseOptions(baseUrl: 'http://localhost'))
-      ..httpClientAdapter = _NeverRespondingAdapter();
-    final client = ApiClient(tokenStore: SecureTokenStore(), dio: dio);
+  test(
+    'ENG3: omitting cancelToken never spuriously classifies a failure as cancelled',
+    () async {
+      // Whatever this request actually fails with in a bare (non-widget) test environment —
+      // `flutter_secure_storage`'s platform channel has no test binding here, so the token-read
+      // interceptor itself is the realistic failure source, not the adapter this test doesn't
+      // even reach — the one thing that must never be true is `isCancelled`, since nothing
+      // cancelled anything.
+      final dio = Dio(BaseOptions(baseUrl: 'http://localhost'))
+        ..httpClientAdapter = _NeverRespondingAdapter();
+      final client = ApiClient(tokenStore: SecureTokenStore(), dio: dio);
 
-    try {
-      await client.get('/api/v1/vinks').timeout(const Duration(milliseconds: 200));
-    } on ApiException catch (error) {
-      expect(error.isCancelled, isFalse);
-    } on TimeoutException {
-      // Reached the never-responding adapter and is still genuinely pending — also fine,
-      // also proves no spurious cancellation occurred.
-    }
-  });
+      try {
+        await client
+            .get('/api/v1/vinks')
+            .timeout(const Duration(milliseconds: 200));
+      } on ApiException catch (error) {
+        expect(error.isCancelled, isFalse);
+      } on TimeoutException {
+        // Reached the never-responding adapter and is still genuinely pending — also fine,
+        // also proves no spurious cancellation occurred.
+      }
+    },
+  );
 }

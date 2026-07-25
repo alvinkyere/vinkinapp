@@ -25,7 +25,9 @@ import 'package:vinkin_mobile/core/storage/secure_token_store.dart';
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('I2C: a participant sees the Lobby update live, with no manual reload', (tester) async {
+  testWidgets('I2C: a participant sees the Lobby update live, with no manual reload', (
+    tester,
+  ) async {
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final organizerUsername = 'i2c_organizer_$stamp';
     final backend = Dio(BaseOptions(baseUrl: ApiConfig.baseUrl));
@@ -76,13 +78,17 @@ void main() {
     await tester.pumpAndSettle();
     await binding.takeScreenshot('i2c-01-organizer-opened');
 
-    final container = ProviderScope.containerOf(tester.element(find.byType(VinkinApp)));
-    final organizerToken = (container.read(authControllerProvider) as AuthSignedIn).accessToken;
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(VinkinApp)),
+    );
+    final organizerToken =
+        (container.read(authControllerProvider) as AuthSignedIn).accessToken;
     final myVinks = await backend.get(
       '/api/v1/vinks',
       options: Options(headers: {'Authorization': 'Bearer $organizerToken'}),
     );
-    final vinkId = ((myVinks.data as Map)['vinks'] as List).first['id'] as String;
+    final vinkId =
+        ((myVinks.data as Map)['vinks'] as List).first['id'] as String;
 
     // --- Sign out, sign back in as the member — the ONE with something to reach here --------
     await SecureTokenStore().clear();
@@ -129,7 +135,8 @@ void main() {
     expect(
       updatedSeen,
       isTrue,
-      reason: 'the participant Lobby should reflect the organizer\'s contribution live, with no manual reload',
+      reason:
+          'the participant Lobby should reflect the organizer\'s contribution live, with no manual reload',
     );
     await binding.takeScreenshot('i2c-03-participant-lobby-live-update');
 
@@ -142,9 +149,21 @@ void main() {
     await tester.pumpAndSettle();
     await binding.takeScreenshot('i2d-04-participant-activity');
 
-    expect(find.text('Nothing here yet'), findsNothing, reason: 'real activity exists for this vink');
-    expect(find.text("Couldn't load activity."), findsNothing, reason: 'the crash-bug regression proof');
+    expect(
+      find.text('Nothing here yet'),
+      findsNothing,
+      reason: 'real activity exists for this vink',
+    );
+    expect(
+      find.text("Couldn't load activity."),
+      findsNothing,
+      reason: 'the crash-bug regression proof',
+    );
     expect(find.textContaining('is open for contributions'), findsWidgets);
-    expect(find.textContaining('You started'), findsNothing, reason: 'organizer-only framing must never reach a participant');
+    expect(
+      find.textContaining('You started'),
+      findsNothing,
+      reason: 'organizer-only framing must never reach a participant',
+    );
   });
 }

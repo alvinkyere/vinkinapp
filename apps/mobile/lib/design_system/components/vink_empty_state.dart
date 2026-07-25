@@ -6,7 +6,12 @@ import '../vink_typography.dart';
 /// Every empty state must offer a next action (design correction requirement) — this
 /// widget makes that structurally impossible to skip by requiring [action].
 class VinkEmptyState extends StatelessWidget {
-  const VinkEmptyState({super.key, required this.title, required this.message, required this.action});
+  const VinkEmptyState({
+    super.key,
+    required this.title,
+    required this.message,
+    required this.action,
+  });
 
   final String title;
   final String message;
@@ -15,11 +20,18 @@ class VinkEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: VinkSpacing.xl, vertical: VinkSpacing.xxl),
+      padding: const EdgeInsets.symmetric(
+        horizontal: VinkSpacing.xl,
+        vertical: VinkSpacing.xxl,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(title, style: VinkTypography.cardTitle, textAlign: TextAlign.center),
+          Text(
+            title,
+            style: VinkTypography.cardTitle,
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: VinkSpacing.sm),
           Text(
             message,
@@ -50,11 +62,18 @@ class VinkLoadingState extends StatelessWidget {
           const SizedBox(
             width: 28,
             height: 28,
-            child: CircularProgressIndicator(strokeWidth: 2.5, color: VinkColors.blue),
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: VinkColors.blue,
+            ),
           ),
           if (message != null) ...[
             const SizedBox(height: VinkSpacing.md),
-            Text(message!, style: VinkTypography.bodySecondary, textAlign: TextAlign.center),
+            Text(
+              message!,
+              style: VinkTypography.bodySecondary,
+              textAlign: TextAlign.center,
+            ),
           ],
         ],
       ),

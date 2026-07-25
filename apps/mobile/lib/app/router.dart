@@ -33,8 +33,14 @@ import 'nav_shell.dart';
 /// Invites feature (D44) adds [invitesEnabled] the same way — it changes the STATEFUL SHELL'S
 /// OWN BRANCH COUNT (a 4th `/invites` branch), not just a visual toggle, so `VinkNavShell`
 /// must be told the exact same resolved value this function used.
-GoRouter buildRouter(Ref ref, {bool? canonicalCreateFlow, bool? homeActivityV2, bool? invitesEnabled}) {
-  final useCanonicalCreateFlow = canonicalCreateFlow ?? FeatureFlags.canonicalCreateFlow;
+GoRouter buildRouter(
+  Ref ref, {
+  bool? canonicalCreateFlow,
+  bool? homeActivityV2,
+  bool? invitesEnabled,
+}) {
+  final useCanonicalCreateFlow =
+      canonicalCreateFlow ?? FeatureFlags.canonicalCreateFlow;
   final useHomeActivityV2 = homeActivityV2 ?? FeatureFlags.homeActivityV2;
   final useInvitesEnabled = invitesEnabled ?? FeatureFlags.invitesEnabled;
   return GoRouter(
@@ -78,7 +84,9 @@ GoRouter buildRouter(Ref ref, {bool? canonicalCreateFlow, bool? homeActivityV2, 
       GoRoute(
         path: '/create-vink/resume/:vinkId',
         builder: (context, state) => useCanonicalCreateFlow
-            ? CanonicalCreateVinkScreen(resumeVinkId: state.pathParameters['vinkId']!)
+            ? CanonicalCreateVinkScreen(
+                resumeVinkId: state.pathParameters['vinkId']!,
+              )
             : CreateVinkScreen(resumeVinkId: state.pathParameters['vinkId']!),
       ),
       // Slice I2B: `?role=participant` (set only by Home's participant-role card tap) tells
@@ -111,7 +119,8 @@ GoRouter buildRouter(Ref ref, {bool? canonicalCreateFlow, bool? homeActivityV2, 
             routes: [
               GoRoute(
                 path: '/home',
-                builder: (context, state) => HomeScreen(homeActivityV2: useHomeActivityV2),
+                builder: (context, state) =>
+                    HomeScreen(homeActivityV2: useHomeActivityV2),
               ),
             ],
           ),
@@ -119,7 +128,8 @@ GoRouter buildRouter(Ref ref, {bool? canonicalCreateFlow, bool? homeActivityV2, 
             routes: [
               GoRoute(
                 path: '/activity',
-                builder: (context, state) => ActivityScreen(homeActivityV2: useHomeActivityV2),
+                builder: (context, state) =>
+                    ActivityScreen(homeActivityV2: useHomeActivityV2),
               ),
             ],
           ),

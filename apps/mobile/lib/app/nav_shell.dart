@@ -29,11 +29,11 @@ class VinkNavShell extends StatelessWidget {
       bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(
           color: VinkColors.paper,
-          border: Border(top: BorderSide(color: VinkColors.ink.withValues(alpha: 0.08))),
+          border: const Border(top: BorderSide(color: VinkColors.line)),
         ),
         child: SafeArea(
           child: SizedBox(
-            height: 64,
+            height: 68,
             child: Row(
               children: [
                 _NavItem(
@@ -62,7 +62,8 @@ class VinkNavShell extends StatelessWidget {
                   icon: Icons.person_outline_rounded,
                   activeIcon: Icons.person_rounded,
                   label: 'Me',
-                  selected: navigationShell.currentIndex == (invitesEnabled ? 3 : 2),
+                  selected:
+                      navigationShell.currentIndex == (invitesEnabled ? 3 : 2),
                   onTap: () => navigationShell.goBranch(invitesEnabled ? 3 : 2),
                 ),
               ],
@@ -102,9 +103,16 @@ class _NavItem extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(selected ? activeIcon : icon, color: color, size: 24),
-              const SizedBox(height: 2),
-              Text(label, style: VinkTypography.bodySmall.copyWith(color: color, fontSize: 11)),
+              Icon(selected ? activeIcon : icon, color: color, size: 23),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                style: VinkTypography.bodySmall.copyWith(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
             ],
           ),
         ),

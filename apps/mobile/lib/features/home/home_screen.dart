@@ -78,25 +78,28 @@ class HomeScreen extends ConsumerWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const VinkWordmark(fontSize: 20),
+                  const VinkWordmark(fontSize: 28, showMark: false),
                   IconButton(
-                    icon: const Icon(Icons.person_outline_rounded, color: VinkColors.ink),
+                    icon: const Icon(
+                      Icons.person_outline_rounded,
+                      color: VinkColors.ink,
+                    ),
                     tooltip: 'Profile',
                     onPressed: () => context.go('/profile'),
                   ),
                 ],
               ),
-              const SizedBox(height: VinkSpacing.lg),
-              VinkPrimaryButton(
-                label: 'Start a Vink',
-                leadingIcon: Icons.add_rounded,
-                onPressed: () => context.push('/create-vink'),
-              ),
-              const SizedBox(height: VinkSpacing.xxl),
+              const SizedBox(height: VinkSpacing.xl),
               if (invitesEnabled) const _PendingInvitesSection(),
               if (homeActivityV2) ...[
                 _ActiveVinksSectionsV2(inkProgressVessel: inkProgressVessel),
-                const SizedBox(height: VinkSpacing.xxl),
+                const SizedBox(height: VinkSpacing.xl),
+                VinkPrimaryButton(
+                  label: 'Start a Vink',
+                  leadingIcon: Icons.add_rounded,
+                  onPressed: () => context.push('/create-vink'),
+                ),
+                const SizedBox(height: VinkSpacing.lg),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: VinkTextButton(
@@ -108,6 +111,12 @@ class HomeScreen extends ConsumerWidget {
                 Text('Active Vinks', style: VinkTypography.cardTitle),
                 const SizedBox(height: VinkSpacing.md),
                 const _ActiveVinksSection(),
+                const SizedBox(height: VinkSpacing.xl),
+                VinkPrimaryButton(
+                  label: 'Start a Vink',
+                  leadingIcon: Icons.add_rounded,
+                  onPressed: () => context.push('/create-vink'),
+                ),
                 const SizedBox(height: VinkSpacing.xxl),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -147,20 +156,24 @@ class _PendingInvitesSection extends ConsumerWidget {
       loading: () => const SizedBox.shrink(),
       error: (_, _) => const SizedBox.shrink(),
       data: (invites) {
-        final visible = invites.where((invite) => !dismissed.contains(invite.vinkId)).toList();
+        final visible = invites
+            .where((invite) => !dismissed.contains(invite.vinkId))
+            .toList();
         if (visible.isEmpty) return const SizedBox.shrink();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (final invite in visible) ...[
               PendingInviteCard(
-                title: invite.purpose ?? purchaseCategoryLabel(invite.purchaseCategory),
+                title:
+                    invite.purpose ??
+                    purchaseCategoryLabel(invite.purchaseCategory),
                 organizerDisplayName: invite.organizerDisplayName,
                 assignedShareMinor: invite.assignedShareMinor,
                 onView: () => context.go('/invites'),
-                onNotNow: () => ref.read(dismissedInviteIdsProvider.notifier).update(
-                  (state) => {...state, invite.vinkId},
-                ),
+                onNotNow: () => ref
+                    .read(dismissedInviteIdsProvider.notifier)
+                    .update((state) => {...state, invite.vinkId}),
               ),
               const SizedBox(height: VinkSpacing.md),
             ],
@@ -213,15 +226,22 @@ class _ActiveVinksSectionsV2 extends ConsumerWidget {
           );
         }
         final ordered = [
-          ...active.where((item) => item.attentionBucket == AttentionBucket.needsAttention),
-          ...active.where((item) => item.attentionBucket == AttentionBucket.waitingOnOthers),
+          ...active.where(
+            (item) => item.attentionBucket == AttentionBucket.needsAttention,
+          ),
+          ...active.where(
+            (item) => item.attentionBucket == AttentionBucket.waitingOnOthers,
+          ),
         ];
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Active Vinks', style: VinkTypography.cardTitle),
             const SizedBox(height: VinkSpacing.md),
-            _ActiveVinksCarousel(items: ordered, inkProgressVessel: inkProgressVessel),
+            _ActiveVinksCarousel(
+              items: ordered,
+              inkProgressVessel: inkProgressVessel,
+            ),
           ],
         );
       },
@@ -234,7 +254,10 @@ class _ActiveVinksSectionsV2 extends ConsumerWidget {
 /// carousel reflect the real page count/position; a single card renders with no dots at all
 /// (nothing to page between).
 class _ActiveVinksCarousel extends StatefulWidget {
-  const _ActiveVinksCarousel({required this.items, required this.inkProgressVessel});
+  const _ActiveVinksCarousel({
+    required this.items,
+    required this.inkProgressVessel,
+  });
 
   final List<ActiveVink> items;
   final bool inkProgressVessel;
@@ -310,7 +333,10 @@ class _ActiveVinksCarouselState extends State<_ActiveVinksCarousel> {
 /// difference: the title prefers the real [Vink.purpose] (Slice I5B, D39) over the category
 /// label, falling back identically to today's behavior when a Vink has none.
 class _ActiveVinkCardV2 extends StatelessWidget {
-  const _ActiveVinkCardV2({required this.item, required this.inkProgressVessel});
+  const _ActiveVinkCardV2({
+    required this.item,
+    required this.inkProgressVessel,
+  });
 
   final ActiveVink item;
   final bool inkProgressVessel;
@@ -372,7 +398,10 @@ class _ActiveVinkCardV2 extends StatelessWidget {
                         // Slice I6: distinguishes organized from participated Vinks "where
                         // useful" (owner instruction) — plain text, not a colored pill, per
                         // this slice's own "avoid excessive status pills" visual direction.
-                        Text(roleLabel, style: VinkTypography.bodySmallSecondary),
+                        Text(
+                          roleLabel,
+                          style: VinkTypography.bodySmallSecondary,
+                        ),
                       ],
                     ),
                   ),
@@ -391,10 +420,14 @@ class _ActiveVinkCardV2 extends StatelessWidget {
                     children: [
                       TextSpan(
                         text: MoneyText.format(progress.confirmedAmountMinor),
-                        style: const TextStyle(color: VinkColors.blue, fontWeight: FontWeight.w700),
+                        style: const TextStyle(
+                          color: VinkColors.blue,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       TextSpan(
-                        text: ' of ${MoneyText.format(progress.totalAmountMinor)} ready',
+                        text:
+                            ' of ${MoneyText.format(progress.totalAmountMinor)} ready',
                         style: const TextStyle(color: VinkColors.ink),
                       ),
                     ],
@@ -409,8 +442,12 @@ class _ActiveVinkCardV2 extends StatelessWidget {
                 )
               else
                 VinkProgressIndicator(
-                  fundedAmountLabel: MoneyText.format(progress.confirmedAmountMinor),
-                  requiredAmountLabel: MoneyText.format(progress.totalAmountMinor),
+                  fundedAmountLabel: MoneyText.format(
+                    progress.confirmedAmountMinor,
+                  ),
+                  requiredAmountLabel: MoneyText.format(
+                    progress.totalAmountMinor,
+                  ),
                   progress: progress.fraction,
                 ),
               const SizedBox(height: VinkSpacing.sm),
@@ -490,10 +527,17 @@ class _ParticipantAvatarStack extends StatelessWidget {
             Positioned(
               left: i * overlap,
               child: DecoratedBox(
-                decoration: const BoxDecoration(shape: BoxShape.circle, color: VinkColors.paper),
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: VinkColors.paper,
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(2),
-                  child: VinkAvatar(name: shown[i], size: size - 4, filled: true),
+                  child: VinkAvatar(
+                    name: shown[i],
+                    size: size - 4,
+                    filled: true,
+                  ),
                 ),
               ),
             ),
@@ -501,7 +545,10 @@ class _ParticipantAvatarStack extends StatelessWidget {
             Positioned(
               left: shown.length * overlap,
               child: DecoratedBox(
-                decoration: const BoxDecoration(shape: BoxShape.circle, color: VinkColors.paper),
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: VinkColors.paper,
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(2),
                   child: CircleAvatar(
@@ -509,7 +556,10 @@ class _ParticipantAvatarStack extends StatelessWidget {
                     backgroundColor: VinkColors.ink.withValues(alpha: 0.08),
                     child: Text(
                       '+$overflow',
-                      style: VinkTypography.bodySmall.copyWith(fontSize: 10, color: VinkColors.ink),
+                      style: VinkTypography.bodySmall.copyWith(
+                        fontSize: 10,
+                        color: VinkColors.ink,
+                      ),
                     ),
                   ),
                 ),

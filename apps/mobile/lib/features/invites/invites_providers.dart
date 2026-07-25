@@ -6,7 +6,9 @@ import '../../core/repositories/vink_repository.dart';
 /// atomic server query (unlike Activity's own per-vink N+1 fetch), so no partial-failure
 /// wrapper is needed here — a plain `FutureProvider` already gives the right loading/error/
 /// data states.
-final invitesProvider = FutureProvider.autoDispose<List<PendingInvite>>((ref) async {
+final invitesProvider = FutureProvider.autoDispose<List<PendingInvite>>((
+  ref,
+) async {
   return ref.read(vinkRepositoryProvider).listMyInvites();
 });
 
@@ -14,4 +16,6 @@ final invitesProvider = FutureProvider.autoDispose<List<PendingInvite>>((ref) as
 /// in the Invites tab; this is purely a per-session "don't show this card on Home again"
 /// preference, never a server call. Resets on app restart, which is the correct behavior for
 /// a lightweight dismissal, not a real decline.
-final dismissedInviteIdsProvider = StateProvider<Set<String>>((ref) => const {});
+final dismissedInviteIdsProvider = StateProvider<Set<String>>(
+  (ref) => const {},
+);

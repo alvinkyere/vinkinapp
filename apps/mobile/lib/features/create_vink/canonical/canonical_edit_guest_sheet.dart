@@ -19,20 +19,31 @@ import 'delivery_mode.dart';
 /// this sheet is guest-only, matching D40's own "editable guest fields" list; a member's own
 /// row only ever gets a remove action (`canonical_create_vink_screen.dart`).
 class CanonicalEditGuestSheet extends ConsumerStatefulWidget {
-  const CanonicalEditGuestSheet({super.key, required this.vinkId, required this.person});
+  const CanonicalEditGuestSheet({
+    super.key,
+    required this.vinkId,
+    required this.person,
+  });
 
   final String vinkId;
   final PersonEntry person;
 
   @override
-  ConsumerState<CanonicalEditGuestSheet> createState() => _CanonicalEditGuestSheetState();
+  ConsumerState<CanonicalEditGuestSheet> createState() =>
+      _CanonicalEditGuestSheetState();
 }
 
-class _CanonicalEditGuestSheetState extends ConsumerState<CanonicalEditGuestSheet> {
-  late final _nameController = TextEditingController(text: widget.person.displayName);
-  late final _destinationController = TextEditingController(text: widget.person.contactDestination ?? '');
+class _CanonicalEditGuestSheetState
+    extends ConsumerState<CanonicalEditGuestSheet> {
+  late final _nameController = TextEditingController(
+    text: widget.person.displayName,
+  );
+  late final _destinationController = TextEditingController(
+    text: widget.person.contactDestination ?? '',
+  );
   late DeliveryMode _deliveryMode =
-      DeliveryMode.fromWireValue(widget.person.deliveryMode) ?? DeliveryMode.manual;
+      DeliveryMode.fromWireValue(widget.person.deliveryMode) ??
+      DeliveryMode.manual;
   bool _busy = false;
   String? _error;
   String? _destinationError;
@@ -47,14 +58,21 @@ class _CanonicalEditGuestSheetState extends ConsumerState<CanonicalEditGuestShee
   bool get _canSave {
     if (_nameController.text.trim().isEmpty) return false;
     if (_deliveryMode == DeliveryMode.manual) return true;
-    return validateContactDestination(_deliveryMode, _destinationController.text) == null;
+    return validateContactDestination(
+          _deliveryMode,
+          _destinationController.text,
+        ) ==
+        null;
   }
 
   Future<void> _save() async {
     final displayName = _nameController.text.trim();
     final destination = _destinationController.text.trim();
     if (_deliveryMode != DeliveryMode.manual) {
-      final destinationError = validateContactDestination(_deliveryMode, destination);
+      final destinationError = validateContactDestination(
+        _deliveryMode,
+        destination,
+      );
       if (destinationError != null) {
         setState(() => _destinationError = destinationError);
         return;
@@ -72,7 +90,8 @@ class _CanonicalEditGuestSheetState extends ConsumerState<CanonicalEditGuestShee
         body: {
           'displayName': displayName,
           'deliveryMode': _deliveryMode.wireValue,
-          if (_deliveryMode != DeliveryMode.manual) 'contactDestination': destination,
+          if (_deliveryMode != DeliveryMode.manual)
+            'contactDestination': destination,
         },
       );
       final participant = response['participant'] as Map<String, dynamic>;
@@ -85,7 +104,9 @@ class _CanonicalEditGuestSheetState extends ConsumerState<CanonicalEditGuestShee
           isOrganizer: false,
           guestJoinUrl: response['joinUrl'] as String?,
           deliveryMode: _deliveryMode.wireValueUppercase,
-          contactDestination: _deliveryMode == DeliveryMode.manual ? null : destination,
+          contactDestination: _deliveryMode == DeliveryMode.manual
+              ? null
+              : destination,
         ),
       );
     } on ApiException catch (error) {
@@ -121,11 +142,17 @@ class _CanonicalEditGuestSheetState extends ConsumerState<CanonicalEditGuestShee
             return ChoiceChip(
               label: Text(mode.label),
               selected: selected,
-              labelStyle: VinkTypography.label.copyWith(color: selected ? VinkColors.white : VinkColors.ink),
+              labelStyle: VinkTypography.label.copyWith(
+                color: selected ? VinkColors.white : VinkColors.ink,
+              ),
               selectedColor: VinkColors.blue,
               backgroundColor: VinkColors.white,
               shape: const StadiumBorder(),
-              side: BorderSide(color: selected ? VinkColors.blue : VinkColors.ink.withValues(alpha: 0.12)),
+              side: BorderSide(
+                color: selected
+                    ? VinkColors.blue
+                    : VinkColors.ink.withValues(alpha: 0.12),
+              ),
               onSelected: (_) => setState(() {
                 _deliveryMode = mode;
                 _destinationError = null;
@@ -134,11 +161,16 @@ class _CanonicalEditGuestSheetState extends ConsumerState<CanonicalEditGuestShee
           }).toList(),
         ),
         const SizedBox(height: VinkSpacing.sm),
-        Text(_deliveryMode.expectationCaption, style: VinkTypography.bodySmallSecondary),
+        Text(
+          _deliveryMode.expectationCaption,
+          style: VinkTypography.bodySmallSecondary,
+        ),
         if (_deliveryMode != DeliveryMode.manual) ...[
           const SizedBox(height: VinkSpacing.md),
           VinkTextField(
-            label: _deliveryMode == DeliveryMode.sms ? 'Phone number' : 'Email address',
+            label: _deliveryMode == DeliveryMode.sms
+                ? 'Phone number'
+                : 'Email address',
             controller: _destinationController,
             keyboardType: _deliveryMode == DeliveryMode.sms
                 ? TextInputType.phone
@@ -148,9 +180,16 @@ class _CanonicalEditGuestSheetState extends ConsumerState<CanonicalEditGuestShee
             onSubmitted: (_) => _save(),
           ),
         ],
-        if (_error != null) ...[const SizedBox(height: VinkSpacing.sm), VinkInlineError(message: _error!)],
+        if (_error != null) ...[
+          const SizedBox(height: VinkSpacing.sm),
+          VinkInlineError(message: _error!),
+        ],
         const SizedBox(height: VinkSpacing.lg),
-        VinkPrimaryButton(label: 'Save', loading: _busy, onPressed: _canSave ? _save : null),
+        VinkPrimaryButton(
+          label: 'Save',
+          loading: _busy,
+          onPressed: _canSave ? _save : null,
+        ),
       ],
     );
   }

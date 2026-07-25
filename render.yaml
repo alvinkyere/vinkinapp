@@ -1,0 +1,325 @@
+previews:
+  generation: off
+
+projects:
+  - name: vinkin
+    environments:
+      - name: staging
+        networking:
+          isolation: enabled
+        permissions:
+          protection: enabled
+        envVarGroups:
+          - name: vinkin-staging-runtime
+            envVars:
+              - key: NODE_VERSION
+                value: '24'
+              - key: VINKIN_ENV
+                value: staging
+              - key: JWT_SECRET
+                generateValue: true
+              - key: OPERATOR_PASSWORD
+                generateValue: true
+              - key: LOG_LEVEL
+                value: info
+              - key: VINKIN_OTEL_ENABLED
+                value: '0'
+              - key: VINKIN_METRICS_ENABLED
+                value: '0'
+              - key: VINKIN_CONTRIBUTION_PROJECTION_ENABLED
+                value: '1'
+              - key: VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL
+                value: '1'
+              - key: VINKIN_INVITES_ENABLED
+                value: '1'
+              - key: VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED
+                value: '0'
+              - key: VINKIN_PUBLIC_BASE_URL
+                value: https://staging-join.vinkin.org
+              - key: OPERATIONS_CONSOLE_BASE_URL
+                value: https://staging-ops.vinkin.org
+              - key: VINK_OPEN_DURATION_SECONDS
+                value: '86400'
+              - key: VINK_PROCESSING_GRACE_SECONDS
+                value: '60'
+              - key: VINK_SWEEP_INTERVAL_SECONDS
+                value: '10'
+              - key: GUEST_RESEND_COOLDOWN_SECONDS
+                value: '60'
+        databases:
+          - name: vinkin-staging-postgres
+            plan: basic-256mb
+            region: ohio
+            postgresMajorVersion: '16'
+            databaseName: vinkin_staging
+            user: vinkin_staging
+            ipAllowList: []
+        services:
+          - type: keyvalue
+            name: vinkin-staging-redis
+            plan: starter
+            region: ohio
+            ipAllowList: []
+            maxmemoryPolicy: noeviction
+            persistenceMode: journal-snapshot
+
+          - type: web
+            name: vinkin-staging-api
+            runtime: node
+            plan: starter
+            region: ohio
+            branch: main
+            autoDeployTrigger: checksPass
+            buildCommand: corepack enable && pnpm install --frozen-lockfile
+            preDeployCommand: pnpm --filter @vinkin/api migrate
+            startCommand: pnpm --filter @vinkin/api start
+            healthCheckPath: /health/ready
+            maxShutdownDelaySeconds: 60
+            domains:
+              - staging-api.vinkin.org
+            envVars:
+              - fromGroup: vinkin-staging-runtime
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: vinkin-staging-postgres
+                  property: connectionString
+              - key: REDIS_URL
+                fromService:
+                  type: keyvalue
+                  name: vinkin-staging-redis
+                  property: connectionString
+            buildFilter:
+              paths:
+                - apps/api/**
+                - packages/**
+                - package.json
+                - pnpm-lock.yaml
+                - pnpm-workspace.yaml
+
+          - type: worker
+            name: vinkin-staging-worker
+            runtime: node
+            plan: starter
+            region: ohio
+            branch: main
+            autoDeployTrigger: checksPass
+            buildCommand: corepack enable && pnpm install --frozen-lockfile
+            startCommand: pnpm --filter @vinkin/api worker
+            maxShutdownDelaySeconds: 60
+            envVars:
+              - fromGroup: vinkin-staging-runtime
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: vinkin-staging-postgres
+                  property: connectionString
+              - key: REDIS_URL
+                fromService:
+                  type: keyvalue
+                  name: vinkin-staging-redis
+                  property: connectionString
+            buildFilter:
+              paths:
+                - apps/api/**
+                - packages/**
+                - package.json
+                - pnpm-lock.yaml
+                - pnpm-workspace.yaml
+
+          - type: web
+            name: vinkin-staging-guest-web
+            runtime: node
+            plan: starter
+            region: ohio
+            branch: main
+            autoDeployTrigger: checksPass
+            buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @vinkin/guest-web build
+            startCommand: pnpm --filter @vinkin/guest-web start -- -p $PORT
+            healthCheckPath: /
+            domains:
+              - staging-join.vinkin.org
+            envVars:
+              - key: NODE_VERSION
+                value: '24'
+              - key: VINKIN_ENV
+                value: staging
+              - key: NEXT_PUBLIC_API_BASE_URL
+                value: https://staging-api.vinkin.org
+            buildFilter:
+              paths:
+                - apps/guest-web/**
+                - package.json
+                - pnpm-lock.yaml
+                - pnpm-workspace.yaml
+
+          - type: web
+            name: vinkin-staging-operations-console
+            runtime: node
+            plan: starter
+            region: ohio
+            branch: main
+            autoDeployTrigger: checksPass
+            buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @vinkin/operations-console build
+            startCommand: pnpm --filter @vinkin/operations-console start -- -p $PORT
+            healthCheckPath: /
+            domains:
+              - staging-ops.vinkin.org
+            envVars:
+              - key: NODE_VERSION
+                value: '24'
+              - key: VINKIN_ENV
+                value: staging
+              - key: NEXT_PUBLIC_API_BASE_URL
+                value: https://staging-api.vinkin.org
+            buildFilter:
+              paths:
+                - apps/operations-console/**
+                - package.json
+                - pnpm-lock.yaml
+                - pnpm-workspace.yaml
+
+      - name: production
+        networking:
+          isolation: enabled
+        permissions:
+          protection: enabled
+        envVarGroups:
+          - name: vinkin-production-runtime
+            envVars:
+              - key: NODE_VERSION
+                value: '24'
+              - key: VINKIN_ENV
+                value: production
+              - key: JWT_SECRET
+                generateValue: true
+              - key: OPERATOR_PASSWORD
+                generateValue: true
+              - key: LOG_LEVEL
+                value: info
+              - key: VINKIN_OTEL_ENABLED
+                value: '0'
+              - key: VINKIN_METRICS_ENABLED
+                value: '0'
+              - key: VINKIN_CONTRIBUTION_PROJECTION_ENABLED
+                value: '1'
+              - key: VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL
+                value: '1'
+              - key: VINKIN_INVITES_ENABLED
+                value: '1'
+              - key: VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED
+                value: '0'
+              - key: VINKIN_PUBLIC_BASE_URL
+                value: https://join.vinkin.org
+              - key: OPERATIONS_CONSOLE_BASE_URL
+                value: https://ops.vinkin.org
+              - key: VINK_OPEN_DURATION_SECONDS
+                value: '86400'
+              - key: VINK_PROCESSING_GRACE_SECONDS
+                value: '60'
+              - key: VINK_SWEEP_INTERVAL_SECONDS
+                value: '10'
+              - key: GUEST_RESEND_COOLDOWN_SECONDS
+                value: '60'
+        databases:
+          - name: vinkin-production-postgres
+            plan: basic-1gb
+            region: ohio
+            postgresMajorVersion: '16'
+            databaseName: vinkin_production
+            user: vinkin_production
+            ipAllowList: []
+        services:
+          - type: keyvalue
+            name: vinkin-production-redis
+            plan: starter
+            region: ohio
+            ipAllowList: []
+            maxmemoryPolicy: noeviction
+            persistenceMode: journal-snapshot
+
+          - type: web
+            name: vinkin-production-api
+            runtime: node
+            plan: starter
+            region: ohio
+            branch: main
+            autoDeployTrigger: off
+            buildCommand: corepack enable && pnpm install --frozen-lockfile
+            preDeployCommand: pnpm --filter @vinkin/api migrate
+            startCommand: pnpm --filter @vinkin/api start
+            healthCheckPath: /health/ready
+            maxShutdownDelaySeconds: 60
+            domains:
+              - api.vinkin.org
+            envVars:
+              - fromGroup: vinkin-production-runtime
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: vinkin-production-postgres
+                  property: connectionString
+              - key: REDIS_URL
+                fromService:
+                  type: keyvalue
+                  name: vinkin-production-redis
+                  property: connectionString
+
+          - type: worker
+            name: vinkin-production-worker
+            runtime: node
+            plan: starter
+            region: ohio
+            branch: main
+            autoDeployTrigger: off
+            buildCommand: corepack enable && pnpm install --frozen-lockfile
+            startCommand: pnpm --filter @vinkin/api worker
+            maxShutdownDelaySeconds: 60
+            envVars:
+              - fromGroup: vinkin-production-runtime
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: vinkin-production-postgres
+                  property: connectionString
+              - key: REDIS_URL
+                fromService:
+                  type: keyvalue
+                  name: vinkin-production-redis
+                  property: connectionString
+
+          - type: web
+            name: vinkin-production-guest-web
+            runtime: node
+            plan: starter
+            region: ohio
+            branch: main
+            autoDeployTrigger: off
+            buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @vinkin/guest-web build
+            startCommand: pnpm --filter @vinkin/guest-web start -- -p $PORT
+            healthCheckPath: /
+            domains:
+              - join.vinkin.org
+            envVars:
+              - key: NODE_VERSION
+                value: '24'
+              - key: VINKIN_ENV
+                value: production
+              - key: NEXT_PUBLIC_API_BASE_URL
+                value: https://api.vinkin.org
+
+          - type: web
+            name: vinkin-production-operations-console
+            runtime: node
+            plan: starter
+            region: ohio
+            branch: main
+            autoDeployTrigger: off
+            buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @vinkin/operations-console build
+            startCommand: pnpm --filter @vinkin/operations-console start -- -p $PORT
+            healthCheckPath: /
+            domains:
+              - ops.vinkin.org
+            envVars:
+              - key: NODE_VERSION
+                value: '24'
+              - key: VINKIN_ENV
+                value: production
+              - key: NEXT_PUBLIC_API_BASE_URL
+                value: https://api.vinkin.org

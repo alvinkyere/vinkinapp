@@ -20,14 +20,17 @@ class ContributionProgress {
   final int confirmedParticipantCount;
   final int totalParticipantCount;
 
-  double get fraction => totalAmountMinor == 0 ? 0.0 : confirmedAmountMinor / totalAmountMinor;
+  double get fraction =>
+      totalAmountMinor == 0 ? 0.0 : confirmedAmountMinor / totalAmountMinor;
 
-  factory ContributionProgress.fromJson(Map<String, dynamic> json) => ContributionProgress(
-    confirmedAmountMinor: (json['confirmedAmountMinor'] as num).toInt(),
-    totalAmountMinor: (json['totalAmountMinor'] as num).toInt(),
-    confirmedParticipantCount: (json['confirmedParticipantCount'] as num).toInt(),
-    totalParticipantCount: (json['totalParticipantCount'] as num).toInt(),
-  );
+  factory ContributionProgress.fromJson(Map<String, dynamic> json) =>
+      ContributionProgress(
+        confirmedAmountMinor: (json['confirmedAmountMinor'] as num).toInt(),
+        totalAmountMinor: (json['totalAmountMinor'] as num).toInt(),
+        confirmedParticipantCount: (json['confirmedParticipantCount'] as num)
+            .toInt(),
+        totalParticipantCount: (json['totalParticipantCount'] as num).toInt(),
+      );
 }
 
 class VinkParticipant {
@@ -292,11 +295,13 @@ class VinkDetailsSummary {
   final int confirmedParticipantCount;
   final int totalParticipantCount;
 
-  factory VinkDetailsSummary.fromJson(Map<String, dynamic> json) => VinkDetailsSummary(
-    confirmedAmountMinor: (json['confirmedAmountMinor'] as num).toInt(),
-    confirmedParticipantCount: (json['confirmedParticipantCount'] as num).toInt(),
-    totalParticipantCount: (json['totalParticipantCount'] as num).toInt(),
-  );
+  factory VinkDetailsSummary.fromJson(Map<String, dynamic> json) =>
+      VinkDetailsSummary(
+        confirmedAmountMinor: (json['confirmedAmountMinor'] as num).toInt(),
+        confirmedParticipantCount: (json['confirmedParticipantCount'] as num)
+            .toInt(),
+        totalParticipantCount: (json['totalParticipantCount'] as num).toInt(),
+      );
 }
 
 class VinkDetailsTimelineEntry {
@@ -362,7 +367,9 @@ class VinkDetailsView {
 
   bool get isOrganizerViewer => viewerRole == 'organizer';
 
-  factory VinkDetailsView.fromJson(Map<String, dynamic> json) => VinkDetailsView(
+  factory VinkDetailsView.fromJson(
+    Map<String, dynamic> json,
+  ) => VinkDetailsView(
     vinkId: json['vinkId'] as String,
     purpose: json['purpose'] as String?,
     purchaseCategory: json['purchaseCategory'] as String,
@@ -370,9 +377,14 @@ class VinkDetailsView {
     organizerDisplayName: json['organizerDisplayName'] as String,
     viewerRole: json['viewerRole'] as String,
     vinkOutcome: json['vinkOutcome'] as String,
-    summary: VinkDetailsSummary.fromJson(json['summary'] as Map<String, dynamic>),
+    summary: VinkDetailsSummary.fromJson(
+      json['summary'] as Map<String, dynamic>,
+    ),
     timeline: (json['timeline'] as List<dynamic>)
-        .map((entry) => VinkDetailsTimelineEntry.fromJson(entry as Map<String, dynamic>))
+        .map(
+          (entry) =>
+              VinkDetailsTimelineEntry.fromJson(entry as Map<String, dynamic>),
+        )
         .toList(),
     merchantSettlementDetail: json['merchantSettlementDetail'] as String?,
     viewerParticipant: json['viewerParticipant'] == null

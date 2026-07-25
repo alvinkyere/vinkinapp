@@ -82,7 +82,9 @@ Widget _buildTestApp({
     overrides: [
       authControllerProvider.overrideWith(_FakeAuthController.new),
       activeVinksProvider.overrideWith((ref) async => active),
-      recentActivityProvider.overrideWith((ref) async => (entries: <VinkActivity>[], failedCount: 0)),
+      recentActivityProvider.overrideWith(
+        (ref) async => (entries: <VinkActivity>[], failedCount: 0),
+      ),
     ],
     child: MaterialApp.router(routerConfig: router),
   );
@@ -97,7 +99,15 @@ void main() {
       await tester.pumpWidget(
         _buildTestApp(
           // attentionBucket is irrelevant to this test — flag-off rendering never reads it.
-          active: [(vink: vink, participantCount: 2, attentionBucket: AttentionBucket.waitingOnOthers, contributionProgress: _progress, participantNames: const [])],
+          active: [
+            (
+              vink: vink,
+              participantCount: 2,
+              attentionBucket: AttentionBucket.waitingOnOthers,
+              contributionProgress: _progress,
+              participantNames: const [],
+            ),
+          ],
           captured: captured,
         ),
       );
@@ -119,7 +129,15 @@ void main() {
       final vink = _vink(id: 'member-vink', state: 'OPEN', role: 'participant');
       await tester.pumpWidget(
         _buildTestApp(
-          active: [(vink: vink, participantCount: 3, attentionBucket: AttentionBucket.waitingOnOthers, contributionProgress: _progress, participantNames: const [])],
+          active: [
+            (
+              vink: vink,
+              participantCount: 3,
+              attentionBucket: AttentionBucket.waitingOnOthers,
+              contributionProgress: _progress,
+              participantNames: const [],
+            ),
+          ],
           captured: captured,
         ),
       );
@@ -141,7 +159,15 @@ void main() {
       final vink = _vink(id: 'legacy-vink', state: 'OPEN', role: null);
       await tester.pumpWidget(
         _buildTestApp(
-          active: [(vink: vink, participantCount: 1, attentionBucket: AttentionBucket.waitingOnOthers, contributionProgress: _progress, participantNames: const [])],
+          active: [
+            (
+              vink: vink,
+              participantCount: 1,
+              attentionBucket: AttentionBucket.waitingOnOthers,
+              contributionProgress: _progress,
+              participantNames: const [],
+            ),
+          ],
           captured: captured,
         ),
       );
@@ -167,7 +193,15 @@ void main() {
       );
       await tester.pumpWidget(
         _buildTestApp(
-          active: [(vink: vink, participantCount: 3, attentionBucket: AttentionBucket.needsAttention, contributionProgress: _progress, participantNames: const [])],
+          active: [
+            (
+              vink: vink,
+              participantCount: 3,
+              attentionBucket: AttentionBucket.needsAttention,
+              contributionProgress: _progress,
+              participantNames: const [],
+            ),
+          ],
           captured: captured,
         ),
       );
@@ -202,7 +236,9 @@ void main() {
     'and is not replaced with a generic greeting either',
     (tester) async {
       final captured = _CapturedRoute();
-      await tester.pumpWidget(_buildTestApp(active: const [], captured: captured));
+      await tester.pumpWidget(
+        _buildTestApp(active: const [], captured: captured),
+      );
       await tester.pumpAndSettle();
 
       expect(find.textContaining('Everyone in'), findsNothing);
@@ -217,8 +253,16 @@ void main() {
     'a mixed organizer + participant Home renders both roles, each labeled distinctly',
     (tester) async {
       final captured = _CapturedRoute();
-      final orgVink = _vink(id: 'org-vink', state: 'RESTRICTED', role: 'organizer');
-      final memberVink = _vink(id: 'member-vink', state: 'OPEN', role: 'participant');
+      final orgVink = _vink(
+        id: 'org-vink',
+        state: 'RESTRICTED',
+        role: 'organizer',
+      );
+      final memberVink = _vink(
+        id: 'member-vink',
+        state: 'OPEN',
+        role: 'participant',
+      );
       await tester.pumpWidget(
         _buildTestApp(
           active: [
@@ -263,7 +307,11 @@ void main() {
     (tester) async {
       final captured = _CapturedRoute();
       await tester.pumpWidget(
-        _buildTestApp(active: const [], captured: captured, homeActivityV2: true),
+        _buildTestApp(
+          active: const [],
+          captured: captured,
+          homeActivityV2: true,
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -278,7 +326,11 @@ void main() {
     'not color alone',
     (tester) async {
       final captured = _CapturedRoute();
-      final vink = _vink(id: 'org-vink', state: 'RESTRICTED', role: 'organizer');
+      final vink = _vink(
+        id: 'org-vink',
+        state: 'RESTRICTED',
+        role: 'organizer',
+      );
       await tester.pumpWidget(
         _buildTestApp(
           active: [
@@ -298,7 +350,9 @@ void main() {
 
       final semanticsWidget = tester.widget<Semantics>(
         find.byWidgetPredicate(
-          (w) => w is Semantics && (w.properties.label ?? '').contains('Organizer'),
+          (w) =>
+              w is Semantics &&
+              (w.properties.label ?? '').contains('Organizer'),
         ),
       );
       final label = semanticsWidget.properties.label!;

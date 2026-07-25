@@ -6,7 +6,11 @@ import '../vink_colors.dart';
 /// see docs/design/vinkin-design-system.md "Logo treatment"): an angular V-shaped vessel
 /// with a droplet above its opening — an ink drop about to fall in.
 class VinkLogoMark extends StatelessWidget {
-  const VinkLogoMark({super.key, this.size = 28, this.vesselColor = VinkColors.ink});
+  const VinkLogoMark({
+    super.key,
+    this.size = 28,
+    this.vesselColor = VinkColors.ink,
+  });
 
   final double size;
   final Color vesselColor;
@@ -62,13 +66,19 @@ class _VinkMarkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _VinkMarkPainter oldDelegate) => oldDelegate.vesselColor != vesselColor;
+  bool shouldRepaint(covariant _VinkMarkPainter oldDelegate) =>
+      oldDelegate.vesselColor != vesselColor;
 }
 
 /// The full lockup: mark + "Vink" (in [vesselColor]) + "In" (always blue) — matches the
 /// site's header exactly (font-display, extrabold, tightest tracking).
 class VinkWordmark extends StatelessWidget {
-  const VinkWordmark({super.key, this.fontSize = 20, this.color = VinkColors.ink, this.showMark = true});
+  const VinkWordmark({
+    super.key,
+    this.fontSize = 20,
+    this.color = VinkColors.ink,
+    this.showMark = true,
+  });
 
   final double fontSize;
   final Color color;
@@ -76,10 +86,10 @@ class VinkWordmark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = GoogleFonts.bricolageGrotesque(
+    final style = GoogleFonts.dmSerifDisplay(
       fontSize: fontSize,
-      fontWeight: FontWeight.w800,
-      letterSpacing: -0.04 * fontSize,
+      fontWeight: FontWeight.w400,
+      letterSpacing: -0.025 * fontSize,
       color: color,
     );
     return Row(
@@ -91,10 +101,7 @@ class VinkWordmark extends StatelessWidget {
         ],
         Text.rich(
           TextSpan(
-            children: [
-              TextSpan(text: 'Vink', style: style),
-              TextSpan(text: 'In', style: style.copyWith(color: VinkColors.blue)),
-            ],
+            children: [TextSpan(text: 'VinkIn', style: style)],
           ),
         ),
       ],

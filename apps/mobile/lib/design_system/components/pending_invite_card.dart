@@ -48,9 +48,13 @@ class PendingInviteCard extends StatelessWidget {
             const SizedBox(height: VinkSpacing.md),
             Row(
               children: [
-                Expanded(child: VinkTextButton(label: 'Not now', onPressed: onNotNow)),
+                Expanded(
+                  child: VinkTextButton(label: 'Not now', onPressed: onNotNow),
+                ),
                 const SizedBox(width: VinkSpacing.sm),
-                Expanded(child: VinkSecondaryButton(label: 'View', onPressed: onView)),
+                Expanded(
+                  child: VinkSecondaryButton(label: 'View', onPressed: onView),
+                ),
               ],
             ),
           ],

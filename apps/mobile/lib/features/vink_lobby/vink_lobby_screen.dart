@@ -375,7 +375,10 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
               itemBuilder: (context) => [
                 PopupMenuItem<void>(
                   onTap: _cancelVink,
-                  child: const Text('Cancel Vink', style: TextStyle(color: VinkColors.danger)),
+                  child: const Text(
+                    'Cancel Vink',
+                    style: TextStyle(color: VinkColors.danger),
+                  ),
                 ),
               ],
             ),
@@ -565,7 +568,9 @@ class _ParticipantLobbyBody extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      justFunded ? "Everyone's in!" : purchaseCategoryLabel(vink.purchaseCategory),
+                      justFunded
+                          ? "Everyone's in!"
+                          : purchaseCategoryLabel(vink.purchaseCategory),
                       style: VinkTypography.cardTitle,
                     ),
                   ),
@@ -596,8 +601,12 @@ class _ParticipantLobbyBody extends StatelessWidget {
                 )
               else
                 VinkProgressIndicator(
-                  fundedAmountLabel: MoneyText.format(vink.confirmedAmountMinor),
-                  requiredAmountLabel: MoneyText.format(vink.requiredAmountMinor),
+                  fundedAmountLabel: MoneyText.format(
+                    vink.confirmedAmountMinor,
+                  ),
+                  requiredAmountLabel: MoneyText.format(
+                    vink.requiredAmountMinor,
+                  ),
                   progress: progress,
                 ),
               const SizedBox(height: VinkSpacing.sm),
@@ -692,7 +701,9 @@ class _LobbyBody extends StatelessWidget {
     final unconfirmedNames = [
       for (final participant in snapshot.participants)
         if (participant.allocatedAmountMinor > 0 &&
-            paymentStateFor(snapshot.contributionStatusByParticipant[participant.id]) !=
+            paymentStateFor(
+                  snapshot.contributionStatusByParticipant[participant.id],
+                ) !=
                 VinkParticipantPaymentState.paid)
           participant.displayName,
     ];
@@ -716,7 +727,9 @@ class _LobbyBody extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                justFunded ? "Everyone's in!" : purchaseCategoryLabel(vink.purchaseCategory),
+                justFunded
+                    ? "Everyone's in!"
+                    : purchaseCategoryLabel(vink.purchaseCategory),
                 style: VinkTypography.cardTitle,
               ),
             ),
@@ -730,17 +743,23 @@ class _LobbyBody extends StatelessWidget {
         if (inkProgressVessel)
           VinkVesselAmbientDots(
             child: VinkProgressVessel(
-              confirmedAmountMinor: snapshot.contributionProgress.confirmedAmountMinor,
+              confirmedAmountMinor:
+                  snapshot.contributionProgress.confirmedAmountMinor,
               totalAmountMinor: snapshot.contributionProgress.totalAmountMinor,
               waitingClause: organizerWaitingClause(
-                confirmedAmountMinor: snapshot.contributionProgress.confirmedAmountMinor,
-                totalAmountMinor: snapshot.contributionProgress.totalAmountMinor,
+                confirmedAmountMinor:
+                    snapshot.contributionProgress.confirmedAmountMinor,
+                totalAmountMinor:
+                    snapshot.contributionProgress.totalAmountMinor,
                 unconfirmedNames: unconfirmedNames,
               ),
             ),
           )
         else ...[
-          MoneyText(vink.requiredAmountMinor, style: VinkTypography.amountLarge),
+          MoneyText(
+            vink.requiredAmountMinor,
+            style: VinkTypography.amountLarge,
+          ),
           const SizedBox(height: VinkSpacing.md),
           VinkProgressIndicator(
             fundedAmountLabel: MoneyText.format(vink.fundedAmountMinor),
@@ -754,7 +773,11 @@ class _LobbyBody extends StatelessWidget {
         // still shows it, since the vessel has no per-state messaging for those.
         if (!(inkProgressVessel && vink.state == 'OPEN')) ...[
           const SizedBox(height: VinkSpacing.lg),
-          Text(_stateCopy(vink.state), style: VinkTypography.bodySecondary, textAlign: TextAlign.center),
+          Text(
+            _stateCopy(vink.state),
+            style: VinkTypography.bodySecondary,
+            textAlign: TextAlign.center,
+          ),
         ],
         if (showsSimulationNotice) ...[
           const SizedBox(height: VinkSpacing.md),
@@ -834,7 +857,8 @@ class _LobbyBody extends StatelessWidget {
             ],
           ),
         ),
-        if (vink.state == 'OPEN' && _timeRemainingLabel(vink.submissionDeadline) != null) ...[
+        if (vink.state == 'OPEN' &&
+            _timeRemainingLabel(vink.submissionDeadline) != null) ...[
           const SizedBox(height: VinkSpacing.lg),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,

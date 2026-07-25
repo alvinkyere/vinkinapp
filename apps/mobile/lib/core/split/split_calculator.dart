@@ -3,7 +3,10 @@
 /// remainder deterministic," Plan §15) so the app's preview and the server's actual split
 /// always agree, to the cent. Integer minor units throughout (Plan §15) — never a double.
 class SplitAllocation {
-  const SplitAllocation({required this.participantId, required this.amountMinor});
+  const SplitAllocation({
+    required this.participantId,
+    required this.amountMinor,
+  });
   final String participantId;
   final int amountMinor;
 }
@@ -19,8 +22,12 @@ List<SplitAllocation> equalSplit(int totalMinor, List<String> participantIds) {
   final remainder = totalMinor % count;
   return [
     for (var i = 0; i < count; i++)
-      SplitAllocation(participantId: participantIds[i], amountMinor: base + (i < remainder ? 1 : 0)),
+      SplitAllocation(
+        participantId: participantIds[i],
+        amountMinor: base + (i < remainder ? 1 : 0),
+      ),
   ];
 }
 
-int sumAllocations(Iterable<int> amountsMinor) => amountsMinor.fold(0, (sum, amount) => sum + amount);
+int sumAllocations(Iterable<int> amountsMinor) =>
+    amountsMinor.fold(0, (sum, amount) => sum + amount);

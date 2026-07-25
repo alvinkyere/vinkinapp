@@ -2,7 +2,11 @@
 /// jsonb blob (`{eventType, ...payload}`), interpreted into human copy by
 /// `features/activity/activity_copy.dart`, never shown to a user as-is.
 class ActivityEntry {
-  const ActivityEntry({required this.kind, required this.at, required this.detail});
+  const ActivityEntry({
+    required this.kind,
+    required this.at,
+    required this.detail,
+  });
 
   final String kind;
   final DateTime at;

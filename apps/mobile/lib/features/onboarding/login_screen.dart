@@ -45,7 +45,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     await _loginCommand.run(
       () => ref
           .read(authControllerProvider.notifier)
-          .login(username: _usernameController.text.trim(), password: _passwordController.text),
+          .login(
+            username: _usernameController.text.trim(),
+            password: _passwordController.text,
+          ),
     );
   }
 
@@ -53,7 +56,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: VinkColors.paper,
-      appBar: AppBar(backgroundColor: VinkColors.paper, surfaceTintColor: Colors.transparent, elevation: 0),
+      appBar: AppBar(
+        backgroundColor: VinkColors.paper,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(VinkSpacing.lg),
@@ -76,9 +83,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 obscureText: true,
                 onSubmitted: (_) => _submit(),
               ),
-              if (_error != null) ...[const SizedBox(height: VinkSpacing.sm), VinkInlineError(message: _error!)],
+              if (_error != null) ...[
+                const SizedBox(height: VinkSpacing.sm),
+                VinkInlineError(message: _error!),
+              ],
               const SizedBox(height: VinkSpacing.lg),
-              VinkPrimaryButton(label: 'Log in', glow: true, loading: _submitting, onPressed: _submit),
+              VinkPrimaryButton(
+                label: 'Log in',
+                glow: true,
+                loading: _submitting,
+                onPressed: _submit,
+              ),
             ],
           ),
         ),

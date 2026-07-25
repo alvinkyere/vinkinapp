@@ -10,17 +10,29 @@ class VinkShadows {
 
   /// `0 8px 24px -12px rgba(10,10,11,.25)` — the everyday card shadow.
   static List<BoxShadow> card = [
-    BoxShadow(color: VinkColors.ink.withValues(alpha: 0.25), offset: const Offset(0, 8), blurRadius: 24),
+    BoxShadow(
+      color: VinkColors.ink.withValues(alpha: 0.055),
+      offset: const Offset(0, 8),
+      blurRadius: 24,
+    ),
   ];
 
   /// `0 40px 100px -20px rgba(10,10,11,.55)` — the hero mockup's dramatic elevated shadow,
   /// for the single most prominent card on a screen (e.g. the live lobby's Vink card).
   static List<BoxShadow> cardElevated = [
-    BoxShadow(color: VinkColors.ink.withValues(alpha: 0.55), offset: const Offset(0, 40), blurRadius: 100),
+    BoxShadow(
+      color: VinkColors.ink.withValues(alpha: 0.08),
+      offset: const Offset(0, 16),
+      blurRadius: 40,
+    ),
   ];
 
   /// `0 16px 40px -12px rgba(49,92,255,.6)` — the primary-CTA glow. Use once per screen.
   static List<BoxShadow> ctaGlow = [
-    BoxShadow(color: VinkColors.blue.withValues(alpha: 0.6), offset: const Offset(0, 16), blurRadius: 40),
+    BoxShadow(
+      color: VinkColors.blue.withValues(alpha: 0.18),
+      offset: const Offset(0, 10),
+      blurRadius: 24,
+    ),
   ];
 }

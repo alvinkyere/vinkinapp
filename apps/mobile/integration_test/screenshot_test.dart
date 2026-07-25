@@ -27,21 +27,37 @@ import 'package:vinkin_mobile/core/networking/api_config.dart';
 import 'package:vinkin_mobile/core/storage/secure_token_store.dart';
 
 Future<String> _login(Dio dio, String username, String password) async {
-  final response = await dio.post('/api/v1/auth/login', data: {'username': username, 'password': password});
+  final response = await dio.post(
+    '/api/v1/auth/login',
+    data: {'username': username, 'password': password},
+  );
   return response.data['accessToken'] as String;
 }
 
-Future<String> _register(Dio dio, String username, String displayName, String password) async {
+Future<String> _register(
+  Dio dio,
+  String username,
+  String displayName,
+  String password,
+) async {
   final response = await dio.post(
     '/api/v1/auth/register',
-    data: {'username': username, 'displayName': displayName, 'password': password},
+    data: {
+      'username': username,
+      'displayName': displayName,
+      'password': password,
+    },
   );
   return response.data['accessToken'] as String;
 }
 
 /// Wall-clock bounded (not iteration-count bounded) — `flutter drive`'s VM-service round trip
 /// adds real per-pump overhead a fixed iteration count doesn't reliably absorb.
-Future<bool> _waitUntil(WidgetTester tester, bool Function() condition, {Duration timeout = const Duration(seconds: 20)}) async {
+Future<bool> _waitUntil(
+  WidgetTester tester,
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 20),
+}) async {
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
     await tester.pump(const Duration(milliseconds: 250));
@@ -53,7 +69,9 @@ Future<bool> _waitUntil(WidgetTester tester, bool Function() condition, {Duratio
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('capture the 13 official VinkIn product screenshots', (tester) async {
+  testWidgets('capture the 13 official VinkIn product screenshots', (
+    tester,
+  ) async {
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final backend = Dio(BaseOptions(baseUrl: ApiConfig.baseUrl));
 
@@ -113,7 +131,11 @@ void main() {
     await tester.tap(find.text('ADD GUEST'));
     await tester.pumpAndSettle();
     final linkText = tester
-        .widgetList<Text>(find.byWidgetPredicate((w) => w is Text && (w.data?.contains('/g/') ?? false)))
+        .widgetList<Text>(
+          find.byWidgetPredicate(
+            (w) => w is Text && (w.data?.contains('/g/') ?? false),
+          ),
+        )
         .first
         .data!;
     final guestToken = Uri.parse(linkText).pathSegments.last;
@@ -152,23 +174,35 @@ void main() {
     expect(find.text('PAY MY \$30.00'), findsNothing);
 
     // Pull the vink id via the app's own provider container, same pattern as e1_test.dart.
-    final container = ProviderScope.containerOf(tester.element(find.byType(VinkinApp)));
-    final organizerToken = (container.read(authControllerProvider) as AuthSignedIn).accessToken;
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(VinkinApp)),
+    );
+    final organizerToken =
+        (container.read(authControllerProvider) as AuthSignedIn).accessToken;
     final myVinks = await backend.get(
       '/api/v1/vinks',
       options: Options(headers: {'Authorization': 'Bearer $organizerToken'}),
     );
-    final vinkId = ((myVinks.data as Map)['vinks'] as List).first['id'] as String;
+    final vinkId =
+        ((myVinks.data as Map)['vinks'] as List).first['id'] as String;
 
     // --- Ama and Jordan approve their own shares — their own UI is guest-web/mobile's
     // own account scope, not this app's; driven directly against the API, exactly as
     // e1_test.dart already establishes for every other participant's own action.
-    final amaToken = await _login(backend, 'amak_$stamp', 'showcase-password-1');
+    final amaToken = await _login(
+      backend,
+      'amak_$stamp',
+      'showcase-password-1',
+    );
     await backend.post(
       '/api/v1/vinks/$vinkId/contributions/authorize',
       options: Options(headers: {'Authorization': 'Bearer $amaToken'}),
     );
-    final jordanToken = await _login(backend, 'jordank_$stamp', 'showcase-password-1');
+    final jordanToken = await _login(
+      backend,
+      'jordank_$stamp',
+      'showcase-password-1',
+    );
     await backend.post(
       '/api/v1/vinks/$vinkId/contributions/authorize',
       options: Options(headers: {'Authorization': 'Bearer $jordanToken'}),
@@ -201,10 +235,17 @@ void main() {
         options: Options(headers: {'Authorization': 'Bearer $organizerToken'}),
       );
       final contributions = (snapshot.data as Map)['contributions'] as List;
-      authorizedCount = contributions.where((c) => (c as Map)['status'] == 'AUTHORIZED').length;
-      if (authorizedCount < 3) await Future<void>.delayed(const Duration(milliseconds: 500));
+      authorizedCount = contributions
+          .where((c) => (c as Map)['status'] == 'AUTHORIZED')
+          .length;
+      if (authorizedCount < 3)
+        await Future<void>.delayed(const Duration(milliseconds: 500));
     }
-    expect(authorizedCount, 3, reason: 'organizer + Ama + Jordan should all be AUTHORIZED server-side');
+    expect(
+      authorizedCount,
+      3,
+      reason: 'organizer + Ama + Jordan should all be AUTHORIZED server-side',
+    );
     for (var i = 0; i < 12; i++) {
       await tester.pump(const Duration(milliseconds: 250));
     }
@@ -218,7 +259,11 @@ void main() {
     // shell (app/router.dart) — no "Home" tab label is on screen here, only the back arrow.
     await tester.tap(find.byIcon(Icons.arrow_back_rounded));
     await tester.pumpAndSettle();
-    final homeShowsVink = await _waitUntil(tester, () => find.text('Groceries').evaluate().isNotEmpty, timeout: const Duration(seconds: 15));
+    final homeShowsVink = await _waitUntil(
+      tester,
+      () => find.text('Groceries').evaluate().isNotEmpty,
+      timeout: const Duration(seconds: 15),
+    );
     expect(homeShowsVink, isTrue);
     await binding.takeScreenshot('01-organizer-home');
 
@@ -238,7 +283,11 @@ void main() {
       () => find.text('\$120.00 of \$120.00 funded').evaluate().isNotEmpty,
       timeout: const Duration(seconds: 30),
     );
-    expect(fundedSeen, isTrue, reason: 'lobby should show FUNDED live, no reload');
+    expect(
+      fundedSeen,
+      isTrue,
+      reason: 'lobby should show FUNDED live, no reload',
+    );
     await binding.takeScreenshot('07-everyone-in');
 
     // --- Card provisioning happens via the REAL server's deadline sweep — no simulator
@@ -248,27 +297,48 @@ void main() {
       () => find.text('PILOT SIMULATION').evaluate().isNotEmpty,
       timeout: const Duration(seconds: 60),
     );
-    expect(cardSeen, isTrue, reason: 'the card should appear live once the sweep provisions it');
+    expect(
+      cardSeen,
+      isTrue,
+      reason: 'the card should appear live once the sweep provisions it',
+    );
     await binding.takeScreenshot('08-ready-to-pay');
 
     // --- Merchant simulation (ops-console scope) completes the purchase --------------
     final auth = await backend.post(
       '/internal/simulator/vinks/$vinkId/merchant-authorizations',
-      data: {'merchantName': 'Luna Market', 'merchantIdentifier': 'PV13-SHOWCASE', 'mcc': '5411', 'amountMinor': 12000},
+      data: {
+        'merchantName': 'Luna Market',
+        'merchantIdentifier': 'PV13-SHOWCASE',
+        'mcc': '5411',
+        'amountMinor': 12000,
+      },
     );
     final authorizationId = auth.data['authorizationId'] as String;
-    final providerAuthorizationId = auth.data['providerAuthorizationId'] as String;
+    final providerAuthorizationId =
+        auth.data['providerAuthorizationId'] as String;
     await backend.post(
       '/internal/simulator/authorizations/$authorizationId/capture',
-      data: {'vinkId': vinkId, 'providerAuthorizationId': providerAuthorizationId, 'settledAmountMinor': 12000},
+      data: {
+        'vinkId': vinkId,
+        'providerAuthorizationId': providerAuthorizationId,
+        'settledAmountMinor': 12000,
+      },
     );
 
     final completedSeen = await _waitUntil(
       tester,
-      () => find.text('This Vink is complete. Thanks for organizing.').evaluate().isNotEmpty,
+      () => find
+          .text('This Vink is complete. Thanks for organizing.')
+          .evaluate()
+          .isNotEmpty,
       timeout: const Duration(seconds: 30),
     );
-    expect(completedSeen, isTrue, reason: 'the lobby should show COMPLETED live, no reload');
+    expect(
+      completedSeen,
+      isTrue,
+      reason: 'the lobby should show COMPLETED live, no reload',
+    );
     await binding.takeScreenshot('09-vink-completed');
   });
 }

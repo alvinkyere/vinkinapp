@@ -47,7 +47,10 @@ class VinkProgressIndicator extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        Text('$fundedAmountLabel of $requiredAmountLabel funded', style: VinkTypography.bodySmallSecondary),
+        Text(
+          '$fundedAmountLabel of $requiredAmountLabel funded',
+          style: VinkTypography.bodySmallSecondary,
+        ),
       ],
     );
   }

@@ -16,20 +16,26 @@ class ApiClient {
   // Every real caller omits it and gets the exact same production `Dio` as before. `appVersion`
   // is the same pattern for "app-version enforcement" — a test supplies a fixed value instead
   // of the real `PackageInfo.fromPlatform()` platform-channel call.
-  ApiClient({required SecureTokenStore tokenStore, Dio? dio, Future<String>? appVersion})
+  ApiClient({
+    required SecureTokenStore tokenStore,
+    Dio? dio,
+    Future<String>? appVersion,
+  })
     // ignore: prefer_initializing_formals — `_tokenStore` is deliberately private while the
     // constructor parameter stays public (`tokenStore`) for a readable call site elsewhere.
     : _tokenStore = tokenStore,
-      _appVersion = appVersion ?? PackageInfo.fromPlatform().then((info) => info.version),
-      _dio =
-          dio ??
-          Dio(
-            BaseOptions(
-              baseUrl: ApiConfig.baseUrl,
-              connectTimeout: const Duration(seconds: 10),
-              receiveTimeout: const Duration(seconds: 15),
-            ),
-          ) {
+       _appVersion =
+           appVersion ??
+           PackageInfo.fromPlatform().then((info) => info.version),
+       _dio =
+           dio ??
+           Dio(
+             BaseOptions(
+               baseUrl: ApiConfig.baseUrl,
+               connectTimeout: const Duration(seconds: 10),
+               receiveTimeout: const Duration(seconds: 15),
+             ),
+           ) {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
@@ -48,7 +54,9 @@ class ApiClient {
           final isAuthFailure = error.response?.statusCode == 401;
           final alreadyRetried = error.requestOptions.extra['retried'] == true;
           if (isAuthFailure && !alreadyRetried && await _tryRefresh()) {
-            final retried = await _dio.fetch(error.requestOptions..extra['retried'] = true);
+            final retried = await _dio.fetch(
+              error.requestOptions..extra['retried'] = true,
+            );
             return handler.resolve(retried);
           }
           handler.next(error);
@@ -65,7 +73,10 @@ class ApiClient {
     final refreshToken = await _tokenStore.readRefreshToken();
     if (refreshToken == null) return false;
     try {
-      final response = await _dio.post('/api/v1/auth/refresh', data: {'refreshToken': refreshToken});
+      final response = await _dio.post(
+        '/api/v1/auth/refresh',
+        data: {'refreshToken': refreshToken},
+      );
       await _tokenStore.save(
         accessToken: response.data['accessToken'] as String,
         refreshToken: response.data['refreshToken'] as String,
@@ -88,20 +99,25 @@ class ApiClient {
     String path, {
     Map<String, dynamic>? body,
     CancelToken? cancelToken,
-  }) => _unwrap(_dio.post(path, data: body ?? const {}, cancelToken: cancelToken));
+  }) => _unwrap(
+    _dio.post(path, data: body ?? const {}, cancelToken: cancelToken),
+  );
 
   Future<Map<String, dynamic>> put(
     String path, {
     Map<String, dynamic>? body,
     CancelToken? cancelToken,
-  }) => _unwrap(_dio.put(path, data: body ?? const {}, cancelToken: cancelToken));
+  }) =>
+      _unwrap(_dio.put(path, data: body ?? const {}, cancelToken: cancelToken));
 
   /// Slice I5B (D40) — draft-only guest correction is this app's first PATCH endpoint.
   Future<Map<String, dynamic>> patch(
     String path, {
     Map<String, dynamic>? body,
     CancelToken? cancelToken,
-  }) => _unwrap(_dio.patch(path, data: body ?? const {}, cancelToken: cancelToken));
+  }) => _unwrap(
+    _dio.patch(path, data: body ?? const {}, cancelToken: cancelToken),
+  );
 
   Future<void> delete(String path, {CancelToken? cancelToken}) =>
       _unwrap(_dio.delete(path, cancelToken: cancelToken)).then((_) {});
@@ -117,7 +133,9 @@ class ApiClient {
     }
   }
 
-  Future<Map<String, dynamic>> _unwrap(Future<Response<dynamic>> request) async {
+  Future<Map<String, dynamic>> _unwrap(
+    Future<Response<dynamic>> request,
+  ) async {
     try {
       final response = await request;
       return response.data as Map<String, dynamic>;
@@ -141,6 +159,10 @@ class ApiClient {
         message: data['message'] as String?,
       );
     }
-    return ApiException(statusCode: error.response?.statusCode ?? 0, code: 'NETWORK_ERROR', message: error.message);
+    return ApiException(
+      statusCode: error.response?.statusCode ?? 0,
+      code: 'NETWORK_ERROR',
+      message: error.message,
+    );
   }
 }

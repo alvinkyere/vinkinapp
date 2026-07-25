@@ -13,5 +13,5 @@ class VinkSpacing {
   static const xxl = 48.0;
 
   /// vinkin.org's hero card: `p-7` = 28px.
-  static const cardPadding = 28.0;
+  static const cardPadding = 20.0;
 }

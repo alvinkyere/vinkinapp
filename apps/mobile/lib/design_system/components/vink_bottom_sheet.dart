@@ -16,11 +16,15 @@ Future<T?> showVinkBottomSheet<T>({
     isScrollControlled: isScrollControlled,
     backgroundColor: VinkColors.paper,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(VinkRadius.card)),
+      borderRadius: BorderRadius.vertical(
+        top: Radius.circular(VinkRadius.card),
+      ),
     ),
     builder: (context) {
       return Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: SafeArea(
           top: false,
           // Bounded to the viewport so content taller than the screen (e.g. the guest-invite
@@ -28,9 +32,16 @@ Future<T?> showVinkBottomSheet<T>({
           // `showModalBottomSheet` alone doesn't cap height, so without this bound
           // `SingleChildScrollView` would just grow with its child instead of scrolling.
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.9,
+            ),
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(VinkSpacing.lg, VinkSpacing.sm, VinkSpacing.lg, VinkSpacing.lg),
+              padding: const EdgeInsets.fromLTRB(
+                VinkSpacing.lg,
+                VinkSpacing.sm,
+                VinkSpacing.lg,
+                VinkSpacing.lg,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

@@ -29,7 +29,10 @@ class VinkRepository {
   /// depending on the server-side `VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL` flag (Slice I2B);
   /// entirely server-driven, no client-side branching on the flag.
   Future<List<Vink>> listMyVinks({CancelToken? cancelToken}) async {
-    final response = await _client.get('/api/v1/vinks', cancelToken: cancelToken);
+    final response = await _client.get(
+      '/api/v1/vinks',
+      cancelToken: cancelToken,
+    );
     return (response['vinks'] as List<dynamic>)
         .map((entry) => Vink.fromJson(entry as Map<String, dynamic>))
         .toList();
@@ -41,15 +44,24 @@ class VinkRepository {
   /// [cancelToken], if provided (ENG3 "request cancellation"), lets a caller abort this
   /// specific fetch — e.g. the Lobby screen cancels every in-flight read on `dispose()`
   /// rather than letting a superseded request finish uselessly against a gone screen.
-  Future<VinkSnapshot> getSnapshot(String vinkId, {CancelToken? cancelToken}) async {
-    final response = await _client.get('/api/v1/vinks/$vinkId', cancelToken: cancelToken);
+  Future<VinkSnapshot> getSnapshot(
+    String vinkId, {
+    CancelToken? cancelToken,
+  }) async {
+    final response = await _client.get(
+      '/api/v1/vinks/$vinkId',
+      cancelToken: cancelToken,
+    );
     return VinkSnapshot.fromJson(response);
   }
 
   /// `GET /api/v1/vinks/:vinkId/participant-view` — the customer-safe counterpart for a
   /// signed-in member who isn't the organizer (Slice I2B); never another participant's
   /// identity or status.
-  Future<ParticipantVinkView> getParticipantView(String vinkId, {CancelToken? cancelToken}) async {
+  Future<ParticipantVinkView> getParticipantView(
+    String vinkId, {
+    CancelToken? cancelToken,
+  }) async {
     final response = await _client.get(
       '/api/v1/vinks/$vinkId/participant-view',
       cancelToken: cancelToken,
@@ -58,28 +70,47 @@ class VinkRepository {
   }
 
   /// `GET /api/v1/vinks/:vinkId/activity` — this Vink's own transition/event history.
-  Future<List<ActivityEntry>> getActivity(String vinkId, {CancelToken? cancelToken}) async {
-    final list = await _client.getList('/api/v1/vinks/$vinkId/activity', cancelToken: cancelToken);
-    return list.map((raw) => ActivityEntry.fromJson(raw as Map<String, dynamic>)).toList();
+  Future<List<ActivityEntry>> getActivity(
+    String vinkId, {
+    CancelToken? cancelToken,
+  }) async {
+    final list = await _client.getList(
+      '/api/v1/vinks/$vinkId/activity',
+      cancelToken: cancelToken,
+    );
+    return list
+        .map((raw) => ActivityEntry.fromJson(raw as Map<String, dynamic>))
+        .toList();
   }
 
   /// `GET /api/v1/vinks/:vinkId/participant-activity` — the customer-safe counterpart to
   /// [getActivity] for a signed-in member who isn't the organizer (Slice I2D). Reuses the same
   /// [ActivityEntry] wire shape; the server has already filtered/sanitized every entry.
-  Future<List<ActivityEntry>> getParticipantActivity(String vinkId, {CancelToken? cancelToken}) async {
+  Future<List<ActivityEntry>> getParticipantActivity(
+    String vinkId, {
+    CancelToken? cancelToken,
+  }) async {
     final list = await _client.getList(
       '/api/v1/vinks/$vinkId/participant-activity',
       cancelToken: cancelToken,
     );
-    return list.map((raw) => ActivityEntry.fromJson(raw as Map<String, dynamic>)).toList();
+    return list
+        .map((raw) => ActivityEntry.fromJson(raw as Map<String, dynamic>))
+        .toList();
   }
 
   /// `GET /api/v1/vinks/:vinkId/details` — Vink Details (Slice I6, D29/D31 "Vink details",
   /// never "receipt"). Organizer or any active participant; the server has already applied
   /// Phase 4 §11's deliberate widening (every participant's own outcome, not just the
   /// viewer's).
-  Future<VinkDetailsView> getDetails(String vinkId, {CancelToken? cancelToken}) async {
-    final response = await _client.get('/api/v1/vinks/$vinkId/details', cancelToken: cancelToken);
+  Future<VinkDetailsView> getDetails(
+    String vinkId, {
+    CancelToken? cancelToken,
+  }) async {
+    final response = await _client.get(
+      '/api/v1/vinks/$vinkId/details',
+      cancelToken: cancelToken,
+    );
     return VinkDetailsView.fromJson(response);
   }
 
@@ -89,7 +120,8 @@ class VinkRepository {
   /// mutating financial command should complete server-side once sent, regardless of whether
   /// the screen that triggered it is still around to see the result (cancellation is for
   /// reads that become moot when superseded or the screen disposes, not for commands).
-  Future<void> cancelVink(String vinkId) => _client.post('/api/v1/vinks/$vinkId/cancel');
+  Future<void> cancelVink(String vinkId) =>
+      _client.post('/api/v1/vinks/$vinkId/cancel');
 
   /// `POST /api/v1/vinks/:vinkId/contributions/authorize` — the exact same contribution
   /// engine every participant uses, organizer included (Phase 0 §3's no-role-shortcut rule);
@@ -100,7 +132,10 @@ class VinkRepository {
 
   /// `GET /api/v1/invites` — Invites feature (D44). Newest-invited-first.
   Future<List<PendingInvite>> listMyInvites({CancelToken? cancelToken}) async {
-    final response = await _client.get('/api/v1/invites', cancelToken: cancelToken);
+    final response = await _client.get(
+      '/api/v1/invites',
+      cancelToken: cancelToken,
+    );
     return (response['invites'] as List<dynamic>)
         .map((entry) => PendingInvite.fromJson(entry as Map<String, dynamic>))
         .toList();

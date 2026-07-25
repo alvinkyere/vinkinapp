@@ -43,12 +43,13 @@ enum DeliveryMode {
     DeliveryMode.manual => 'Shared manually',
   };
 
-  static DeliveryMode? fromWireValue(String? value) => switch (value?.toUpperCase()) {
-    'SMS' => DeliveryMode.sms,
-    'EMAIL' => DeliveryMode.email,
-    'MANUAL' => DeliveryMode.manual,
-    _ => null,
-  };
+  static DeliveryMode? fromWireValue(String? value) =>
+      switch (value?.toUpperCase()) {
+        'SMS' => DeliveryMode.sms,
+        'EMAIL' => DeliveryMode.email,
+        'MANUAL' => DeliveryMode.manual,
+        _ => null,
+      };
 }
 
 /// A loose phone-shape check mirroring the backend's own `PHONE_SHAPE` regex

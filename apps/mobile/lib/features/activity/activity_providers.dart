@@ -15,7 +15,10 @@ typedef VinkActivity = ({
 /// take down the rest of the list — [failedCount] lets the screen show a small, honest "some
 /// items couldn't load" note alongside whatever DID load, rather than either silently hiding
 /// the failure or collapsing the whole screen into a single retry-everything error state.
-typedef VinkActivityLoadResult = ({List<VinkActivity> entries, int failedCount});
+typedef VinkActivityLoadResult = ({
+  List<VinkActivity> entries,
+  int failedCount,
+});
 
 /// Merges each of the user's own Vinks' activity feeds into one reverse-chronological list —
 /// an N+1 fetch (one per Vink), acceptable at pilot scale (a handful of Vinks per user), not
@@ -33,33 +36,32 @@ typedef VinkActivityLoadResult = ({List<VinkActivity> entries, int failedCount})
 /// Slice I6 (owner-directed partial-failure resilience): each vink's own fetch is now isolated
 /// in its own try/catch — one vink's failure is skipped and counted, never propagated to fail
 /// the whole `Future` the way an unhandled exception here would have.
-final recentActivityProvider = FutureProvider.autoDispose<VinkActivityLoadResult>((
-  ref,
-) async {
-  final repository = ref.read(vinkRepositoryProvider);
-  final vinks = await ref.watch(myVinksProvider.future);
-  final entries = <VinkActivity>[];
-  var failedCount = 0;
-  for (final vink in vinks) {
-    try {
-      final list = vink.isOrganizerRole
-          ? await repository.getActivity(vink.id)
-          : await repository.getParticipantActivity(vink.id);
-      for (final entry in list) {
-        entries.add((
-          vinkId: vink.id,
-          vinkTitle: purchaseCategoryLabel(vink.purchaseCategory),
-          entry: entry,
-          isOrganizerRole: vink.isOrganizerRole,
-        ));
+final recentActivityProvider =
+    FutureProvider.autoDispose<VinkActivityLoadResult>((ref) async {
+      final repository = ref.read(vinkRepositoryProvider);
+      final vinks = await ref.watch(myVinksProvider.future);
+      final entries = <VinkActivity>[];
+      var failedCount = 0;
+      for (final vink in vinks) {
+        try {
+          final list = vink.isOrganizerRole
+              ? await repository.getActivity(vink.id)
+              : await repository.getParticipantActivity(vink.id);
+          for (final entry in list) {
+            entries.add((
+              vinkId: vink.id,
+              vinkTitle: purchaseCategoryLabel(vink.purchaseCategory),
+              entry: entry,
+              isOrganizerRole: vink.isOrganizerRole,
+            ));
+          }
+        } catch (_) {
+          failedCount++;
+        }
       }
-    } catch (_) {
-      failedCount++;
-    }
-  }
-  entries.sort((a, b) => b.entry.at.compareTo(a.entry.at));
-  return (entries: entries, failedCount: failedCount);
-});
+      entries.sort((a, b) => b.entry.at.compareTo(a.entry.at));
+      return (entries: entries, failedCount: failedCount);
+    });
 
 /// Slice I6 (Phase 3 §4, D29) — a vink-level outcome summary row, one per terminal Vink, the
 /// data model Activity's flag-on list actually renders. `state`→outcome is the same simple
@@ -91,7 +93,10 @@ typedef VinkOutcomeSummary = ({
 });
 
 /// Same partial-failure contract as [VinkActivityLoadResult] above.
-typedef VinkOutcomesLoadResult = ({List<VinkOutcomeSummary> summaries, int failedCount});
+typedef VinkOutcomesLoadResult = ({
+  List<VinkOutcomeSummary> summaries,
+  int failedCount,
+});
 
 final vinkOutcomesProvider = FutureProvider.autoDispose<VinkOutcomesLoadResult>((
   ref,

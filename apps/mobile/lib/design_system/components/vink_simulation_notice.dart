@@ -8,7 +8,11 @@ import '../vink_typography.dart';
 /// that renders mock money/card state. Deliberately neutral (`smoke`/`ink`, no invented
 /// alert color) — this is informational, not a warning.
 class VinkSimulationNotice extends StatelessWidget {
-  const VinkSimulationNotice({super.key, this.text = 'Pilot simulation — no real card has been issued, no real money moves.'});
+  const VinkSimulationNotice({
+    super.key,
+    this.text =
+        'Pilot simulation — no real card has been issued, no real money moves.',
+  });
 
   final String text;
 
@@ -18,7 +22,10 @@ class VinkSimulationNotice extends StatelessWidget {
       label: 'Simulation notice: $text',
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: VinkSpacing.sm + 2, horizontal: VinkSpacing.md),
+        padding: const EdgeInsets.symmetric(
+          vertical: VinkSpacing.sm + 2,
+          horizontal: VinkSpacing.md,
+        ),
         decoration: BoxDecoration(
           color: VinkColors.ink.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(12),
@@ -27,7 +34,9 @@ class VinkSimulationNotice extends StatelessWidget {
           children: [
             Icon(Icons.info_outline_rounded, size: 16, color: VinkColors.smoke),
             const SizedBox(width: VinkSpacing.sm),
-            Expanded(child: Text(text, style: VinkTypography.bodySmallSecondary)),
+            Expanded(
+              child: Text(text, style: VinkTypography.bodySmallSecondary),
+            ),
           ],
         ),
       ),

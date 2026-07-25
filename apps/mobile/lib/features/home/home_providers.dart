@@ -45,10 +45,12 @@ AttentionBucket organizerAttentionBucket({
 }) {
   if (vinkState == 'RESTRICTED') return AttentionBucket.needsAttention;
   if (vinkState == 'OPEN' &&
-      paymentStateFor(ownContributionStatus) != VinkParticipantPaymentState.paid) {
+      paymentStateFor(ownContributionStatus) !=
+          VinkParticipantPaymentState.paid) {
     return AttentionBucket.needsAttention;
   }
-  if (allowedActions.contains('OPEN_VINK') || allowedActions.contains('COVER_REMAINING')) {
+  if (allowedActions.contains('OPEN_VINK') ||
+      allowedActions.contains('COVER_REMAINING')) {
     return AttentionBucket.needsAttention;
   }
   return AttentionBucket.waitingOnOthers;
@@ -76,6 +78,7 @@ typedef ActiveVink = ({
   int participantCount,
   AttentionBucket attentionBucket,
   ContributionProgress contributionProgress,
+
   /// Slice 3 (Home visual polish) — real display names, organizer-role entries only. Empty
   /// for a participant-role entry: `ParticipantVinkView` never carries another participant's
   /// identity (D24/D25), so there is nothing privacy-safe to show here for that role — the
@@ -108,11 +111,13 @@ final activeVinksProvider = FutureProvider.autoDispose<List<ActiveVink>>((
         attentionBucket: organizerAttentionBucket(
           vinkState: vink.state,
           allowedActions: snapshot.allowedActions,
-          ownContributionStatus: snapshot.contributionStatusByParticipant[organizerId],
+          ownContributionStatus:
+              snapshot.contributionStatusByParticipant[organizerId],
         ),
         contributionProgress: snapshot.contributionProgress,
         participantNames: [
-          for (final participant in snapshot.participants) participant.displayName,
+          for (final participant in snapshot.participants)
+            participant.displayName,
         ],
       ));
     } else {

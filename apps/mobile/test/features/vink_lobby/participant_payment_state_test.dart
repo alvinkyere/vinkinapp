@@ -8,14 +8,28 @@ void main() {
   });
 
   test('in-flight statuses read as processing', () {
-    for (final status in ['CREATED', 'AUTHORIZATION_PENDING', 'RESOLUTION_PENDING', 'CAPTURE_PENDING', 'CANCELLATION_PENDING']) {
-      expect(paymentStateFor(status), VinkParticipantPaymentState.processing, reason: status);
+    for (final status in [
+      'CREATED',
+      'AUTHORIZATION_PENDING',
+      'RESOLUTION_PENDING',
+      'CAPTURE_PENDING',
+      'CANCELLATION_PENDING',
+    ]) {
+      expect(
+        paymentStateFor(status),
+        VinkParticipantPaymentState.processing,
+        reason: status,
+      );
     }
   });
 
   test('settled-success statuses read as paid', () {
     for (final status in ['AUTHORIZED', 'CAPTURED', 'SETTLED']) {
-      expect(paymentStateFor(status), VinkParticipantPaymentState.paid, reason: status);
+      expect(
+        paymentStateFor(status),
+        VinkParticipantPaymentState.paid,
+        reason: status,
+      );
     }
   });
 

@@ -812,6 +812,16 @@ Slices 2/6/7/8/9/10.
 `PV12` (the actual closed pilot) remains an owner/operational decision deferred until
 ENG0–ENG9 close.
 
+**ENG4 Slice 2 implemented locally** (`milestone-reports/ENG4-SLICE-2-RENDER-TOPOLOGY.md`,
+2026-07-25): owner selected Render as the final hosted-pilot platform, superseding Railway.
+`render.yaml` now defines isolated/protected staging and production environments, each with its
+own API, worker, Guest Web, Operations Console, PostgreSQL 16, durable no-eviction Key Value,
+config, JWT key, and operator password. Staging deploys from `main` only after checks pass;
+production auto-deploy is off. Only the API `preDeployCommand` applies the advisory-locked
+migrations; new API/worker startup checks refuse both older and newer schema sets without
+mutating them. Topology is code-complete but not provisioned: Render/GitHub access, cost review,
+and DNS changes are external actions. Next infrastructure slices: 6/7/8/9, then 10.
+
 ## Hard rules (from the Spec — never relax to make something pass)
 
 - Ledger is append-only, balanced, integer minor units; DB triggers enforce it

@@ -79,14 +79,21 @@ class ClassifiedFailure {
   final bool requiresSignIn;
 }
 
-const _alreadyCompletedCodes = {'PARTICIPANT_ALREADY_ADDED', 'INVITE_ALREADY_SENT'};
+const _alreadyCompletedCodes = {
+  'PARTICIPANT_ALREADY_ADDED',
+  'INVITE_ALREADY_SENT',
+};
 // ILLEGAL_TRANSITION (packages/domain's state machine, e.g. a double-tapped Open/Cancel on a
 // Vink that already moved on) doesn't distinguish "you're late, it's already done" from "this
 // can genuinely never happen" the way ApiException is shaped today — refreshing state is the
 // right response either way, so this conservatively classifies as conflict, not a guess at
 // which of the two it was.
 const _conflictCodes = {'VINK_VERSION_CONFLICT', 'ILLEGAL_TRANSITION'};
-const _expiredCodes = {'VINK_NOT_JOINABLE', 'PARTICIPANT_EXITED', 'GUEST_UNAUTHENTICATED'};
+const _expiredCodes = {
+  'VINK_NOT_JOINABLE',
+  'PARTICIPANT_EXITED',
+  'GUEST_UNAUTHENTICATED',
+};
 const _terminalCodes = {
   'VINK_NOT_FOUND',
   'PARTICIPANT_NOT_FOUND',
@@ -200,7 +207,9 @@ ClassifiedFailure classifyFailure(Object error) {
       requiresSignIn: true,
     );
   }
-  if (error.code == 'RATE_LIMITED' || error.code == 'NETWORK_ERROR' || error.statusCode >= 500) {
+  if (error.code == 'RATE_LIMITED' ||
+      error.code == 'NETWORK_ERROR' ||
+      error.statusCode >= 500) {
     return ClassifiedFailure(
       category: FailureCategory.retryable,
       message: message,

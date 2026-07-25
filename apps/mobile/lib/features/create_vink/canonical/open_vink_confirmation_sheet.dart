@@ -59,7 +59,10 @@ class OpenVinkConfirmationSheet extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(purchaseCategoryLabel(category), style: VinkTypography.cardTitle),
+            Text(
+              purchaseCategoryLabel(category),
+              style: VinkTypography.cardTitle,
+            ),
             MoneyText(requiredAmountMinor, style: VinkTypography.amountMedium),
           ],
         ),
@@ -80,20 +83,28 @@ class OpenVinkConfirmationSheet extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        person.isOrganizer ? '${person.displayName} · You' : person.displayName,
+                        person.isOrganizer
+                            ? '${person.displayName} · You'
+                            : person.displayName,
                         style: VinkTypography.body,
                       ),
                       // Customer-safe expectation only, per person — never provider
                       // acceptance/attempt history (Phase 4 §5c, explicitly no diagnostics
                       // during Create).
-                      if (DeliveryMode.fromWireValue(person.deliveryMode) case final mode?)
-                        Text(mode.shortExpectation, style: VinkTypography.bodySmallSecondary),
+                      if (DeliveryMode.fromWireValue(person.deliveryMode)
+                          case final mode?)
+                        Text(
+                          mode.shortExpectation,
+                          style: VinkTypography.bodySmallSecondary,
+                        ),
                     ],
                   ),
                 ),
                 MoneyText(
                   amountsMinorByParticipantId[person.participantId] ?? 0,
-                  style: VinkTypography.bodySmall.copyWith(fontWeight: FontWeight.w600),
+                  style: VinkTypography.bodySmall.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),

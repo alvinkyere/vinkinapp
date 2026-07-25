@@ -11,8 +11,8 @@ import '../vink_typography.dart';
 /// The site's real blue/paper/ink color tokens are unchanged; only shape and case converge
 /// to the concept. `minHeight: 48` clears the 44×44pt minimum touch target with room for
 /// label ascenders/descenders.
-const double _minButtonHeight = 48;
-const double _buttonRadius = 16;
+const double _minButtonHeight = 52;
+const double _buttonRadius = 999;
 
 /// Swaps a button's label for a loading spinner without the button visibly resizing
 /// (docs/design/phase-9-motion-system.md §2/§7, docs/design/phase-10-implementation-readiness.md

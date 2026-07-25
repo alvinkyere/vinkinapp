@@ -9,7 +9,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// set), the SERVER becomes the source of truth and this store is cleared immediately —
 /// the two mechanisms never overlap.
 class LocalDraftStore {
-  LocalDraftStore({FlutterSecureStorage? storage}) : _storage = storage ?? const FlutterSecureStorage();
+  LocalDraftStore({FlutterSecureStorage? storage})
+    : _storage = storage ?? const FlutterSecureStorage();
 
   final FlutterSecureStorage _storage;
 
@@ -27,7 +28,11 @@ class LocalDraftStore {
       // current, flag-off) five-step wizard before this slice never has the key at all;
       // absent-vs-empty are treated identically, both read back as ''.
       final purpose = json['purpose'] as String?;
-      return UnsavedDraft(category: category, totalText: totalText ?? '', purpose: purpose ?? '');
+      return UnsavedDraft(
+        category: category,
+        totalText: totalText ?? '',
+        purpose: purpose ?? '',
+      );
     } on FormatException {
       return null; // corrupt/old-shape value — treat as no draft rather than crashing
     }
@@ -46,7 +51,11 @@ class LocalDraftStore {
 }
 
 class UnsavedDraft {
-  const UnsavedDraft({required this.category, required this.totalText, this.purpose = ''});
+  const UnsavedDraft({
+    required this.category,
+    required this.totalText,
+    this.purpose = '',
+  });
 
   final String category;
   final String totalText;

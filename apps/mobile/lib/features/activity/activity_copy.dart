@@ -10,9 +10,14 @@ import '../../core/models/activity_entry.dart';
 /// byte unchanged) swaps `VinkCreated`/`VinkCancelled`'s "You..." framing — true only for the
 /// organizer — to neutral phrasing when the viewer is a mere participant, since those two are
 /// the only cases in this switch that name the viewer as the actor.
-String activityCopy(ActivityEntry entry, {required String vinkTitle, bool isOrganizerViewer = true}) {
+String activityCopy(
+  ActivityEntry entry, {
+  required String vinkTitle,
+  bool isOrganizerViewer = true,
+}) {
   return switch (entry.eventType) {
-    'VinkCreated' => isOrganizerViewer ? 'You started $vinkTitle' : 'This Vink was created',
+    'VinkCreated' =>
+      isOrganizerViewer ? 'You started $vinkTitle' : 'This Vink was created',
     'ParticipantJoined' => 'Someone joined $vinkTitle',
     // Invites feature (2026-07-23, D44).
     'ParticipantInvited' => 'Someone was invited to $vinkTitle',
@@ -27,7 +32,10 @@ String activityCopy(ActivityEntry entry, {required String vinkTitle, bool isOrga
     'MerchantAuthorizationApproved' => '$vinkTitle was used at checkout',
     'PurchaseCaptured' => '$vinkTitle purchase completed',
     'VinkCompleted' => '$vinkTitle is all paid up',
-    'VinkCancelled' => isOrganizerViewer ? 'You cancelled $vinkTitle' : 'This Vink was cancelled',
+    'VinkCancelled' =>
+      isOrganizerViewer
+          ? 'You cancelled $vinkTitle'
+          : 'This Vink was cancelled',
     'VinkExpired' => '$vinkTitle expired before everyone joined',
     'RefundIssued' => 'A refund went out for $vinkTitle',
     _ => '$vinkTitle was updated',

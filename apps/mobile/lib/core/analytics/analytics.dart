@@ -13,19 +13,33 @@ import '../networking/api_config.dart';
 /// the backend's funnel-event endpoint (apps/api/src/modules/analytics), the same one
 /// apps/guest-web's `lib/analytics.ts` posts to — one funnel, two clients.
 abstract class Analytics {
-  void track(String event, [Map<String, Object?> properties = const {}, String? vinkId]);
+  void track(
+    String event, [
+    Map<String, Object?> properties = const {},
+    String? vinkId,
+  ]);
 }
 
 class DebugAnalytics implements Analytics {
   @override
-  void track(String event, [Map<String, Object?> properties = const {}, String? vinkId]) {
-    developer.log(jsonEncode({'event': event, 'vinkId': vinkId, ...properties}), name: 'vinkin.analytics');
+  void track(
+    String event, [
+    Map<String, Object?> properties = const {},
+    String? vinkId,
+  ]) {
+    developer.log(
+      jsonEncode({'event': event, 'vinkId': vinkId, ...properties}),
+      name: 'vinkin.analytics',
+    );
   }
 }
 
 String _randomClientId() {
   final random = Random.secure();
-  return List.generate(16, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  return List.generate(
+    16,
+    (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ).join();
 }
 
 /// Posts every event to the backend, fire-and-forget — a network failure here must never
@@ -33,19 +47,28 @@ String _randomClientId() {
 /// [DebugAnalytics]'s formatting) so `flutter run`'s console still shows events during
 /// development without needing the backend up.
 class HttpAnalytics implements Analytics {
-  HttpAnalytics({Dio? dio}) : _dio = dio ?? Dio(BaseOptions(baseUrl: ApiConfig.baseUrl));
+  HttpAnalytics({Dio? dio})
+    : _dio = dio ?? Dio(BaseOptions(baseUrl: ApiConfig.baseUrl));
 
   final Dio _dio;
   final String _clientId = _randomClientId();
   final _debug = DebugAnalytics();
 
   @override
-  void track(String event, [Map<String, Object?> properties = const {}, String? vinkId]) {
+  void track(
+    String event, [
+    Map<String, Object?> properties = const {},
+    String? vinkId,
+  ]) {
     _debug.track(event, properties, vinkId);
     unawaited(_post(event, properties, vinkId));
   }
 
-  Future<void> _post(String event, Map<String, Object?> properties, String? vinkId) async {
+  Future<void> _post(
+    String event,
+    Map<String, Object?> properties,
+    String? vinkId,
+  ) async {
     try {
       await _dio.post(
         '/api/v1/analytics/events',

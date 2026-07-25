@@ -53,7 +53,11 @@ class VinkTextField extends StatelessWidget {
         autofocus: autofocus,
         obscureText: obscureText,
         style: VinkTypography.body,
-        decoration: InputDecoration(labelText: label, errorText: errorText, counterText: ''),
+        decoration: InputDecoration(
+          labelText: label,
+          errorText: errorText,
+          counterText: '',
+        ),
       ),
     );
   }
@@ -86,12 +90,16 @@ class VinkMoneyField extends StatelessWidget {
         onChanged: onChanged,
         autofocus: autofocus,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+        ],
         textAlign: TextAlign.center,
         style: VinkTypography.amountLarge,
         decoration: InputDecoration(
           prefixText: '\$ ',
-          prefixStyle: VinkTypography.amountLarge.copyWith(color: VinkColors.smoke),
+          prefixStyle: VinkTypography.amountLarge.copyWith(
+            color: VinkColors.smoke,
+          ),
           errorText: errorText,
           border: InputBorder.none,
           focusedBorder: InputBorder.none,

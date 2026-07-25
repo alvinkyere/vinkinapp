@@ -14,10 +14,12 @@ const _paidStatuses = {'AUTHORIZED', 'CAPTURED', 'SETTLED'};
 /// human-facing payment indicator (design correction: friendly status language, never a
 /// raw backend status string).
 VinkParticipantPaymentState paymentStateFor(String? contributionStatus) {
-  if (contributionStatus != null && _paidStatuses.contains(contributionStatus)) {
+  if (contributionStatus != null &&
+      _paidStatuses.contains(contributionStatus)) {
     return VinkParticipantPaymentState.paid;
   }
-  if (contributionStatus != null && _processingStatuses.contains(contributionStatus)) {
+  if (contributionStatus != null &&
+      _processingStatuses.contains(contributionStatus)) {
     return VinkParticipantPaymentState.processing;
   }
   return VinkParticipantPaymentState.waiting;

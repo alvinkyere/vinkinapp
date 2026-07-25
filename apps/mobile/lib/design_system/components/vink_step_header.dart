@@ -32,7 +32,11 @@ class VinkStepHeader extends StatelessWidget {
 /// gray ring while still ahead; the connecting line between two reached nodes is blue, gray
 /// otherwise.
 class VinkStepDots extends StatelessWidget {
-  const VinkStepDots({super.key, required this.stepIndex, required this.stepCount});
+  const VinkStepDots({
+    super.key,
+    required this.stepIndex,
+    required this.stepCount,
+  });
 
   final int stepIndex;
   final int stepCount;
@@ -48,7 +52,9 @@ class VinkStepDots extends StatelessWidget {
               Expanded(
                 child: Container(
                   height: 2,
-                  color: index <= stepIndex ? VinkColors.blue : VinkColors.ink.withValues(alpha: 0.12),
+                  color: index <= stepIndex
+                      ? VinkColors.blue
+                      : VinkColors.ink.withValues(alpha: 0.12),
                 ),
               ),
             Container(
@@ -56,10 +62,15 @@ class VinkStepDots extends StatelessWidget {
               height: 10,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: index <= stepIndex ? VinkColors.blue : Colors.transparent,
+                color: index <= stepIndex
+                    ? VinkColors.blue
+                    : Colors.transparent,
                 border: index <= stepIndex
                     ? null
-                    : Border.all(color: VinkColors.ink.withValues(alpha: 0.2), width: 1.5),
+                    : Border.all(
+                        color: VinkColors.ink.withValues(alpha: 0.2),
+                        width: 1.5,
+                      ),
               ),
             ),
           ],

@@ -21,9 +21,15 @@ void main() {
       expect(isOnline(const [ConnectivityResult.mobile]), isTrue);
     });
 
-    test('[none, wifi] (a device reporting both) is online — any real connection counts', () {
-      expect(isOnline(const [ConnectivityResult.none, ConnectivityResult.wifi]), isTrue);
-    });
+    test(
+      '[none, wifi] (a device reporting both) is online — any real connection counts',
+      () {
+        expect(
+          isOnline(const [ConnectivityResult.none, ConnectivityResult.wifi]),
+          isTrue,
+        );
+      },
+    );
   });
 
   group('ENG3: ConnectivityService', () {
@@ -43,17 +49,20 @@ void main() {
       expect(await service.checkIsOnline(), isFalse);
     });
 
-    test('onlineChanges maps the raw connectivity stream through isOnline', () async {
-      final service = ConnectivityService(
-        checkConnectivity: () async => const [ConnectivityResult.wifi],
-        connectivityChanges: () => Stream.fromIterable([
-          const [ConnectivityResult.wifi],
-          const [ConnectivityResult.none],
-          const [ConnectivityResult.mobile],
-        ]),
-      );
-      expect(await service.onlineChanges.toList(), [true, false, true]);
-    });
+    test(
+      'onlineChanges maps the raw connectivity stream through isOnline',
+      () async {
+        final service = ConnectivityService(
+          checkConnectivity: () async => const [ConnectivityResult.wifi],
+          connectivityChanges: () => Stream.fromIterable([
+            const [ConnectivityResult.wifi],
+            const [ConnectivityResult.none],
+            const [ConnectivityResult.mobile],
+          ]),
+        );
+        expect(await service.onlineChanges.toList(), [true, false, true]);
+      },
+    );
   });
 
   group('ENG3: isOnlineProvider', () {
@@ -63,7 +72,9 @@ void main() {
           connectivityServiceProvider.overrideWithValue(
             ConnectivityService(
               checkConnectivity: () async => const [ConnectivityResult.none],
-              connectivityChanges: () => Stream.fromIterable([const [ConnectivityResult.wifi]]),
+              connectivityChanges: () => Stream.fromIterable([
+                const [ConnectivityResult.wifi],
+              ]),
             ),
           ),
         ],
