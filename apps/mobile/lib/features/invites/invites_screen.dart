@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/commands/command_state.dart';
-import '../../core/errors/api_exception.dart';
-import '../../core/errors/human_errors.dart';
 import '../../core/models/pending_invite.dart';
 import '../../core/repositories/vink_repository.dart';
 import '../../design_system/components/money_text.dart';
@@ -40,9 +38,8 @@ class InvitesScreen extends ConsumerWidget {
               padding: const EdgeInsets.all(VinkSpacing.lg),
               children: [
                 VinkInlineError(
-                  message: error is ApiException
-                      ? humanErrorMessage(error)
-                      : "Couldn't load invites.",
+                  message:
+                      "Couldn't load invites. Check your connection and try again.",
                 ),
                 const SizedBox(height: VinkSpacing.md),
                 VinkSecondaryButton(

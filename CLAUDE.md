@@ -812,15 +812,16 @@ Slices 2/6/7/8/9/10.
 `PV12` (the actual closed pilot) remains an owner/operational decision deferred until
 ENG0–ENG9 close.
 
-**ENG4 Slice 2 implemented locally** (`milestone-reports/ENG4-SLICE-2-RENDER-TOPOLOGY.md`,
-2026-07-25): owner selected Render as the final hosted-pilot platform, superseding Railway.
-`render.yaml` now defines isolated/protected staging and production environments, each with its
-own API, worker, Guest Web, Operations Console, PostgreSQL 16, durable no-eviction Key Value,
-config, JWT key, and operator password. Staging deploys from `main` only after checks pass;
-production auto-deploy is off. Only the API `preDeployCommand` applies the advisory-locked
-migrations; new API/worker startup checks refuse both older and newer schema sets without
-mutating them. Topology is code-complete but not provisioned: Render/GitHub access, cost review,
-and DNS changes are external actions. Next infrastructure slices: 6/7/8/9, then 10.
+**ENG4 Slice 2 implemented locally** (`milestone-reports/ENG4-SLICE-2-RAILWAY-TOPOLOGY.md`,
+2026-07-25): owner selected Railway for the hosted pilot after rejecting Render's estimated
+cost. Three service-local `railway.json` files define the API, Guest Web, and Operations
+Console builds from the shared pnpm monorepo; Railway managed PostgreSQL and Redis complete the
+five-service, production-only initial topology. A separate worker is deliberately deferred
+because the API already runs the real sweep/outbox work while today's worker is only a
+heartbeat. The API alone applies advisory-locked migrations in a pre-deploy command, then its
+startup schema check and `/health/ready` fail closed. Topology is code-complete but not
+provisioned: Railway/GitHub access, variables, generated domains, cost controls, and DNS are
+external actions. Next infrastructure slices: 6/7/8/9, then 10.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

@@ -16,7 +16,7 @@ enum _Tone { neutral, active, positive, attention }
 
 const Map<String, _StatusPresentation> _presentations = {
   'DRAFT': _StatusPresentation('Draft', _Tone.neutral),
-  'OPEN': _StatusPresentation('Waiting for everyone', _Tone.neutral),
+  'OPEN': _StatusPresentation('Open', _Tone.active),
   'SUBMISSIONS_CLOSED': _StatusPresentation('Wrapping up', _Tone.active),
   'PROCESSING_GRACE': _StatusPresentation('Confirming payments', _Tone.active),
   'FUNDED': _StatusPresentation("Everyone's in", _Tone.positive),
@@ -54,6 +54,11 @@ class VinkStatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // OPEN is already communicated by the live progress, participant count, and available
+    // actions. A status pill here only repeats that information and previously produced the
+    // noisy "Waiting for everyone" label across Home and the live Vink.
+    if (state == 'OPEN') return const SizedBox.shrink();
+
     final presentation =
         _presentations[state] ?? _StatusPresentation(state, _Tone.neutral);
     final (background, foreground) = switch (presentation.tone) {

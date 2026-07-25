@@ -30,7 +30,7 @@ import 'canonical_edit_guest_sheet.dart';
 import 'delivery_mode.dart';
 import 'open_vink_confirmation_sheet.dart';
 
-enum CanonicalStep { purposeAndTotal, peopleAndSplit }
+enum CanonicalStep { purpose, total, peopleAndSplit }
 
 enum CanonicalSplitMode { equal, custom }
 
@@ -59,7 +59,7 @@ class CanonicalCreateVinkScreen extends ConsumerStatefulWidget {
 
 class _CanonicalCreateVinkScreenState
     extends ConsumerState<CanonicalCreateVinkScreen> {
-  CanonicalStep _step = CanonicalStep.purposeAndTotal;
+  CanonicalStep _step = CanonicalStep.purpose;
 
   // Slice I5B (D39) — human-readable payment context, required by this canonical screen
   // (not by the API itself — see `_createVinkAndContinue`'s own validation, and the D39 doc
@@ -321,6 +321,18 @@ class _CanonicalCreateVinkScreenState
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  void _continueFromPurpose() {
+    if (_purposeController.text.trim().isEmpty) {
+      setState(() => _purposeError = 'Tell everyone what this Vink is for.');
+      return;
+    }
+    setState(() {
+      _purposeError = null;
+      _error = null;
+      _step = CanonicalStep.total;
+    });
   }
 
   Future<void> _openAddPersonSheet() async {
@@ -639,11 +651,12 @@ class _CanonicalCreateVinkScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          VinkStepDots(stepIndex: _step.index, stepCount: 2),
+          VinkStepDots(stepIndex: _step.index, stepCount: 3),
           const SizedBox(height: VinkSpacing.lg),
           Expanded(
             child: switch (_step) {
-              CanonicalStep.purposeAndTotal => _buildPurposeAndTotalStep(),
+              CanonicalStep.purpose => _buildPurposeStep(),
+              CanonicalStep.total => _buildTotalStep(),
               CanonicalStep.peopleAndSplit => _buildPeopleAndSplitStep(),
             },
           ),
@@ -652,19 +665,14 @@ class _CanonicalCreateVinkScreenState
     );
   }
 
-  Widget _buildPurposeAndTotalStep() {
+  Widget _buildPurposeStep() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const VinkStepHeader(
-          title: 'What are you paying for, and how much?',
-          supportingText:
-              'Give it a name, pick the closest category, and enter the full amount everyone will split.',
+          title: 'What are you paying for?',
         ),
         const SizedBox(height: VinkSpacing.lg),
-        // Slice I5B (D39) — purpose, category, and total are all visibly on this one screen;
-        // total stays the dominant element (large, centered, below) — purpose and category
-        // are secondary inputs above it.
         VinkTextField(
           label: 'Purpose',
           controller: _purposeController,
@@ -701,9 +709,21 @@ class _CanonicalCreateVinkScreenState
             );
           }).toList(),
         ),
-        // The total is the dominant element on this screen (deliberately the largest text,
-        // centered, below the — comparatively small — category chips): the requirement is
-        // "total has the strongest hierarchy," not merely present alongside purpose.
+        const Spacer(),
+        VinkPrimaryButton(
+          label: 'Continue',
+          trailingIcon: Icons.arrow_forward_rounded,
+          onPressed: _continueFromPurpose,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTotalStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const VinkStepHeader(title: 'What’s the total?'),
         const Spacer(),
         Center(
           child: VinkMoneyField(

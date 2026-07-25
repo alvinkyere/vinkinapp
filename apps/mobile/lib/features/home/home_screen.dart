@@ -93,15 +93,9 @@ class HomeScreen extends ConsumerWidget {
               if (invitesEnabled) const _PendingInvitesSection(),
               if (homeActivityV2) ...[
                 _ActiveVinksSectionsV2(inkProgressVessel: inkProgressVessel),
-                const SizedBox(height: VinkSpacing.xl),
-                VinkPrimaryButton(
-                  label: 'Start a Vink',
-                  leadingIcon: Icons.add_rounded,
-                  onPressed: () => context.push('/create-vink'),
-                ),
                 const SizedBox(height: VinkSpacing.lg),
                 Align(
-                  alignment: Alignment.centerLeft,
+                  alignment: Alignment.center,
                   child: VinkTextButton(
                     label: 'See Activity',
                     onPressed: () => context.go('/activity'),
@@ -212,17 +206,24 @@ class _ActiveVinksSectionsV2 extends ConsumerWidget {
       ),
       data: (active) {
         if (active.isEmpty) {
-          return VinkSurfaceCard(
-            child: VinkEmptyState(
-              title: 'Nothing active right now',
-              message:
-                  'Split a purchase with your group — everyone pays their share, you pay the merchant once.',
-              action: VinkPrimaryButton(
-                label: 'Start your first Vink',
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              VinkSurfaceCard(
+                child: const VinkEmptyState(
+                  title: 'Nothing active right now',
+                  message:
+                      'Split a purchase with your group — everyone pays their share, you pay the merchant once.',
+                  action: SizedBox.shrink(),
+                ),
+              ),
+              const SizedBox(height: VinkSpacing.xl),
+              VinkPrimaryButton(
+                label: 'Start a Vink',
                 leadingIcon: Icons.add_rounded,
                 onPressed: () => context.push('/create-vink'),
               ),
-            ),
+            ],
           );
         }
         final ordered = [
@@ -286,7 +287,7 @@ class _ActiveVinksCarouselState extends State<_ActiveVinksCarousel> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         SizedBox(
-          height: 250,
+          height: 282,
           child: PageView.builder(
             controller: _controller,
             itemCount: widget.items.length,
@@ -405,7 +406,7 @@ class _ActiveVinkCardV2 extends StatelessWidget {
                       ],
                     ),
                   ),
-                  VinkStatusBadge(state: vink.state),
+                  if (vink.state != 'OPEN') VinkStatusBadge(state: vink.state),
                 ],
               ),
               const SizedBox(height: VinkSpacing.md),
@@ -451,7 +452,10 @@ class _ActiveVinkCardV2 extends StatelessWidget {
                   progress: progress.fraction,
                 ),
               const SizedBox(height: VinkSpacing.sm),
-              Row(
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: VinkSpacing.md,
+                runSpacing: VinkSpacing.xs,
                 children: [
                   // Slice 3 (Home visual polish) — real initials circles for an organizer-
                   // role card (their own already-visible participant list); the plain icon +
@@ -474,7 +478,6 @@ class _ActiveVinkCardV2 extends StatelessWidget {
                     style: VinkTypography.bodySmallSecondary,
                   ),
                   if (timeLabel != null) ...[
-                    const SizedBox(width: VinkSpacing.md),
                     Icon(
                       Icons.schedule_rounded,
                       size: 16,

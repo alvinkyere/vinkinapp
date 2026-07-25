@@ -104,7 +104,7 @@ Widget _wrap({
 }
 
 void main() {
-  group('Purpose+Total (Slice I5 screen 1)', () {
+  group('Separate Purpose and Total steps', () {
     testWidgets(
       'purpose is required before Continue proceeds — no server call without one',
       (tester) async {
@@ -121,10 +121,6 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.enterText(
-          find.byType(TextField).last,
-          '50.00',
-        ); // total only, purpose left blank
         await tester.tap(find.text('Continue'));
         await tester.pumpAndSettle();
 
@@ -156,6 +152,10 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        await tester.enterText(find.byType(TextField).first, 'Team lunch');
+        await tester.tap(find.text('Continue'));
+        await tester.pumpAndSettle();
+
         final moneyField = tester.widget<TextField>(
           find.byType(TextField).last,
         );
@@ -164,7 +164,6 @@ void main() {
           const TextInputType.numberWithOptions(decimal: true),
         );
 
-        await tester.enterText(find.byType(TextField).first, 'Team lunch');
         await tester.tap(find.text('Continue'));
         await tester.pumpAndSettle();
         expect(find.text('Enter an amount greater than zero.'), findsOneWidget);
@@ -207,6 +206,8 @@ void main() {
         await tester.pumpAndSettle();
 
         await tester.enterText(find.byType(TextField).first, 'Team lunch');
+        await tester.tap(find.text('Continue'));
+        await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField).last, '50.50');
         await tester.tap(find.text('Continue'));
         await tester.pumpAndSettle();

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "buildCommand": "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @vinkin/operations-console build",
+    "watchPatterns": [
+      "/apps/operations-console/**",
+      "/package.json",
+      "/pnpm-lock.yaml",
+      "/pnpm-workspace.yaml"
+    ]
+  },
+  "deploy": {
+    "startCommand": "pnpm --filter @vinkin/operations-console start",
+    "healthcheckPath": "/",
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3,
+    "drainingSeconds": "10"
+  }
+}
