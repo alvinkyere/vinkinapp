@@ -71,7 +71,7 @@ dependencies:
   # scheme needs no external infrastructure at all — just this package plus an Info.plist
   # registration (see ios/Runner/Info.plist).
   app_links: ^7.2.1
-  sentry_flutter: ^8.14.2
+  sentry_flutter: ^9.25.0
 
 dev_dependencies:
   flutter_test:

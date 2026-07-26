@@ -843,6 +843,13 @@ and Flutter without making local/runtime startup depend on a DSN. See
 10-CERTIFICATION}.md`. ENG4 is **not closed** until the external certification blockers in
 Slice 10 are completed.
 
+**ENG4 Slice 9 certified** (2026-07-26): controlled Sentry events were received from the live
+Railway API container, Guest Web browser, Operations Console browser, and Flutter app in the
+iOS simulator. The simulator check caught an actual `sentry_flutter 8.14.2`/Sentry Cocoa
+compile incompatibility; upgrading to stable `sentry_flutter 9.25.0` restored the iOS build and
+the Flutter event was received. Slice 10 remains open only on the non-Sentry release blockers
+listed in its certification report.
+
 ## Hard rules (from the Spec — never relax to make something pass)
 
 - Ledger is append-only, balanced, integer minor units; DB triggers enforce it
