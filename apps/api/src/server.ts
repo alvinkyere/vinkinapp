@@ -9,8 +9,10 @@ import { startOutboxPublisher } from './realtime/outbox-publisher.ts';
 import { RedisRealtimeHub } from './realtime/redis-hub.ts';
 import { MockFinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 import { MockDeliveryProvider } from '../../../packages/delivery/src/index.ts';
+import { startCrashReporter } from './observability/sentry.ts';
 
 const env = loadEnv();
+const crashReporter = startCrashReporter(env);
 const stopOtel = await startOtel(env);
 const { metrics, stop: stopMetrics } = await startMetrics(env);
 const sql = createDb(env);
@@ -44,6 +46,7 @@ const app = await buildApp({
   metrics,
   checkDb,
   checkRedis,
+  crashReporter,
 });
 
 // ENG4 Slice 4 ("health status" metric): reuses the exact same checks `/health/ready` already
@@ -87,6 +90,7 @@ async function shutdown(signal: string): Promise<void> {
   realtimeSub.disconnect();
   await stopOtel();
   await stopMetrics();
+  await crashReporter.flush();
   process.exit(0);
 }
 process.on('SIGINT', () => void shutdown('SIGINT'));

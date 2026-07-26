@@ -26,6 +26,7 @@ import { isAppVersionSupported } from './app-version.ts';
 import { NOOP_METRICS, type Metrics } from './observability/metrics.ts';
 import type { FinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 import type { DeliveryProvider } from '../../../packages/delivery/src/index.ts';
+import type { CrashReporter } from './observability/sentry.ts';
 
 export interface AppDeps extends HealthChecks {
   env: Env;
@@ -51,6 +52,8 @@ export interface AppDeps extends HealthChecks {
   /** ENG4 Slice 4 ("metrics & observability") — defaults to a genuine no-op so every existing
    * test/caller that never sets this is unaffected. */
   metrics?: Metrics;
+  /** ENG4 Slice 9: optional and no-op by default, like metrics. */
+  crashReporter?: CrashReporter;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -131,6 +134,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         })),
       });
     }
+    deps.crashReporter?.captureException(error, {
+      requestId: request.id,
+      method: request.method,
+      route: request.routeOptions.url ?? 'unmatched',
+    });
     request.log.error({ err: error }, 'unhandled error');
     return reply.code(500).send({ error: 'INTERNAL_ERROR' });
   });

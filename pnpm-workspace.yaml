@@ -4,6 +4,7 @@ packages:
 # Optional native/postinstall builds we deliberately skip: msgpackr-extract is a bullmq
 # performance optimization with a pure-JS fallback; protobufjs' postinstall is unneeded here.
 allowBuilds:
+  '@sentry/cli': true
   msgpackr-extract: false
   protobufjs: false
   sharp: true

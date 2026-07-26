@@ -16,6 +16,8 @@ jobs:
           node-version: 24
       - name: scan for prohibited provider SDK imports
         run: node tooling/scripts/check-provider-imports.mjs
+      - name: scan for committed secret material
+        run: node tooling/scripts/check-secrets.mjs
 
   packages:
     name: Package tests (zero-dependency, Node native TS)
@@ -81,3 +83,19 @@ jobs:
         run: |
           node src/db/migrate.ts
           npm test
+
+  mobile:
+    name: Mobile — analyze and test hosted configuration
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test --dart-define-from-file=config/pilot.json

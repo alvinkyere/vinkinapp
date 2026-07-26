@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["APBXUQAJAU.com.vinkin.vinkinMobile"],
+        "components": [
+          {
+            "/": "/app/vinks/*",
+            "comment": "Open an authenticated Vink directly in the organizer app."
+          }
+        ]
+      }
+    ]
+  }
+}

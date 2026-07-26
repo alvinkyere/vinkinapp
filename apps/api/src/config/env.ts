@@ -31,6 +31,9 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32).default(DEV_JWT_SECRET),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   VINKIN_OTEL_ENABLED: z.enum(['0', '1']).default('0'),
+  /** ENG4 Slice 9: optional crash-reporting endpoint. An absent DSN keeps Sentry completely
+   * disabled in local/test environments; the DSN is provider-issued and never defaulted. */
+  SENTRY_DSN: z.url().optional(),
   /** ENG4 Slice 4 ("metrics & observability") — a pull-based Prometheus `/metrics` endpoint
    * (own tiny HTTP server, `observability/metrics.ts`), deliberately gated by its own flag
    * rather than `VINKIN_OTEL_ENABLED`: that one is off by default because a push exporter is

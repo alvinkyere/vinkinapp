@@ -63,6 +63,7 @@ VINK_OPEN_DURATION_SECONDS=86400
 VINK_PROCESSING_GRACE_SECONDS=60
 VINK_SWEEP_INTERVAL_SECONDS=10
 GUEST_RESEND_COOLDOWN_SECONDS=60
+SENTRY_DSN=<API Sentry DSN; optional until the Sentry project exists>
 ```
 
 Set these on `guest-web`:
@@ -71,6 +72,8 @@ Set these on `guest-web`:
 VINKIN_ENV=demo
 NEXT_PUBLIC_API_BASE_URL=https://<api Railway domain>
 NEXT_PUBLIC_GUEST_CONTRIBUTION_STATUS_UI=1
+SENTRY_DSN=<Guest Web Sentry DSN; optional>
+NEXT_PUBLIC_SENTRY_DSN=<same Guest Web DSN; optional>
 ```
 
 Set these on `operations-console`:
@@ -78,7 +81,13 @@ Set these on `operations-console`:
 ```text
 VINKIN_ENV=demo
 NEXT_PUBLIC_API_BASE_URL=https://<api Railway domain>
+SENTRY_DSN=<Operations Console Sentry DSN; optional>
+NEXT_PUBLIC_SENTRY_DSN=<same Operations Console DSN; optional>
 ```
+
+For production source maps, also set `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and the service-specific
+`SENTRY_PROJECT` on each Next.js service. Builds remain functional when Sentry is not configured;
+error reporting is simply disabled.
 
 `NEXT_PUBLIC_API_BASE_URL` is compiled into each Next.js browser bundle, so changing it requires
 a redeploy, not only a process restart.

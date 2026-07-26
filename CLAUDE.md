@@ -832,6 +832,17 @@ HTTP 200. Runtime deliberately remains `VINKIN_ENV=demo` until a real provider i
 Mobile hosted-pilot endpoints and flags are now checked into `apps/mobile/config/pilot.json`
 (non-secret) for `--dart-define-from-file`.
 
+**ENG4 Slices 6–9 implemented; Slice 10 certification pending** (2026-07-25): Universal Links
+are configured for `join.vinkin.org` and the iOS bundle; Android App Links are implemented but
+the association file correctly awaits the real Google Play signing SHA-256 fingerprint.
+Railway remains the pilot secrets store and CI now rejects tracked credential artifacts.
+GitHub workflows cover PR verification, scheduled hosted readiness, and manual unsigned mobile
+release builds. Sentry is conditionally integrated across API, Guest Web, Operations Console,
+and Flutter without making local/runtime startup depend on a DSN. See
+`milestone-reports/ENG4-SLICE-{6-DEEP-LINKS,7-SECRETS,8-RELEASE-PIPELINE,9-CRASH-REPORTING,
+10-CERTIFICATION}.md`. ENG4 is **not closed** until the external certification blockers in
+Slice 10 are completed.
+
 ## Hard rules (from the Spec — never relax to make something pass)
 
 - Ledger is append-only, balanced, integer minor units; DB triggers enforce it
