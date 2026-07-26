@@ -1,6 +1,7 @@
 {
   "VINKIN_API_BASE_URL": "https://api.vinkin.org",
   "VINKIN_GUEST_WEB_BASE_URL": "https://join.vinkin.org",
+  "VINKIN_ENV": "demo",
   "CANONICAL_CREATE_FLOW": true,
   "HOME_ACTIVITY_V2": true,
   "INVITES_ENABLED": true,

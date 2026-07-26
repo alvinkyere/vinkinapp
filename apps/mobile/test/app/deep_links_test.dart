@@ -21,8 +21,27 @@ void main() {
       );
     });
 
-    test('a non-vinkin scheme is ignored', () {
-      expect(deepLinkRouteFor(Uri.parse('https://vinks/abc-123')), isNull);
+    test('the hosted Universal Link routes to the same Vink', () {
+      expect(
+        deepLinkRouteFor(
+          Uri.parse('https://join.vinkin.org/app/vinks/abc-123'),
+        ),
+        '/vinks/abc-123',
+      );
+    });
+
+    test('an HTTPS link on another host is ignored', () {
+      expect(
+        deepLinkRouteFor(Uri.parse('https://example.com/app/vinks/abc-123')),
+        isNull,
+      );
+    });
+
+    test('an unrelated path on join.vinkin.org is ignored', () {
+      expect(
+        deepLinkRouteFor(Uri.parse('https://join.vinkin.org/g/guest-token')),
+        isNull,
+      );
     });
 
     test(
@@ -39,6 +58,10 @@ void main() {
     test('no vinkId segment at all is ignored', () {
       expect(deepLinkRouteFor(Uri.parse('vinkin://vinks/')), isNull);
       expect(deepLinkRouteFor(Uri.parse('vinkin://vinks')), isNull);
+      expect(
+        deepLinkRouteFor(Uri.parse('https://join.vinkin.org/app/vinks/')),
+        isNull,
+      );
     });
 
     test(
