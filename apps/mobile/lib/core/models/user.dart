@@ -7,6 +7,7 @@ class VinkinUser {
     required this.displayName,
     this.email,
     this.phone,
+    this.emailVerified = false,
   });
 
   final String id;
@@ -18,11 +19,16 @@ class VinkinUser {
   /// slice; `users.phone` itself existed since PV1 but was never surfaced anywhere before.
   final String? phone;
 
+  /// ENG5 Slice 1 — mirrors `PublicUser.emailVerified`. Always `false` when [email] is null;
+  /// the server, never this client, is the source of truth for what "verified" means.
+  final bool emailVerified;
+
   factory VinkinUser.fromJson(Map<String, dynamic> json) => VinkinUser(
     id: json['id'] as String,
     username: json['username'] as String,
     displayName: json['displayName'] as String,
     email: json['email'] as String?,
     phone: json['phone'] as String?,
+    emailVerified: json['emailVerified'] as bool? ?? false,
   );
 }

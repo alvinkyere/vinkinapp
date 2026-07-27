@@ -10,6 +10,7 @@ import type {
   CaptureResult,
   CardResult,
   CardholderResult,
+  ContributionDeclineReason,
   CreateCardholderInput,
   CreateCustomerInput,
   CustomerResult,
@@ -115,6 +116,7 @@ export class MockFinancialProvider implements FinancialProvider {
   private counter = 0;
   private transientFailures = 0;
   private lostResponses = 0;
+  private readonly unknownOutcomes: { sideEffectHappened: boolean }[] = [];
 
   private readonly customers = new Map<string, CreateCustomerInput>();
   private readonly methods = new Map<string, { customerId: string; token: string }>();
@@ -157,6 +159,22 @@ export class MockFinancialProvider implements FinancialProvider {
       this.transientFailures -= 1;
       throw new ProviderError('PROVIDER_UNAVAILABLE', 'simulated failure before execution');
     }
+    if (this.unknownOutcomes.length > 0) {
+      const { sideEffectHappened } = this.unknownOutcomes.shift()!;
+      // Unlike simulateLostResponse (below), the caller here has NO way to know whether the
+      // side effect happened from this throw alone — that's the entire point of
+      // UNKNOWN_OUTCOME (ENG6 Slice 2). Ground truth is only recorded internally so a test
+      // can prove `retrievePaymentStatus`/`retrieveCardTransaction` afterward reports it
+      // correctly, the same way a real reconciliation check would have to.
+      if (sideEffectHappened) {
+        const result = execute();
+        this.idempotency.set(key, { paramsHash, result });
+      }
+      throw new ProviderError(
+        'UNKNOWN_OUTCOME',
+        'simulated ambiguous outcome — verify via retrievePaymentStatus/retrieveCardTransaction',
+      );
+    }
     const result = execute();
     this.idempotency.set(key, { paramsHash, result });
     if (this.lostResponses > 0) {
@@ -175,6 +193,14 @@ export class MockFinancialProvider implements FinancialProvider {
   /** Mock-only chaos: the next idempotent call executes, then the response is lost (§12). */
   simulateLostResponse(): void {
     this.lostResponses += 1;
+  }
+
+  /** Mock-only chaos (ENG6 Slice 2): the next idempotent call throws `UNKNOWN_OUTCOME`.
+   * [sideEffectHappened] is the ground truth a test can later confirm via
+   * `retrievePaymentStatus`/`retrieveCardTransaction` — real ambiguity has real ground truth
+   * the caller just doesn't know yet, not a coin flip this mock decides for itself. */
+  simulateUnknownOutcome(sideEffectHappened: boolean): void {
+    this.unknownOutcomes.push({ sideEffectHappened });
   }
 
   private emit(type: ProviderEventType, objectId: string, payload: Record<string, unknown>): void {
@@ -229,6 +255,16 @@ export class MockFinancialProvider implements FinancialProvider {
 
   async authorizeContribution(input: AuthorizeContributionInput): Promise<AuthorizationResult> {
     assertMoney(input.amount, 'authorizeContribution.amount');
+    // ENG6 Slice 2 (INVALID_REQUEST): the interface's own doc comment on `metadata` names
+    // vinkId as required — a real provider's own request validation would reject a call
+    // missing it the same way; not conflated with `assertMoney`'s existing, separately
+    // tested money-shape validation.
+    if (input.metadata.vinkId === undefined || input.metadata.vinkId.length === 0) {
+      throw new ProviderError(
+        'INVALID_REQUEST',
+        'authorizeContribution.metadata.vinkId is required',
+      );
+    }
     return this.idempotent(input.idempotencyKey, input, () => {
       const method = this.methods.get(input.providerMethodId);
       if (!method || method.customerId !== input.providerCustomerId) {
@@ -249,12 +285,22 @@ export class MockFinancialProvider implements FinancialProvider {
         metadata: input.metadata,
       };
 
-      if (method.token === 'tok_decline') {
+      // ENG6 Slice 2 — three distinct decline tokens instead of one generic decline, so host
+      // code (and this package's own contract suite) can prove it handles each
+      // `ContributionDeclineReason` distinctly, not just "declined vs. not."
+      const declineReasonForToken: Record<string, ContributionDeclineReason> = {
+        tok_decline: 'CARD_DECLINED',
+        tok_insufficient_funds: 'INSUFFICIENT_FUNDS',
+        tok_compliance_blocked: 'COMPLIANCE_BLOCKED',
+        tok_expired_method: 'EXPIRED_METHOD',
+      };
+      const declineReason = declineReasonForToken[method.token];
+      if (declineReason !== undefined) {
         record.status = 'DECLINED';
         record.authorizedAmount = null;
         this.payments.set(providerPaymentId, record);
-        this.emit('payment.declined', providerPaymentId, { reason: 'card_declined' });
-        return { providerPaymentId, status: 'DECLINED', declineReason: 'card_declined' };
+        this.emit('payment.declined', providerPaymentId, { reason: declineReason });
+        return { providerPaymentId, status: 'DECLINED', declineReason };
       }
 
       if (method.token === 'tok_pending') {

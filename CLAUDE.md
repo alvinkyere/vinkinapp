@@ -850,6 +850,332 @@ compile incompatibility; upgrading to stable `sentry_flutter 9.25.0` restored th
 the Flutter event was received. Slice 10 remains open only on the non-Sentry release blockers
 listed in its certification report.
 
+## ENG6 — Financial Provider Readiness and Integration Boundary
+
+Owner-directed, running concurrently with the ENG track above (does not replace it). Full
+8-slice brief with an explicit "hard boundaries" section: must not become a public real-money
+launch, fee-model implementation, KYC/AML policy invention, merchant acquiring, bank-account
+infrastructure, production card credential exposure, UI redesign, a Stripe-specific rewrite of
+the domain, or automatic reconciliation repairs without reviewed rules.
+
+**M0-gate scoping was decided twice.** First (D45, now `SUPERSEDED (by D46)`): the owner chose
+provider-independent work only, leaving any real provider SDK/sandbox integration until the M0
+gate's own 10 conditions are satisfied. Then reversed, having identified a real distinction
+D45 hadn't drawn: Stripe issues sandbox/test-mode keys freely, decoupled from the gate's actual
+concern (live funds-flow approval). **D46** (ACCEPTED) amends
+`docs/architecture/06-milestone-0-gate.md` with a narrow **Sandbox-only exception**: sandbox/
+test-mode Stripe integration is permitted for technical validation and demos, with hard code-
+level guards (a live-mode key must fail to boot, isolated webhook config, existing off-by-
+default/boot-refused-outside-dev-test flag discipline) — this does **not** satisfy any of the
+gate's 10 conditions and does **not** authorize real-money movement, live card issuance,
+consumer fund custody, or public launch.
+
+**ENG6 Slice 1 done** (`milestone-reports/ENG6-SLICE-1-PROVIDER-CAPABILITY-AUDIT.md`): full
+capability matrix against Stripe; surfaced the M0-gate-vs-brief conflict above before any code
+was written.
+
+**ENG6 Slice 2 done** (`milestone-reports/ENG6-SLICE-2-ADAPTER-CONTRACT-HARDENING.md`):
+completed the provider error-classification vocabulary (`INVALID_REQUEST`,
+`COMPLIANCE_BLOCKED`, `UNKNOWN_OUTCOME`), typed `ContributionDeclineReason` (declines are data,
+never a thrown error — kept distinct from `ProviderError`, an operational failure), 5 new
+shared-conformance-suite tests against the mock (25/25). Bundled the D46 amendment above.
+
+**ENG6 Slice 3 done** (`milestone-reports/ENG6-SLICE-3-STRIPE-SANDBOX-ADAPTER.md`): a real
+`StripeFinancialProvider` (`packages/providers`, the second — and only legal, per D7/§42 —
+home for a provider SDK besides `packages/payment-provider/src/adapters`) passing the *same*
+shared conformance suite the mock passes, against a real Stripe sandbox account: **14/14
+passing, 0 failing, 11 disclosed skips**. The D46 hard guard (`assertSandboxModeKey` —
+unconditional live-key rejection) has its own 8-test unconditional unit suite requiring no
+credentials, closing a real gap (the guard previously had zero test coverage outside the
+credential-gated sandbox suite, meaning it was unverified in any environment without real
+keys, including CI). Real bugs found and fixed via the live sandbox, not guessed: the shared
+suite's `freshSlotId()` collided with itself against Stripe's real 24h-persistent idempotency
+store (fixed with `randomUUID()`); the provider-import guard (`tooling/scripts/check-provider-
+imports.mjs`) had no approved-directory exemption for `package.json` dependency checks at all,
+making it structurally impossible to ever legally declare a provider SDK dependency anywhere
+(fixed, verified both directions). Specific Stripe error-code mappings
+(`amount_too_large`→`AMOUNT_EXCEEDS_AUTHORIZATION`, `payment_intent_unexpected_state`→
+`INVALID_STATE`, refund-over-amount's undocumented code-less case) were all confirmed live
+against the sandbox, never guessed from docs. **Disclosed gap, not an adapter defect**: the
+4 issuing-side contract tests stay skipped — Stripe requires the *account* (not just the
+adapter) to complete Issuing Terms-of-Service acceptance before any card can be *activated*
+(confirmed via `GET /v1/account`: `capabilities: {}`, `card_issuing.tos_acceptance: null`),
+an owner-side Stripe Dashboard action outside any code change; card/cardholder *creation*
+already succeeds. `apps/api/src/server.ts` still hardcodes `MockFinancialProvider` — wiring the
+real adapter into a running app is Slice 7's scope, not built early here. `apps/api` 221/221
+unchanged, confirming zero regression. `pnpm typecheck/lint/format:check/guard` clean, 11/11
+packages. Disclosed, unrelated environment gap: `apps/guest-web`/`apps/operations-console`'s
+own Playwright suites fail here on a missing Chromium binary, and installing it hit `ENOSPC`
+(disk at 99% full) — not caused by this slice, not fixed here.
+
+**ENG6 Slice 3 update (same day)**: the owner completed Stripe's general-payments onboarding,
+then the Issuing-specific requirements too. Re-checked live: `card_issuing`'s requirements
+gate is now clear, but requesting the capability itself is a live-key-only Stripe operation
+(confirmed via a real rejected call — no live key was ever used, that would violate D46).
+Retrying card issuance after that surfaced a **new, bigger** wall: this account now needs
+Stripe's newer **v2 Financial Account** primitive before any Issuing card can be created
+(`financial_account_v2` required, its own distinct API-version header) — Stripe's own
+money-movement/balance object, not a settings toggle. That sits close to, arguably inside,
+ENG6's own declared hard boundary ("must not become... bank-account infrastructure").
+Stopped and flagged to the owner (§9) rather than building Financial Account plumbing
+unilaterally — the 4 issuing-side contract tests remain disclosed skips pending an explicit
+owner call on whether adopting Stripe's v2 model is in scope. Full detail in the amended
+`ENG6-SLICE-3-STRIPE-SANDBOX-ADAPTER.md`.
+
+**ENG6 Slice 4 done** (`milestone-reports/ENG6-SLICE-4-WEBHOOK-INGESTION.md`): a durable,
+provider-agnostic webhook ingestion route — §28's order (verify signature, store raw, dedupe
+on `(provider, provider_event_id)`) — plus a dead-letter path for signature-valid-but-
+unmappable events. New migration `0019_webhook_events.sql`; new
+`apps/api/src/modules/webhooks/routes.ts`, a thin binding over `FinancialProvider.
+parseWebhookEvent` proven generically against the mock (6/6, no credentials — what CI runs)
+and, separately, against the real Stripe sandbox (a 7th test, real HMAC-signed Stripe event
+envelope, credential-gated). Wired into `server.ts` behind a new
+`VINKIN_STRIPE_WEBHOOKS_ENABLED` flag constructing a **separate** `StripeFinancialProvider`
+instance used only for webhook verification — the command-execution `provider` stays Mock,
+unchanged, per Slice 3's own documented boundary. Deliberately **not** environment-boot-
+refused like its ENG5 siblings (Apple/Google/email flags) — this one guards a real, working
+sandbox capability D46 explicitly permits without scoping it to `VINKIN_ENV`; the actual
+safety mechanism is `assertSandboxModeKey`'s unconditional live-key rejection, disclosed as a
+deliberate deviation, not an oversight. **Real bug caught by a dedicated test**: the
+dead-letter dedupe-key fallback used `randomUUID()`, so two deliveries of the byte-identical
+unparseable body produced two rows instead of one — fixed by hashing the raw body (SHA-256)
+instead, since a dedupe key must be a deterministic function of content. Verified against a
+real running server both directions: flag on with real credentials → route genuinely live
+(`400 MISSING_SIGNATURE`, not 404); flag off with Stripe credentials deliberately unset →
+boots clean, route genuinely absent (404), zero Stripe dependency. **`apps/api` 227/227** (up
+from 221), **`packages/application` 137/137** unchanged (confirms this stayed entirely inside
+the transport layer), `pnpm typecheck/lint/format:check/guard` clean, 11/11 packages. No
+processor reads these rows yet — that's Slice 5's explicit job, not built early here per
+ENG6's own hard boundary against inventing reconciliation behavior.
+
+**ENG6 Slice 5 done** (`milestone-reports/ENG6-SLICE-5-RECONCILIATION.md`, owner-scoped brief
+with explicit exclusions: no Stripe Financial Accounts v2, no Stripe command adapter wired
+into the running app, no bank-account infrastructure). New `packages/reconciliation`
+(zero-dependency, mirrors `@vinkin/ledger`'s pure-rules/DB-persistence split) — a
+`correlationTargetFor(eventType)` map plus pure `classify(event, lookup)` rules implementing
+the owner's exact five-classification vocabulary (`EXPECTED`/`PENDING`/`MISMATCHED`/
+`ORPHANED`/`UNRECOGNIZED`), tested against both hand-written provider-neutral fixtures (12
+tests) and real Stripe-translated events (4 tests, fully offline — `Stripe.webhooks.
+constructEvent` is pure local crypto, so a throwaway sandbox-shaped key with a locally-
+computed HMAC signature exercises the real Stripe translation path with zero network calls
+and zero live credentials). New migration `0020_reconciliation.sql`
+(`reconciliation_runs`/`reconciliation_findings`, `webhook_event_id UNIQUE` as the real
+idempotency guard); `apps/api/src/modules/reconciliation/{store,runner}.ts` — `runReconciliation`
+deliberately mirrors `outbox-publisher.ts`'s own proven `FOR UPDATE SKIP LOCKED` pattern
+(claim a batch ordered by `occurred_at`, never `received_at` — §28's own rule — process,
+commit), which delivers concurrent-run safety, crash-safe resumption, and idempotent replay
+all from one already-proven pattern rather than three separate mechanisms. **13/13 new
+integration tests** against real PostgreSQL prove every owner-required scenario by name (late
+capture, reversal, refund mismatch, missing predecessor, unknown provider object, out-of-order
+processing order via a `seq` proof, replay producing zero duplicate findings, two concurrent
+runs processing a 30-row batch exactly once combined, full audit-trail linkage, and a dedicated
+test proving reconciliation never writes to `contributions`/`settlements`/any ledger table).
+**`apps/api` 240/240** (up from 227), **`packages/reconciliation` 16/16**, **`packages/
+application` 137/137 unchanged** (confirms zero domain/command code touched),
+`pnpm typecheck/lint/format:check/guard` clean, 12/12 packages. No HTTP surface or scheduled
+trigger yet — `runReconciliation` is callable programmatically only; that's Slice 6's own
+explicit scope, not built early here.
+
+**Stripe Financial Account finding, formally documented** (separate decision note,
+`milestone-reports/ENG6-SLICE-5-STRIPE-FINANCIAL-ACCOUNT-NOTE.md`, per explicit owner
+instruction): mid-Slice-5, the owner reported completing Stripe's Issuing-specific
+requirements (confirmed live: `card_issuing` capability `currently_due` is now empty).
+Retrying card creation surfaced a **new, bigger** wall — `POST /v1/issuing/cards` now requires
+`financial_account_v2`, a Stripe v2-API primitive (`/v2/financial_addresses` needs its own
+distinct API-version header entirely) — not a settings toggle. The note documents, precisely
+and without guessing: the exact request/response pair; that requesting the `card_issuing`
+capability itself is confirmed live-key-only (no live key was used); that whether this is
+platform-vs-connected-account-vs-card-program-specific, whether an ordinary Dashboard Issuing
+balance sidesteps it, and the true minimum architecture cost are all **explicitly unknown**
+without further Stripe confirmation — stated as open questions, not guessed at. No Financial
+Account code was written anywhere; the 4 issuing-side contract-suite skips remain exactly as
+disclosed in Slice 3's report.
+
+Next: ENG6 Slice 6 — operations console read-only tooling: surfacing `reconciliation_findings`
+and run history in `apps/operations-console`, an operator-triggered run, and the
+acknowledge/resolve review workflow `review_status` already supports.
+
+**Track note (2026-07-26):** ENG4's remaining Slice 10 external blockers (Play signing
+fingerprint, GitHub branch protection, Railway spend alerts/backup drill, signed TestFlight/
+Play builds, staging environment) are owner/ops actions, not code — deferred per owner
+direction, revisit when reached. The owner also supplied the full ENG0–ENG15 engineering
+roadmap this session; reconciled against actual repo state (a sweep found ENG1 Slices 4–7,
+ENG2, and ENG3 already done under those exact names, and large parts of the plan's ENG6/ENG7
+already substantially built as PV4/PV11/D44/ENG4 Slices 3–5) — the roadmap's own ENG4 hosting
+section (Fly.io + Vercel + separate worker) is superseded by the already-live Railway topology
+(owner confirmed: keep Railway). Net position: **ENG5 (Authentication and Identity)** is the
+actual next unbuilt milestone. Owner directed: continue with VinkIn's native auth platform
+(not a managed identity provider — Clerk/Auth0/Supabase Auth etc. — reevaluate only after
+public launch if operational complexity justifies migrating), adding email verification,
+password reset, magic links, and Sign in with Apple/Google on top of the existing PV1
+username/password + rotating-refresh-token auth.
+
+**ENG5 Slice 1 done** (`milestone-reports/ENG5-SLICE-1-EMAIL-VERIFICATION.md`): email
+verification. New `email_verification_tokens` table (migration 0015) + `users.email_verified_at`,
+hashed-only single-use tokens (D14 hard rule applied to this new secret too, snapshotting their
+own target email so a later email change can never be verified by an in-flight token minted for
+the old address — `updateContactInfo` now resets `email_verified_at` on a real email change,
+the guard that makes this possible). `packages/delivery`'s `DeliveryTemplateInput` became a
+real discriminated union (invitation-shaped vs. the new account-security shape) rather than
+widening the shared interface. New `VINKIN_EMAIL_VERIFICATION_ENABLED` — same off-by-default,
+boot-refused-outside-development/test discipline as `VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED`,
+for the identical reason (no real email provider selected yet, §4); registration auto-sends
+best-effort (never blocks on failure, Phase 5 §2), plus a self-serve `POST .../email/verify/
+request` resend route and a public `GET .../email/verify/confirm` the emailed link points at
+directly (returns HTML, not JSON — a browser hits it, not a client app). Mobile: Profile screen
+gained a verification-status card with a `CommandRunner`-driven resend button (ENG3's typed
+command-state pattern). **`apps/api` 176/176** (up from 165) **, `packages/application` 137/137
+unchanged** (confirms the work stayed inside auth's own PV1-era module, disclosed as sitting
+outside the D13 command layer since that module's own header comment) **+ 245 Flutter tests**
+(up from 241), `flutter analyze` unchanged at the 26-issue baseline,
+`typecheck`/`lint`/`format:check`/`guard` clean across all 10 packages. Known, disclosed gaps:
+verification is provable but not yet enforced anywhere (no product decision requested one); no
+in-app contact-info-editing screen exists yet to attach this to on mobile (pre-existing gap
+since Slice I4, not created or closed here).
+
+**ENG5 Slice 2 done** (`milestone-reports/ENG5-SLICE-2-PASSWORD-RESET.md`): password reset.
+New `password_reset_tokens` table (migration 0016, hashed-only/single-use, no email snapshot —
+resetting isn't verifying an address). `requestPasswordReset` returns `null` for every reason
+nothing should send (unknown account, inactive, cooldown) so the route can reply with the
+byte-identical `202` regardless — the actual account-enumeration defense, proven by a test
+asserting identical responses, not by inspection. `confirmPasswordReset` revokes every existing
+session on success, reusing `refreshSession`'s reuse-detection family-revocation precedent
+rather than inventing a new rule. `VINKIN_PASSWORD_RESET_ENABLED` (own flag, same
+boot-refused-outside-dev/test discipline as its Slice 1 sibling); `PASSWORD_RESET_TOKEN_TTL_
+SECONDS` defaults to 1h (deliberately shorter than email verification's 24h — a reset token
+grants full account takeover). New IP rate limit on the request route (`makeRateLimiter`, same
+mechanism the public join surface already uses) as a volume brake, complementary to — not a
+substitute for — the enumeration defense. Confirm page stays server-rendered HTML+`fetch()`
+(no urlencoded body parser added to an otherwise all-JSON API); mobile gained a "Forgot
+password?" entry point (`ForgotPasswordScreen`) whose only job is collecting the email — typing
+the new password happens on the emailed link's page, same split as Slice 1's email
+verification. **`apps/api` 183/183** (up from 176), **`packages/application` 137/137**
+unchanged, **247 Flutter tests** (up from 245), `flutter analyze` unchanged at the 26-issue
+baseline, `typecheck`/`lint`/`format:check`/`guard` clean across all 10 packages.
+
+**ENG5 Slice 3 done** (`milestone-reports/ENG5-SLICE-3-MAGIC-LINKS.md`): magic links
+(passwordless login). New `magic_link_tokens` table (migration 0017, same hashed/single-use
+shape as its siblings). The real design question: a "click and land signed in" magic link
+needs a deep link to hand a native app real session tokens, but Android App Links are
+disclosed-not-functional (ENG4 Slice 10's own open blocker) — rather than build a flow that's
+broken-by-default on one platform, the confirm page requires an explicit click (never
+auto-fires, unlike Slice 1's page — nothing else competes to consume that token there) and the
+email tells the user they can instead paste the link into the app's own new "Log in with a
+link" screen; both paths hit the identical `POST .../magic-link/confirm` JSON route. One-tap
+deep-link completion is a disclosed follow-up once the Android gap closes, not built against
+unverified infrastructure now. `confirmMagicLink` issues a genuinely real session (same return
+shape as login/register — this *is* a login, just via a different credential), verified by a
+test that makes a real authenticated call with the issued token, not just checking the
+response shape. `MAGIC_LINK_TOKEN_TTL_SECONDS` defaults to 15 minutes — shortest of the three
+token families, since this one grants immediate full access with no second factor at all.
+Mobile's `AuthController.confirmMagicLink()` extracts the token from either a bare token or a
+pasted full URL client-side — tested against the actual request body sent, not just that a
+request fired. **`apps/api` 188/188** (up from 183), **`packages/application` 137/137**
+unchanged, **251 Flutter tests** (up from 247), `flutter analyze` unchanged at the 26-issue
+baseline, `typecheck`/`lint`/`format:check`/`guard` clean across all 10 packages.
+
+ENG5's token/delivery-shaped work is done (Slices 1–3: email verification, password reset,
+magic links).
+
+**ENG5 Slice 4 done** (`milestone-reports/ENG5-SLICE-4-SIGN-IN-WITH-APPLE.md`): Sign in with
+Apple. Owner confirmed no Apple Developer account access is coming soon, so this ships
+**server-side only** — the mobile client's "Continue with Apple" button was deliberately not
+built (it would always fail without real Apple capability provisioned, the same "don't build a
+button that doesn't work" call ENG3 Slice 4 already made for deep links). New
+`oauth_identities` table (migration 0018), generic across providers by design — Slice 5
+(Google) is the very next item in the same brief and reuses this table and
+`signInWithOAuth(sql, provider, providerUserId, email, displayName)` verbatim, only needing its
+own token-verification module. `verifyAppleIdentityToken` checks Apple's real JWKS by default
+but takes an injectable key resolver, which is what makes the whole feature genuinely testable
+without real Apple credentials: tests generate a local key pair, sign real Apple-shaped tokens,
+and inject a local JWKS — proving forged signatures, wrong issuer, wrong audience, and expiry
+are all correctly rejected via actual cryptography, not mocks. **A real bug the tests caught
+mid-slice**: two different Apple identities reporting the same email crashed on `users.email`'s
+UNIQUE constraint instead of failing cleanly — surfaced a genuine, undecided product question
+(should this auto-link to the existing account?) that wasn't a call to make silently; resolved
+conservatively with a clean `409 EMAIL_ALREADY_REGISTERED` (PostgreSQL's own constraint is the
+final guard here too), auto-linking flagged as open, not decided. The route fails closed (503)
+whenever the flag is off or `APPLE_SIGN_IN_CLIENT_ID` is unconfigured — deliberately not the
+softer no-op pattern its siblings use, since accepting a token with no configured audience to
+check would mean accepting one minted for a different app. **`apps/api` 203/203** (up from
+188 — 8 real-cryptography unit tests + 7 full-route integration tests, the latter proving a
+genuine subsequent authenticated call with the issued token, not just checking response
+shape), **`packages/application` 137/137** unchanged, `typecheck`/`lint`/`format:check`/`guard`
+clean across all 10 packages. Mobile untouched this slice (no button, no build change).
+
+**ENG5 Slice 5 done** (`milestone-reports/ENG5-SLICE-5-SIGN-IN-WITH-GOOGLE.md`): Sign in with
+Google — same owner-directed server-side-only scope as Slice 4 (no real Google Cloud OAuth
+client provisioned yet, no client button built). Reused `oauth_identities`/`signInWithOAuth`
+verbatim, exactly as Slice 4's own report predicted; only a new `google-identity.ts` and route
+were needed. Two real differences from Apple, each with its own test: Google's ID token
+carries a verified `name` claim on every sign-in (Apple's never does, at all — that's why only
+Apple's route has `givenName`/`familyName` request fields), and an `email_verified: false`
+claim is explicitly never trusted as a real email. A cross-provider test proves the shared
+`EMAIL_ALREADY_REGISTERED` conflict guard Slice 4's own tests caught is genuinely shared code,
+not just structurally identical, by reaching it through the Google route with two Google
+identities. **`apps/api` 221/221** (up from 203 — 10 real-cryptography unit tests + 8 full-route
+integration tests), **`packages/application` 137/137** unchanged (the fifth consecutive ENG5
+slice to stay entirely inside auth's own module), `typecheck`/`lint`/`format:check`/`guard`
+clean across all 10 packages. Mobile untouched, same reason as Slice 4.
+
+**ENG5 is complete.** All five slices done — email verification, password reset, magic links,
+Sign in with Apple, Sign in with Google — every one server-complete and tested against real
+cryptography/PostgreSQL, each disclosed everywhere it stops short of a working end-user button
+(three gated on §4's still-unselected email/SMS provider, two gated on unprovisioned Apple
+Developer/Google Cloud credentials).
+
+**ENG6 ("Financial Provider Readiness and Integration Boundary") in progress** — owner-supplied
+8-slice brief. **Slice 1 done** (`milestone-reports/ENG6-SLICE-1-PROVIDER-CAPABILITY-AUDIT.md`):
+capability/gap matrix against the real `FinancialProvider` interface, contract-test coverage,
+and every real provider call site (not assumptions). **Headline finding, flagged to the owner,
+not resolved silently**: ENG6 Slices 3 ("real provider adapter in sandbox mode... may be
+Stripe") and 4 ("hardened webhook boundary") closely match what
+`docs/architecture/06-milestone-0-gate.md` — this repo's own stated authority on M0 — names
+explicitly in its **Forbidden** list ("Stripe-specific schemas or webhook tables," "real
+contribution capture flows") while the gate is open (all ten conditions still `☐ OPEN`,
+including #1 "a provider confirms the funds flow" and #7 "sandbox tests pass"). D15 already
+ratified today's provider-calls-inside-transaction pattern as intentionally deferred until a
+real provider's semantics are known, for the identical reason. Slices 1–2 don't conflict (the
+gate's own Permitted list covers both); Slices 3+ need an explicit owner call — supersede/
+reopen the gate for ENG6, or hold until conditions 1/7 are met — before proceeding. Other real
+findings: webhook ingestion has zero HTTP route and zero `(provider, provider_event_id)` dedupe
+table anywhere in this codebase despite `parseWebhookEvent` being fully specified and contract-
+tested (Slice 4's infrastructure gap is real and provider-independent — buildable against the
+mock's synthetic events regardless of how the M0 question resolves); merchant authorization/
+capture today are entirely VinkIn's own in-process simulator decision (PV6/PV11), never a real
+provider webhook; zero reconciliation, KYC, or transaction-limit code exists anywhere (expected
+— explicitly gate-condition territory, not an unclosed engineering gap).
+
+**ENG6 Slice 2 done** (`milestone-reports/ENG6-SLICE-2-ADAPTER-CONTRACT-HARDENING.md`):
+provider error classification. Three new `ProviderErrorCode` values (`INVALID_REQUEST`,
+`COMPLIANCE_BLOCKED`, `UNKNOWN_OUTCOME`) and `AuthorizationResult.declineReason` retyped from
+bare `string` to a real `ContributionDeclineReason` union — deliberately kept separate from
+thrown errors (a normal per-transaction decline is a typed return value, not an operational
+failure). `UNKNOWN_OUTCOME` is `retryable: true`, same reasoning as `PROVIDER_UNAVAILABLE`.
+New mock chaos hook `simulateUnknownOutcome(sideEffectHappened)` takes ground truth as a
+parameter rather than deciding it internally. Shared conformance suite grew 5 tests (20→25),
+including `UNKNOWN_OUTCOME` proven in both directions against real committed/uncommitted
+state. A real gap the new validation caught immediately: the suite's own shared `authorize()`
+helper built metadata without the now-required `vinkId` — one fix cascaded to every dependent
+test.
+
+**M0 gate amended (D46, supersedes D45) mid-slice** — the owner reversed D45's "do not amend"
+direction after identifying a real distinction: Stripe issues sandbox/test-mode credentials
+freely, with no business approval needed, genuinely decoupled from what the gate's ten
+conditions govern (live funds-flow approval). `docs/architecture/06-milestone-0-gate.md` now
+has a **Sandbox-only exception**: sandbox-mode Stripe integration is permitted for technical
+validation/demos, with hard guards specified (live-mode credentials must fail to boot in any
+environment; isolated webhook endpoint/secret; existing off-by-default flag discipline) — but
+explicitly does not satisfy any of the ten conditions or authorize real-money movement, live
+issuance, fund custody, or launch. D45 marked `SUPERSEDED (by D46)`, not deleted — the
+historical record (including the reversal itself) is preserved. **`apps/api` 221/221**,
+**`packages/application` 137/137** unchanged, contract-tests 25/25 (up from 20),
+`typecheck`/`lint`/`format:check`/`guard` clean across all 10 packages.
+
+Next: ENG6 Slice 3 — a real Stripe sandbox adapter, now unblocked by D46 but needing real
+(free, sandbox-only) Stripe API keys from the owner before it can build against an actual
+sandbox — the same external-credential dependency ENG5's Apple/Google slices hit.
+
 ## Hard rules (from the Spec — never relax to make something pass)
 
 - Ledger is append-only, balanced, integer minor units; DB triggers enforce it

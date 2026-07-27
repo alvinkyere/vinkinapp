@@ -12,7 +12,7 @@ import { ZodError } from 'zod';
 import type { Env } from './config/env.ts';
 import type { Sql } from './db/client.ts';
 import { registerHealthRoutes, type HealthChecks } from './modules/health/routes.ts';
-import { registerAuthRoutes } from './modules/auth/routes.ts';
+import { registerAuthRoutes, type AuthRateLimits } from './modules/auth/routes.ts';
 import { registerVinkRoutes } from './modules/vinks/routes.ts';
 import { registerSharingRoutes, type PublicRateLimits } from './modules/sharing/routes.ts';
 import { registerContributionRoutes } from './modules/contributions/routes.ts';
@@ -21,6 +21,7 @@ import { registerRecoveryRoutes } from './modules/recovery/routes.ts';
 import { registerRealtimeRoutes } from './modules/realtime/routes.ts';
 import { registerOpsRoutes } from './modules/ops/routes.ts';
 import { registerAnalyticsRoutes } from './modules/analytics/routes.ts';
+import { registerWebhookRoutes, type WebhookRouteConfig } from './modules/webhooks/routes.ts';
 import { InProcessRealtimeHub, type RealtimeHub } from './realtime/hub.ts';
 import { isAppVersionSupported } from './app-version.ts';
 import { NOOP_METRICS, type Metrics } from './observability/metrics.ts';
@@ -42,6 +43,13 @@ export interface AppDeps extends HealthChecks {
   deliveryProvider?: DeliveryProvider;
   /** Test override for the public-surface rate limits. */
   publicRateLimits?: PublicRateLimits;
+  /** ENG5 Slice 2 — test override for the auth-surface rate limits (password-reset request). */
+  authRateLimits?: AuthRateLimits;
+  /** ENG5 Slice 4 — test-only override for Apple identity token verification; see
+   * `registerAuthRoutes`'s own doc comment on the parameter this threads to. */
+  appleKeyResolver?: Parameters<typeof registerAuthRoutes>[5];
+  /** ENG5 Slice 5 — same test-only override, for Google's key resolver. */
+  googleKeyResolver?: Parameters<typeof registerAuthRoutes>[6];
   /** Shared with the outbox publisher (server.ts) so published events reach live sockets. */
   hub?: RealtimeHub;
   /** Slice I4B (D38) — test-only hook: a writable stream Pino writes every log line to,
@@ -54,6 +62,10 @@ export interface AppDeps extends HealthChecks {
   metrics?: Metrics;
   /** ENG4 Slice 9: optional and no-op by default, like metrics. */
   crashReporter?: CrashReporter;
+  /** ENG6 Slice 4 — sandbox provider webhook endpoints (D46), mounted only when the caller
+   * supplies one (server.ts does so only when `VINKIN_STRIPE_WEBHOOKS_ENABLED === '1'`).
+   * Empty/undefined preserves today's exact route surface byte-for-byte. */
+  webhookRoutes?: WebhookRouteConfig[];
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -145,7 +157,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   registerHealthRoutes(app, { checkDb: deps.checkDb, checkRedis: deps.checkRedis });
   if (deps.sql !== null) {
-    registerAuthRoutes(app, deps.env, deps.sql);
+    registerAuthRoutes(
+      app,
+      deps.env,
+      deps.sql,
+      deps.deliveryProvider,
+      deps.authRateLimits,
+      deps.appleKeyResolver,
+      deps.googleKeyResolver,
+    );
     registerVinkRoutes(app, deps.env, deps.sql, deps.deliveryProvider, metrics);
     registerSharingRoutes(app, deps.env, deps.sql, deps.publicRateLimits);
     registerAnalyticsRoutes(app, deps.sql);
@@ -162,6 +182,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       deps.hub ?? new InProcessRealtimeHub(),
       metrics,
     );
+    for (const webhookConfig of deps.webhookRoutes ?? []) {
+      registerWebhookRoutes(app, deps.sql, webhookConfig);
+    }
   }
 
   return app;

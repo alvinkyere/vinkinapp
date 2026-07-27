@@ -100,10 +100,21 @@ export interface AuthorizeContributionInput {
   captureMode: 'MANUAL'; // §11: prefer authorize-then-capture; immediate capture is not modeled in V1
   metadata: Record<string, string>; // vinkId, contributionSlotId, correlationId
 }
+
+/**
+ * ENG6 Slice 2 — a normal, expected per-transaction decline outcome (never a thrown
+ * `ProviderError`; see that file's own doc comment for why the two are kept separate).
+ * `GENERIC` covers a decline whose specific reason the provider didn't disclose or that
+ * doesn't fit the named categories — never invented as a more specific reason than the
+ * provider actually gave.
+ */
+export type ContributionDeclineReason =
+  'CARD_DECLINED' | 'INSUFFICIENT_FUNDS' | 'COMPLIANCE_BLOCKED' | 'EXPIRED_METHOD' | 'GENERIC';
+
 export interface AuthorizationResult {
   providerPaymentId: string;
   status: Extract<ProviderPaymentStatusCode, 'PROCESSING' | 'AUTHORIZED' | 'DECLINED'>;
-  declineReason?: string;
+  declineReason?: ContributionDeclineReason;
 }
 
 export interface CaptureContributionInput {

@@ -10,6 +10,11 @@ import { RedisRealtimeHub } from './realtime/redis-hub.ts';
 import { MockFinancialProvider } from '../../../packages/payment-provider/src/index.ts';
 import { MockDeliveryProvider } from '../../../packages/delivery/src/index.ts';
 import { startCrashReporter } from './observability/sentry.ts';
+import {
+  StripeFinancialProvider,
+  loadStripeAdapterConfig,
+} from '../../../packages/providers/src/index.ts';
+import type { WebhookRouteConfig } from './modules/webhooks/routes.ts';
 
 const env = loadEnv();
 const crashReporter = startCrashReporter(env);
@@ -30,6 +35,22 @@ const realtimePub = createRedis(env);
 const realtimeSub = createRedis(env);
 const hub = new RedisRealtimeHub(realtimePub, realtimeSub);
 
+// ENG6 Slice 4 (D46) — a sandbox-only Stripe webhook endpoint, isolated from command
+// execution: this StripeFinancialProvider instance is used only to verify/parse inbound
+// webhooks, never to drive `provider` (still Mock) above. Fails loudly at boot if the flag
+// is on but credentials are missing/live-mode-shaped — the same fail-fast discipline as
+// every other required-when-enabled config in this file, not a silent no-op.
+const webhookRoutes: WebhookRouteConfig[] = [];
+if (env.VINKIN_STRIPE_WEBHOOKS_ENABLED === '1') {
+  const stripeConfig = loadStripeAdapterConfig();
+  webhookRoutes.push({
+    routePath: '/webhooks/stripe/sandbox',
+    provider: new StripeFinancialProvider(stripeConfig),
+    webhookSecret: stripeConfig.webhookSecret,
+    signatureHeaderName: 'stripe-signature',
+  });
+}
+
 const checkDb = async (): Promise<void> => {
   await sql`SELECT 1`;
 };
@@ -47,6 +68,7 @@ const app = await buildApp({
   checkDb,
   checkRedis,
   crashReporter,
+  webhookRoutes,
 });
 
 // ENG4 Slice 4 ("health status" metric): reuses the exact same checks `/health/ready` already

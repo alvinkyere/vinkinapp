@@ -8,6 +8,80 @@ contract.
 
 ---
 
+## D46 — M0 gate amended with a narrow, hard-guarded sandbox-only exception for ENG6
+
+- **Decision:** `docs/architecture/06-milestone-0-gate.md` is amended (not discarded) with a
+  new **Sandbox-only exception** section. A sandbox-mode provider integration (initially
+  Stripe) is now permitted specifically for technical validation and demonstration — proving
+  VinkIn's architecture maps onto a real provider's actual API shape. This does **not**
+  satisfy any of the gate's ten conditions and does **not** authorize real-money movement,
+  live card issuance, consumer fund custody, or public launch. Hard guards, enforced in code
+  not just by convention: sandbox/test-mode credentials only, in every environment including
+  the demo — a live-mode key must fail to boot, the same fail-fast discipline this codebase
+  already applies to `JWT_SECRET`/`OPERATOR_PASSWORD`; a webhook endpoint and signing secret
+  isolated from any future live-mode equivalent; the existing off-by-default/boot-refused-
+  outside-development-test flag discipline. ENG6 Slices 3 (sandbox adapter) and 4's
+  real-provider webhook half now proceed under these constraints.
+- **Date:** 2026-07-26
+- **Status:** ACCEPTED (owner-directed, explicit reversal of D45's "do not amend" direction)
+- **Reason:** after D45 was recorded, the owner identified a real, meaningful distinction D45
+  had not drawn: sandbox credentials and live credentials are structurally different (Stripe
+  issues sandbox/test-mode API keys freely, with no business approval, commercial
+  relationship, or KYC program required — genuinely decoupled from the ten gate conditions,
+  which govern *live* funds-flow approval, not technical integration proof). A sandbox demo
+  proves the adapter calls the right APIs, webhook verification/translation/idempotency work,
+  and the UI can show the complete experience; it does **not** prove Stripe has approved
+  VinkIn's business model, that live-mode will enable the same capabilities, or that
+  Treasury/Issuing/Connect commercial and compliance requirements are satisfied — the gate's
+  ten conditions remain the only authority on those.
+- **Alternatives considered:** hold Slice 3–4 until the gate fully closes (D45's original
+  position — superseded here, not wrong at the time, reflecting the owner's own
+  reconsideration after weighing the sandbox/live distinction); remove the M0 gate's
+  Forbidden-list language entirely rather than add a scoped exception (rejected — the owner's
+  own instruction was explicit: "amend — not discard"; a full removal would also blur the
+  line for genuinely live-money-shaped work the gate must keep blocking).
+- **Affected modules:** `docs/architecture/06-milestone-0-gate.md` (new exception section,
+  Permitted/Forbidden lists updated to reference it), everything D45 already listed
+  (`packages/payment-provider`, webhook ingestion, reconciliation scaffolding, ops console),
+  plus a new sandbox-mode Stripe adapter under `packages/payment-provider`'s existing
+  approved-adapter-directory convention (§42/§43 — no change to where provider SDK code is
+  allowed to live, only to whether sandbox-mode code may exist there yet).
+- **Revisit trigger:** M0 gate conditions 1–10 being met in full (unchanged from D45) closes
+  the gate entirely, at which point this exception's own scoping (sandbox-only) becomes moot
+  — live-mode work is then governed by the now-closed gate's own M0 report, not this decision.
+
+## D45 — ENG6 split into a provider-independent Phase A and a gate-blocked Phase B [SUPERSEDED by D46]
+
+- **Decision:** ENG6 ("Financial Provider Readiness and Integration Boundary") proceeds only
+  on the work that doesn't require a real provider or real sandbox credentials — adapter
+  contract hardening (typed inputs/results, provider error classification), a webhook
+  ingestion framework (route, signature verification, `(provider, provider_event_id)`
+  dedupe, replay/timestamp protection, dead-letter handling), reconciliation scaffolding
+  (detection logic and its data model), operations-console read-only tooling for all of the
+  above, and a golden-path test proven against `MockFinancialProvider`'s own synthetic,
+  self-signed events (`MockFinancialProvider.sign`). A real provider SDK, real sandbox
+  integration, webhook signature verification against a live provider, and any
+  provider-specific adapter implementation (ENG6's own Slice 3, and the real-provider half of
+  Slice 4) explicitly do **not** proceed under this decision.
+- **Date:** 2026-07-26
+- **Status:** SUPERSEDED (by D46) — the owner reversed this decision's "do not amend the M0
+  gate" direction within the same session, after weighing the sandbox/live-credential
+  distinction D46 records. This entry is kept for the historical record of what was decided
+  and why, not as current guidance — read D46 for the governing decision.
+- **Reason:** ENG6 Slice 1's own capability audit (`milestone-reports/ENG6-SLICE-1-PROVIDER-
+  CAPABILITY-AUDIT.md`) found Slices 3–4 as originally written closely match what
+  `docs/architecture/06-milestone-0-gate.md` — this repo's own stated authority on M0 — names
+  explicitly in its Forbidden list while the gate is open ("Stripe-specific schemas or
+  webhook tables," "real contribution capture flows"), with all ten gate conditions still
+  `☐ OPEN`. Flagged to the owner per §9 rather than resolved silently or assumed either way.
+  Owner's explicit direction at the time: **do not supersede or amend the M0 gate**.
+- **Alternatives considered:** treat ENG6 as implicitly superseding the gate (rejected at the
+  time — explicitly declined by the owner); hold all of ENG6 until the gate closes (rejected —
+  the owner identified real, provider-independent value in hardening the boundary now,
+  matching the gate's own Permitted list).
+- **Affected modules:** see D46.
+- **Revisit trigger:** superseded — see D46.
+
 ## D44 — Invites: a real INVITED → accept/decline gate before an added member is JOINED
 
 - **Decision:** an existing VinkIn member added to someone else's Vink by the organizer no

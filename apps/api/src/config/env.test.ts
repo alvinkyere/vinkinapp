@@ -63,4 +63,37 @@ describe('environment configuration', () => {
       assert.equal(env.VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED, '1');
     }
   });
+
+  // ENG5 Slice 1 — same boot-refusal discipline, same reason, as the invitation-delivery
+  // flag immediately above.
+  it('refuses VINKIN_EMAIL_VERIFICATION_ENABLED outside development/test', () => {
+    for (const environment of ['staging', 'production', 'demo']) {
+      assert.throws(
+        () =>
+          loadEnv({
+            VINKIN_ENV: environment,
+            VINKIN_EMAIL_VERIFICATION_ENABLED: '1',
+            ...(environment === 'production' || environment === 'staging'
+              ? { JWT_SECRET: 'a-genuinely-configured-secret-value-123' }
+              : {}),
+            ...(environment === 'demo' ? { OPERATOR_PASSWORD: 'a-genuinely-configured-pw' } : {}),
+          }),
+        /VINKIN_EMAIL_VERIFICATION_ENABLED must stay off/,
+      );
+    }
+    for (const environment of ['development', 'test']) {
+      const env = loadEnv({
+        VINKIN_ENV: environment,
+        VINKIN_EMAIL_VERIFICATION_ENABLED: '1',
+      });
+      assert.equal(env.VINKIN_EMAIL_VERIFICATION_ENABLED, '1');
+    }
+  });
+
+  it('applies email-verification config defaults', () => {
+    const env = loadEnv({});
+    assert.equal(env.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS, 86_400);
+    assert.equal(env.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS, 60);
+    assert.equal(env.VINKIN_API_PUBLIC_BASE_URL, 'http://localhost:3000');
+  });
 });

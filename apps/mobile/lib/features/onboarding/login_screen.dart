@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/auth/auth_controller.dart';
 import '../../core/commands/command_state.dart';
 import '../../design_system/components/vink_buttons.dart';
@@ -87,12 +88,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: VinkSpacing.sm),
                 VinkInlineError(message: _error!),
               ],
-              const SizedBox(height: VinkSpacing.lg),
+              const SizedBox(height: VinkSpacing.sm),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => context.push('/forgot-password'),
+                  child: const Text('Forgot password?'),
+                ),
+              ),
+              const SizedBox(height: VinkSpacing.md),
               VinkPrimaryButton(
                 label: 'Log in',
                 glow: true,
                 loading: _submitting,
                 onPressed: _submit,
+              ),
+              const SizedBox(height: VinkSpacing.sm),
+              Align(
+                alignment: Alignment.center,
+                child: TextButton(
+                  onPressed: () => context.push('/magic-link'),
+                  child: const Text('Log in with a link instead'),
+                ),
               ),
             ],
           ),

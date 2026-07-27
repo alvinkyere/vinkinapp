@@ -66,6 +66,15 @@ const envSchema = z.object({
   /** Base for share links / QR payloads — the guest web app's own origin (PV10,
    * apps/guest-web), also the allowed CORS origin for its browser fetches (app.ts). */
   VINKIN_PUBLIC_BASE_URL: z.url().default('http://localhost:3100'),
+  /** ENG5 Slice 1 — the API's own externally-reachable origin, needed because the
+   * email-verification confirm link is a plain API route a browser hits directly (no
+   * client app involved), not a guest-web page. Distinct from `VINKIN_PUBLIC_BASE_URL`
+   * (that one is guest-web's origin) for the same reason `OPERATIONS_CONSOLE_BASE_URL` is
+   * its own separate value — three different services, three different origins. Building
+   * this from the incoming request's own Host header would be fragile behind a proxy without
+   * configuring Fastify's `trustProxy`; a dedicated env var matches every other base-URL
+   * value in this file instead. */
+  VINKIN_API_PUBLIC_BASE_URL: z.url().default('http://localhost:3000'),
   /** Shared operator credential for the PV11 ops console (D17) — gates `/internal/ops/*`
    * alongside the existing environment allowlist (simulator-guard.ts). Not a per-operator
    * account; the operator's typed name (not this password) is what the audit log records. */
@@ -108,6 +117,68 @@ const envSchema = z.object({
    * rejects a request whose `x-app-version` header is below it with `426 Upgrade Required` —
    * see `app-version.ts` for the (fail-open on anything malformed) comparison. */
   VINKIN_MINIMUM_APP_VERSION: z.string().optional(),
+  /** ENG5 Slice 1 (email verification) — same off-by-default, boot-refused-outside-dev/test
+   * discipline as `VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED` immediately above, and for
+   * the identical reason: no real email-sending provider is selected yet (§4), so a real send
+   * capability can't exist outside development/test regardless of this flag. */
+  VINKIN_EMAIL_VERIFICATION_ENABLED: z.enum(['0', '1']).default('0'),
+  /** How long an email-verification link stays valid. Default (24h) is a plain, undisputed
+   * default — no ratified decision specifies a different value (checked
+   * docs/spec/decision-log.md before picking a number, same discipline ENG1's timer-semantics
+   * slice established for VINK_OPEN_DURATION_SECONDS et al.). */
+  EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
+  /** Abuse-prevention cooldown between verification-email resend attempts, per user — same
+   * "real config, not a hardcoded constant" pattern as `GUEST_RESEND_COOLDOWN_SECONDS` (a
+   * test needs to shrink this to exercise "resend accepted" without an actual 60s sleep). */
+  EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().nonnegative().default(60),
+  /** ENG5 Slice 2 (password reset) — same off-by-default, boot-refused-outside-dev/test
+   * discipline as `VINKIN_EMAIL_VERIFICATION_ENABLED`, for the identical reason (no real
+   * email provider selected yet, §4). A separate flag, not a reuse of the email-verification
+   * one — the two are independently rollout-able capabilities, same "one flag per feature"
+   * convention `VINKIN_INVITES_ENABLED` established alongside the older delivery flag. */
+  VINKIN_PASSWORD_RESET_ENABLED: z.enum(['0', '1']).default('0'),
+  /** Deliberately shorter than `EMAIL_VERIFICATION_TOKEN_TTL_SECONDS` (1h vs. 24h) — a
+   * password-reset link is a more security-sensitive bearer secret (it grants a full account
+   * takeover, not just an email-ownership proof) and standard practice keeps its window short. */
+  PASSWORD_RESET_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3_600),
+  PASSWORD_RESET_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().nonnegative().default(60),
+  /** ENG5 Slice 3 (magic links) — same off-by-default, boot-refused-outside-dev/test
+   * discipline and same reason as its two siblings; own flag, independently rollout-able. */
+  VINKIN_MAGIC_LINK_ENABLED: z.enum(['0', '1']).default('0'),
+  /** Shortest TTL of the three token families — a magic link grants an immediate real login
+   * with no further factor (not even a password), the highest-stakes bearer secret this
+   * codebase mints. 15 minutes is standard practice for that risk level. */
+  MAGIC_LINK_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  MAGIC_LINK_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().nonnegative().default(60),
+  /** ENG5 Slice 4 — off by default like its siblings, but for a different underlying reason:
+   * not "no delivery provider" (this feature sends no email) but "no real Apple Developer
+   * Sign in with Apple capability configured yet" — the same class of external dependency,
+   * still boot-refused outside development/test. */
+  VINKIN_APPLE_SIGN_IN_ENABLED: z.enum(['0', '1']).default('0'),
+  /** The expected `aud` claim on an Apple identity token (the app's own Services ID/bundle
+   * ID) — required, never defaulted: accepting an unconfigured value would mean accepting a
+   * token minted for a DIFFERENT app. Unset by default; the route fails closed (503) rather
+   * than silently skip audience validation when this is missing. */
+  APPLE_SIGN_IN_CLIENT_ID: z.string().optional(),
+  /** ENG5 Slice 5 — same off-by-default, boot-refused-outside-dev/test discipline and same
+   * "no real provider capability configured yet" reason as its Apple sibling; a Google Cloud
+   * OAuth client, not a delivery provider. */
+  VINKIN_GOOGLE_SIGN_IN_ENABLED: z.enum(['0', '1']).default('0'),
+  /** The expected `aud` claim on a Google ID token (the app's own OAuth client ID) — required,
+   * never defaulted, for the identical reason `APPLE_SIGN_IN_CLIENT_ID` is required. */
+  GOOGLE_SIGN_IN_CLIENT_ID: z.string().optional(),
+  /** ENG6 Slice 4 — mounts the sandbox Stripe webhook ingestion route (D46's own "a webhook
+   * endpoint and signing secret isolated from any future live-mode endpoint" requirement).
+   * Off by default like every other feature flag here, but deliberately NOT boot-refused
+   * outside development/test the way `VINKIN_APPLE_SIGN_IN_ENABLED` et al. are — those flags
+   * are refused elsewhere because no real provider capability exists at all yet; this one
+   * guards a real, working sandbox capability (ENG6 Slice 3) that D46 explicitly permits "for
+   * technical validation and demos," not scoped to any particular `VINKIN_ENV` value. The
+   * actual safety mechanism is `assertSandboxModeKey` (packages/providers/src/stripe/
+   * config.ts): a live-mode-shaped `STRIPE_SECRET_KEY` fails to construct the adapter at all,
+   * in every environment, regardless of this flag — the credential format is the guard, not
+   * the environment name. */
+  VINKIN_STRIPE_WEBHOOKS_ENABLED: z.enum(['0', '1']).default('0'),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -135,6 +206,56 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
     throw new Error(
       'VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED must stay off outside development/test ' +
         '— no real delivery provider is selected yet (§4)',
+    );
+  }
+  if (
+    env.VINKIN_EMAIL_VERIFICATION_ENABLED === '1' &&
+    env.VINKIN_ENV !== 'development' &&
+    env.VINKIN_ENV !== 'test'
+  ) {
+    throw new Error(
+      'VINKIN_EMAIL_VERIFICATION_ENABLED must stay off outside development/test ' +
+        '— no real delivery provider is selected yet (§4)',
+    );
+  }
+  if (
+    env.VINKIN_PASSWORD_RESET_ENABLED === '1' &&
+    env.VINKIN_ENV !== 'development' &&
+    env.VINKIN_ENV !== 'test'
+  ) {
+    throw new Error(
+      'VINKIN_PASSWORD_RESET_ENABLED must stay off outside development/test ' +
+        '— no real delivery provider is selected yet (§4)',
+    );
+  }
+  if (
+    env.VINKIN_MAGIC_LINK_ENABLED === '1' &&
+    env.VINKIN_ENV !== 'development' &&
+    env.VINKIN_ENV !== 'test'
+  ) {
+    throw new Error(
+      'VINKIN_MAGIC_LINK_ENABLED must stay off outside development/test ' +
+        '— no real delivery provider is selected yet (§4)',
+    );
+  }
+  if (
+    env.VINKIN_APPLE_SIGN_IN_ENABLED === '1' &&
+    env.VINKIN_ENV !== 'development' &&
+    env.VINKIN_ENV !== 'test'
+  ) {
+    throw new Error(
+      'VINKIN_APPLE_SIGN_IN_ENABLED must stay off outside development/test ' +
+        '— no real Apple Developer Sign in with Apple capability is configured yet',
+    );
+  }
+  if (
+    env.VINKIN_GOOGLE_SIGN_IN_ENABLED === '1' &&
+    env.VINKIN_ENV !== 'development' &&
+    env.VINKIN_ENV !== 'test'
+  ) {
+    throw new Error(
+      'VINKIN_GOOGLE_SIGN_IN_ENABLED must stay off outside development/test ' +
+        '— no real Google Cloud OAuth client is configured yet',
     );
   }
   return env;

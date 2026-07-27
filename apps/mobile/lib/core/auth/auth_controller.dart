@@ -99,6 +99,52 @@ class AuthController extends Notifier<AuthState> {
     state = const AuthSignedOut();
   }
 
+  /// ENG5 Slice 1 — triggers a resend of the verification email to the account's own current
+  /// address (`POST /api/v1/auth/email/verify/request`). Deliberately does not update [state]
+  /// on success: verification status only changes once the emailed link is clicked, which
+  /// happens outside this app entirely — the caller re-checks via `/api/v1/me` on next launch
+  /// or a manual refresh, not via any signal this call itself could produce.
+  Future<void> resendEmailVerification() =>
+      _client.post('/api/v1/auth/email/verify/request');
+
+  /// ENG5 Slice 2 — unauthenticated by necessity (forgot-password means not signed in). The
+  /// server's own response is identical whether or not [email] has an account (account-
+  /// enumeration defense, `requestPasswordReset` in `apps/api/src/modules/auth/service.ts`) —
+  /// this call always resolves successfully from the caller's point of view; there is no
+  /// "wrong email" failure mode to distinguish here, by design.
+  Future<void> requestPasswordReset(String email) => _client.post(
+    '/api/v1/auth/password-reset/request',
+    body: {'email': email},
+  );
+
+  /// ENG5 Slice 3 — same unauthenticated, always-succeeds-from-the-caller's-view shape as
+  /// [requestPasswordReset], for the identical account-enumeration reason.
+  Future<void> requestMagicLink(String email) =>
+      _client.post('/api/v1/auth/magic-link/request', body: {'email': email});
+
+  /// ENG5 Slice 3 — completes a magic-link login. [linkOrToken] accepts either the bare
+  /// `mlt_...` token or the full emailed URL (`.../magic-link/confirm?token=mlt_...`), since
+  /// the expected input is literally pasted out of an email app by a person — extracting the
+  /// token from a pasted link is this method's job, not something to ask the user to do by
+  /// hand. Unlike [requestPasswordReset]/[requestMagicLink] above, this genuinely can fail
+  /// (an invalid/expired/reused token) and genuinely succeeds into a real signed-in [state],
+  /// same as [login]/[register].
+  Future<void> confirmMagicLink(String linkOrToken) async {
+    final token = _extractMagicLinkToken(linkOrToken);
+    final response = await _client.post(
+      '/api/v1/auth/magic-link/confirm',
+      body: {'token': token},
+    );
+    await _onAuthenticated(response);
+  }
+
+  String _extractMagicLinkToken(String linkOrToken) {
+    final trimmed = linkOrToken.trim();
+    final uri = Uri.tryParse(trimmed);
+    final fromQuery = uri?.queryParameters['token'];
+    return (fromQuery != null && fromQuery.isNotEmpty) ? fromQuery : trimmed;
+  }
+
   Future<void> logout() async {
     final refreshToken = await _tokenStore.readRefreshToken();
     await _tokenStore.clear();

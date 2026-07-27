@@ -79,6 +79,15 @@ for (const file of walk(repoRoot)) {
   const relPath = relative(repoRoot, file);
 
   if (relPath.endsWith(join(sep, 'package.json')) || relPath === 'package.json') {
+    // ENG6 Slice 3 fix: a package.json's dependency declarations were checked
+    // unconditionally, with no exemption for one that lives inside (or, for
+    // packages/payment-provider, whose src/adapters subdirectory lives inside) an
+    // approved adapter directory — meaning a provider SDK could never legally be
+    // declared as a dependency ANYWHERE, contradicting this guard's own stated purpose
+    // ("Provider SDKs are allowed only inside approved adapter directories"). Real bug,
+    // caught while actually trying to add one for the first time (ENG6 Slice 3's Stripe
+    // sandbox adapter, permitted under the M0 gate's D46 exception).
+    if (isInApprovedAdapterDir(relPath)) continue;
     const manifest = JSON.parse(readFileSync(file, 'utf8'));
     for (const section of [
       'dependencies',

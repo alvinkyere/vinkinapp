@@ -57,7 +57,20 @@ VINKIN_CONTRIBUTION_PROJECTION_ENABLED=1
 VINKIN_PARTICIPANT_INCLUSIVE_RETRIEVAL=1
 VINKIN_INVITES_ENABLED=1
 VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED=0
+# ENG5 Slice 1 — same "no real delivery provider selected yet" reason as the flag above;
+# stays 0 until one is. EMAIL_VERIFICATION_* keep their env.ts defaults if unset.
+VINKIN_EMAIL_VERIFICATION_ENABLED=0
+# ENG5 Slice 2 — same reason again; PASSWORD_RESET_* keep their env.ts defaults if unset.
+VINKIN_PASSWORD_RESET_ENABLED=0
+# ENG5 Slice 3 — same reason again; MAGIC_LINK_* keep their env.ts defaults if unset.
+VINKIN_MAGIC_LINK_ENABLED=0
+# ENG5 Slice 4 — no real Apple Developer capability configured yet (not a delivery
+# dependency); stays 0 until one exists. APPLE_SIGN_IN_CLIENT_ID left unset.
+VINKIN_APPLE_SIGN_IN_ENABLED=0
+# ENG5 Slice 5 — no real Google Cloud OAuth client configured yet; stays 0 until one exists.
+VINKIN_GOOGLE_SIGN_IN_ENABLED=0
 VINKIN_PUBLIC_BASE_URL=https://<guest-web Railway domain>
+VINKIN_API_PUBLIC_BASE_URL=https://<api Railway domain>
 OPERATIONS_CONSOLE_BASE_URL=https://<operations-console Railway domain>
 VINK_OPEN_DURATION_SECONDS=86400
 VINK_PROCESSING_GRACE_SECONDS=60

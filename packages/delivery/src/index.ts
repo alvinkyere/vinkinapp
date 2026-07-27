@@ -4,5 +4,9 @@ export type {
   DeliveryMethod,
   DeliveryResult,
   DeliveryTemplateInput,
+  EmailVerificationTemplateInput,
+  InvitationTemplateInput,
+  MagicLinkTemplateInput,
+  PasswordResetTemplateInput,
 } from './types.ts';
 export { MockDeliveryProvider } from './mock/mock-delivery-provider.ts';

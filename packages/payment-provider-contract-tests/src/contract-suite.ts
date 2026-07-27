@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { ProviderError, operationId, type Money } from '../../payment-provider/src/index.ts';
 import type { MakeKit, ProviderTestKit } from './test-kit.ts';
@@ -18,12 +19,21 @@ import type { MakeKit, ProviderTestKit } from './test-kit.ts';
 const usd = (amountMinor: number): Money => ({ amountMinor, currency: 'USD' });
 
 let slotCounter = 0;
-const freshSlotId = (): string => `slot-contract-${(slotCounter += 1)}`;
+/** ENG6 Slice 3 finding: a real provider's idempotency store persists server-side (Stripe:
+ * 24h) independent of this test process — a plain per-run counter (`slot-contract-1`, ...)
+ * collides with itself across separate test runs against the SAME real sandbox account,
+ * correctly triggering IDEMPOTENCY_CONFLICT for what looks like a fresh key but isn't. The
+ * in-memory mock never had this problem (its idempotency map dies with the process), which
+ * is exactly why this went uncaught until a real adapter ran this suite for the first time.
+ * The random component makes every run's keys genuinely fresh; the counter is kept only for
+ * human-readable ordering in failure output. */
+const freshSlotId = (): string => `slot-contract-${randomUUID()}-${(slotCounter += 1)}`;
 
 async function authorize(
   kit: ProviderTestKit,
   options?: {
-    behavior?: 'ok' | 'decline' | 'pending';
+    behavior?:
+      'ok' | 'decline' | 'pending' | 'insufficient_funds' | 'compliance_blocked' | 'expired_method';
     amountMinor?: number;
     slotId?: string;
     generation?: number;
@@ -40,7 +50,7 @@ async function authorize(
     providerMethodId,
     amount: usd(amountMinor),
     captureMode: 'MANUAL' as const,
-    metadata: { contributionSlotId: slotId },
+    metadata: { vinkId: 'contract-suite-vink', contributionSlotId: slotId },
   };
   const result = await kit.provider.authorizeContribution(input);
   return { result, input, slotId };
@@ -113,7 +123,7 @@ export function runFinancialProviderContractTests(name: string, makeKit: MakeKit
         providerMethodId,
         amount: usd(5_000),
         captureMode: 'MANUAL' as const,
-        metadata: {},
+        metadata: { vinkId: 'contract-suite-vink' },
       };
       kit.simulateTransientFailure();
       await assert.rejects(kit.provider.authorizeContribution(input), (error: unknown) => {
@@ -136,7 +146,7 @@ export function runFinancialProviderContractTests(name: string, makeKit: MakeKit
         providerMethodId,
         amount: usd(5_000),
         captureMode: 'MANUAL' as const,
-        metadata: {},
+        metadata: { vinkId: 'contract-suite-vink' },
       };
       kit.simulateLostResponse();
       await assert.rejects(
@@ -164,6 +174,93 @@ export function runFinancialProviderContractTests(name: string, makeKit: MakeKit
 
       const retry = await authorize(kit, { behavior: 'ok', slotId, generation: 2 });
       assert.equal(retry.result.status, 'AUTHORIZED');
+    });
+
+    // ---- ENG6 Slice 2: named decline reasons + provider error classification ---------
+
+    it('distinguishes INSUFFICIENT_FUNDS from a generic card decline', async () => {
+      const kit = await makeKit();
+      const { result } = await authorize(kit, { behavior: 'insufficient_funds' });
+      assert.equal(result.status, 'DECLINED');
+      assert.equal(result.declineReason, 'INSUFFICIENT_FUNDS');
+    });
+
+    it('distinguishes COMPLIANCE_BLOCKED from a generic card decline', async () => {
+      const kit = await makeKit();
+      const { result } = await authorize(kit, { behavior: 'compliance_blocked' });
+      assert.equal(result.status, 'DECLINED');
+      assert.equal(result.declineReason, 'COMPLIANCE_BLOCKED');
+    });
+
+    it('distinguishes EXPIRED_METHOD from a generic card decline', async () => {
+      const kit = await makeKit();
+      const { result } = await authorize(kit, { behavior: 'expired_method' });
+      assert.equal(result.status, 'DECLINED');
+      assert.equal(result.declineReason, 'EXPIRED_METHOD');
+    });
+
+    it('rejects a request missing required metadata as INVALID_REQUEST, not a generic throw', async () => {
+      const kit = await makeKit();
+      const { providerCustomerId, providerMethodId } = await kit.createCustomerAndMethod('ok');
+      await assert.rejects(
+        kit.provider.authorizeContribution({
+          idempotencyKey: operationId.authorize(freshSlotId(), 1),
+          providerCustomerId,
+          providerMethodId,
+          amount: usd(5_000),
+          captureMode: 'MANUAL',
+          metadata: {}, // vinkId deliberately omitted
+        }),
+        isProviderError('INVALID_REQUEST'),
+      );
+    });
+
+    it('an ambiguous (UNKNOWN_OUTCOME) response is verifiable via retrievePaymentStatus, never assumed either way', async (t) => {
+      const kit = await makeKit();
+      if (!kit.simulateUnknownOutcome) {
+        return t.skip('kit provides no simulateUnknownOutcome hook');
+      }
+      // Case 1: the side effect genuinely did NOT happen — a plain retry with the SAME key
+      // must succeed as a genuinely fresh attempt, since nothing was ever committed.
+      const notHappenedFixture = await kit.createCustomerAndMethod('ok');
+      const notHappenedKey = operationId.authorize(freshSlotId(), 1);
+      const notHappenedInput = {
+        idempotencyKey: notHappenedKey,
+        providerCustomerId: notHappenedFixture.providerCustomerId,
+        providerMethodId: notHappenedFixture.providerMethodId,
+        amount: usd(5_000),
+        captureMode: 'MANUAL' as const,
+        metadata: { vinkId: 'contract-suite-vink' },
+      };
+      kit.simulateUnknownOutcome(false);
+      await assert.rejects(
+        kit.provider.authorizeContribution(notHappenedInput),
+        isProviderError('UNKNOWN_OUTCOME'),
+      );
+      const retryAfterNotHappened = await kit.provider.authorizeContribution(notHappenedInput);
+      assert.equal(retryAfterNotHappened.status, 'AUTHORIZED');
+
+      // Case 2: the side effect DID happen — retrievePaymentStatus must report the real
+      // outcome even though the original call only ever saw UNKNOWN_OUTCOME.
+      const { providerCustomerId, providerMethodId } = await kit.createCustomerAndMethod('ok');
+      const key = operationId.authorize(freshSlotId(), 1);
+      const input = {
+        idempotencyKey: key,
+        providerCustomerId,
+        providerMethodId,
+        amount: usd(5_000),
+        captureMode: 'MANUAL' as const,
+        metadata: { vinkId: 'contract-suite-vink' },
+      };
+      kit.simulateUnknownOutcome(true);
+      await assert.rejects(
+        kit.provider.authorizeContribution(input),
+        isProviderError('UNKNOWN_OUTCOME'),
+      );
+      // A same-key retry after the ambiguous call must replay the ACTUAL committed result
+      // (§12) — proving the side effect really did happen, not just that the mock claims so.
+      const replay = await kit.provider.authorizeContribution(input);
+      assert.equal(replay.status, 'AUTHORIZED');
     });
 
     it('cancel-before-capture releases the hold (preferred failed-Vink path, §25)', async () => {
@@ -343,14 +440,20 @@ export function runFinancialProviderContractTests(name: string, makeKit: MakeKit
       const kit = await makeKit();
       const signWebhook = kit.signWebhook;
       if (!signWebhook) return t.skip('kit provides no signWebhook hook');
-      const rawBody = JSON.stringify({
-        provider: kit.provider.providerName,
-        providerEventId: 'evt_contract',
-        type: 'payment.captured',
-        occurredAt: new Date().toISOString(),
-        objectId: 'pay_contract',
-        payload: {},
-      });
+      const rawBody = kit.buildTestEventRawBody
+        ? kit.buildTestEventRawBody({
+            providerEventId: 'evt_contract',
+            type: 'payment.captured',
+            objectId: 'pay_contract',
+          })
+        : JSON.stringify({
+            provider: kit.provider.providerName,
+            providerEventId: 'evt_contract',
+            type: 'payment.captured',
+            occurredAt: new Date().toISOString(),
+            objectId: 'pay_contract',
+            payload: {},
+          });
       const parsed = kit.provider.parseWebhookEvent({
         rawBody,
         signatureHeader: signWebhook(rawBody, 'contract-secret'),

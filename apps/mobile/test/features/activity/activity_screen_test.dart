@@ -15,23 +15,24 @@ import 'package:vinkin_mobile/features/activity/activity_providers.dart';
 import 'package:vinkin_mobile/features/activity/activity_screen.dart';
 
 void main() {
-  testWidgets('Activity empty state renders when there is no activity', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          recentActivityProvider.overrideWith(
-            (ref) async => (entries: <VinkActivity>[], failedCount: 0),
-          ),
-        ],
-        child: const MaterialApp(home: ActivityScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'Activity empty state renders when there is no activity (flag off)',
+    (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            recentActivityProvider.overrideWith(
+              (ref) async => (entries: <VinkActivity>[], failedCount: 0),
+            ),
+          ],
+          child: const MaterialApp(home: ActivityScreen(homeActivityV2: false)),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Nothing here yet'), findsOneWidget);
-  });
+      expect(find.text('Nothing here yet'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'PARTIAL-FAILURE RESILIENCE (flag off): a failed row does not collapse the screen — '
@@ -44,7 +45,7 @@ void main() {
               (ref) async => (entries: <VinkActivity>[], failedCount: 2),
             ),
           ],
-          child: const MaterialApp(home: ActivityScreen()),
+          child: const MaterialApp(home: ActivityScreen(homeActivityV2: false)),
         ),
       );
       await tester.pumpAndSettle();

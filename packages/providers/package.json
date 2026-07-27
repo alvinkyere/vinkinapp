@@ -1,0 +1,23 @@
+{
+  "name": "@vinkin/providers",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Real FinancialProvider adapters (ENG6 Slice 3+). Provider SDKs are only ever imported here or in packages/payment-provider/src/adapters — the guard in tooling/scripts/check-provider-imports.mjs enforces it. Sandbox-mode only per the M0 gate's D46 exception (docs/architecture/06-milestone-0-gate.md); no live-mode credentials, ever.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "stripe": "^22.3.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

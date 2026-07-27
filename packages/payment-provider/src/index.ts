@@ -13,6 +13,7 @@ export type {
   CaptureResult,
   CardResult,
   CardholderResult,
+  ContributionDeclineReason,
   CreateCardholderInput,
   CreateCustomerInput,
   CurrencyCode,

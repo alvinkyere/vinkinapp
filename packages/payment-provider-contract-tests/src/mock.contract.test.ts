@@ -17,8 +17,14 @@ function makeMockKit(): ProviderTestKit {
 
     async createCustomerAndMethod(behavior) {
       fixtureCounter += 1;
-      const token =
-        behavior === 'decline' ? 'tok_decline' : behavior === 'pending' ? 'tok_pending' : 'tok_ok';
+      const tokenForBehavior: Record<string, string> = {
+        decline: 'tok_decline',
+        pending: 'tok_pending',
+        insufficient_funds: 'tok_insufficient_funds',
+        compliance_blocked: 'tok_compliance_blocked',
+        expired_method: 'tok_expired_method',
+      };
+      const token = tokenForBehavior[behavior] ?? 'tok_ok';
       const { providerCustomerId } = await provider.createCustomer({
         idempotencyKey: `cus:kit:${fixtureCounter}`,
         externalUserId: `user-${fixtureCounter}`,
@@ -37,6 +43,8 @@ function makeMockKit(): ProviderTestKit {
     expireAuthorization: (paymentId) => provider.expireAuthorization(paymentId),
     simulateTransientFailure: () => provider.simulateTransientFailure(),
     simulateLostResponse: () => provider.simulateLostResponse(),
+    simulateUnknownOutcome: (sideEffectHappened) =>
+      provider.simulateUnknownOutcome(sideEffectHappened),
 
     drainEvents: () => provider.drainEvents(),
     duplicateLastEvent: () => provider.duplicateLastEvent(),

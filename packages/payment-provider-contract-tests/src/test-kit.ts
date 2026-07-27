@@ -1,4 +1,8 @@
-import type { FinancialProvider, ProviderEvent } from '../../payment-provider/src/index.ts';
+import type {
+  FinancialProvider,
+  ProviderEvent,
+  ProviderEventType,
+} from '../../payment-provider/src/index.ts';
 
 /**
  * What an adapter must hand the conformance suite. `provider` and
@@ -12,8 +16,14 @@ import type { FinancialProvider, ProviderEvent } from '../../payment-provider/sr
 export interface ProviderTestKit {
   provider: FinancialProvider;
 
-  /** Provision a customer + payment method with the given behavior. */
-  createCustomerAndMethod(behavior: 'ok' | 'decline' | 'pending'): Promise<{
+  /** Provision a customer + payment method with the given behavior. ENG6 Slice 2 added the
+   * three named-decline-reason behaviors — a kit that can only force a generic decline
+   * (not distinguish which `ContributionDeclineReason`) is a real, visible coverage gap for
+   * that adapter, not silently treated as equivalent to `'decline'`. */
+  createCustomerAndMethod(
+    behavior:
+      'ok' | 'decline' | 'pending' | 'insufficient_funds' | 'compliance_blocked' | 'expired_method',
+  ): Promise<{
     providerCustomerId: string;
     providerMethodId: string;
   }>;
@@ -26,12 +36,28 @@ export interface ProviderTestKit {
   expireAuthorization?(providerPaymentId: string): void | Promise<void>;
   simulateTransientFailure?(): void; // next provider call fails BEFORE executing
   simulateLostResponse?(): void; // next provider call executes, then the response is lost
+  /** ENG6 Slice 2 — next provider call throws UNKNOWN_OUTCOME; `sideEffectHappened` is the
+   * ground truth a test confirms afterward via `retrievePaymentStatus`. */
+  simulateUnknownOutcome?(sideEffectHappened: boolean): void;
 
   // --- webhook/event simulation hooks ---
   drainEvents?(): ProviderEvent[];
   duplicateLastEvent?(): void;
   swapLastTwoEvents?(): void;
   signWebhook?(rawBody: string, secret: string): string;
+  /** ENG6 Slice 3 — builds a raw webhook body `parseWebhookEvent` can actually translate for
+   * THIS adapter. A mock that generates events already shaped like VinkIn's own
+   * `ProviderEvent` needs no translation and can echo `providerEventId`/`type`/`objectId`
+   * straight through; a real adapter parses the PROVIDER's own wire format, so a body
+   * shaped like VinkIn's internal vocabulary would never structurally match what its real
+   * `parseWebhookEvent` expects. Optional: a kit that omits it gets the suite's own
+   * mock-shaped default, preserving exact prior behavior for every kit that never needed
+   * this distinction. */
+  buildTestEventRawBody?(input: {
+    providerEventId: string;
+    type: ProviderEventType;
+    objectId: string;
+  }): string;
 
   // --- issuing-side simulation hooks ---
   issueCard?(spendLimitMinor: number): Promise<string>; // returns providerCardId

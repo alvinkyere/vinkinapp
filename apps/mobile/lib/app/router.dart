@@ -8,7 +8,9 @@ import '../features/create_vink/canonical/canonical_create_vink_screen.dart';
 import '../features/create_vink/create_vink_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/invites/invites_screen.dart';
+import '../features/onboarding/forgot_password_screen.dart';
 import '../features/onboarding/login_screen.dart';
+import '../features/onboarding/magic_link_screen.dart';
 import '../features/onboarding/register_screen.dart';
 import '../features/onboarding/welcome_screen.dart';
 import '../features/profile/profile_screen.dart';
@@ -52,6 +54,8 @@ GoRouter buildRouter(
         '/welcome',
         '/login',
         '/register',
+        '/forgot-password',
+        '/magic-link',
       }.contains(state.matchedLocation);
       if (authState is AuthUnknown) {
         return null; // still restoring the session — hold position
@@ -69,6 +73,14 @@ GoRouter buildRouter(
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (context, state) => const ForgotPasswordScreen(),
+      ),
+      GoRoute(
+        path: '/magic-link',
+        builder: (context, state) => const MagicLinkScreen(),
       ),
       // Pushed full-screen, above the tab bar — not part of any branch's own stack, since
       // creating/viewing a Vink is a focused task, not a persistent tab destination.
