@@ -69,7 +69,10 @@ function mapError(error: unknown): { status: number; body: Record<string, unknow
   return null;
 }
 
-async function requireOperator(
+/** Exported for reuse by `modules/reconciliation/routes.ts` (ENG6 Slice 6) — the identical
+ * operator-token check, not a lookalike, so the two consoles' auth boundaries can never
+ * drift apart. */
+export async function requireOperator(
   request: FastifyRequest,
   reply: FastifyReply,
   env: Env,

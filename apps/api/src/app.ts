@@ -22,6 +22,7 @@ import { registerRealtimeRoutes } from './modules/realtime/routes.ts';
 import { registerOpsRoutes } from './modules/ops/routes.ts';
 import { registerAnalyticsRoutes } from './modules/analytics/routes.ts';
 import { registerWebhookRoutes, type WebhookRouteConfig } from './modules/webhooks/routes.ts';
+import { registerReconciliationOpsRoutes } from './modules/reconciliation/routes.ts';
 import { InProcessRealtimeHub, type RealtimeHub } from './realtime/hub.ts';
 import { isAppVersionSupported } from './app-version.ts';
 import { NOOP_METRICS, type Metrics } from './observability/metrics.ts';
@@ -185,6 +186,12 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     for (const webhookConfig of deps.webhookRoutes ?? []) {
       registerWebhookRoutes(app, deps.sql, webhookConfig);
     }
+    registerReconciliationOpsRoutes(
+      app,
+      deps.env,
+      deps.sql,
+      new Map((deps.webhookRoutes ?? []).map((config) => [config.provider.providerName, config])),
+    );
   }
 
   return app;

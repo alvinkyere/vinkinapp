@@ -991,9 +991,44 @@ without further Stripe confirmation — stated as open questions, not guessed at
 Account code was written anywhere; the 4 issuing-side contract-suite skips remain exactly as
 disclosed in Slice 3's report.
 
-Next: ENG6 Slice 6 — operations console read-only tooling: surfacing `reconciliation_findings`
-and run history in `apps/operations-console`, an operator-triggered run, and the
-acknowledge/resolve review workflow `review_status` already supports.
+**ENG6 Slice 6 done** (`milestone-reports/ENG6-SLICE-6-OPS-CONSOLE-RECONCILIATION.md`,
+owner-scoped brief: "operational visibility, not financial control" — explicit prohibition on
+any button that moves money, approves a payment, issues a refund, creates a card, or edits
+provider/financial data). Read-only operator console over the webhook inbox and Slice 5's
+reconciliation engine: new migration `0021` (`signature_header`/`delivery_count` on
+`webhook_events`); `webhooks/routes.ts` refactored so the entire ingestion decision is one
+exported `ingestWebhookEvent` function, called identically by the live route AND the new
+replay endpoint — the literal mechanism making "replay always goes through the normal
+ingestion path" true rather than asserted; `modules/reconciliation/{ops-queries,routes}.ts`
+(list/filter/paginate webhook events and findings, finding detail with linked Vink/ledger
+entries/reconciliation history/audit history, acknowledge/resolve reusing PV11's existing
+`operator_audit_log`, a concurrency-guarded manual run trigger). New
+`apps/operations-console` pages (`/reconciliation`, `/reconciliation/findings/:id`) matching
+the app's existing conventions exactly (raw DB-shaped rows, `DataTable`, React Query,
+operator-token auth). **Three real bugs found and fixed**: an auth-ordering bug where
+acknowledge/resolve validated the request body before checking the operator token (an
+unauthenticated caller got a body-shaped `400` instead of a uniform `401` — caught by the
+AUTHZ test itself); a genuine TOCTOU race in the concurrency guard (checking `runInProgress`
+after an `await` would let two truly concurrent requests both pass — fixed by claiming the
+flag as the first synchronous statement, before any await); and a frontend/backend
+content-type mismatch (`replayWebhookEvent` sent a bodyless POST, but the shared `request()`
+helper always sets `Content-Type: application/json`, which Fastify rejects on a truly empty
+body with a raw 500 — caught live in a real Chromium browser driving the real production
+console against the real API, not by any `app.inject()`-based test, since that harness
+doesn't replicate real `fetch()` header behavior). **`apps/api` 254/254** (up from 240 — 14
+new, including concurrent-run prevention via `Promise.all`, replay-through-the-normal-pipeline,
+and a dedicated no-financial-mutation proof), **`packages/application` 137/137** unchanged,
+`pnpm typecheck/lint/format:check/guard` clean, 12/12 packages. Verified end-to-end with a
+real Playwright-driven browser (login → findings list → detail → acknowledge → dead-letter
+browser → replay refusal) against real running processes — the run that caught the
+content-type bug. No HTTP-level financial mutation is possible from this module by
+construction (verified by a dedicated integration test and by reading every query in
+`ops-queries.ts`: none write to `contributions`/`settlements`/`purchase_authorizations`/
+`temporary_cards`/any ledger table).
+
+Next: ENG6 Slice 7 — sandbox golden path: an end-to-end proof that a real Stripe sandbox
+event flows through webhook ingestion → reconciliation → the operations console, closing out
+ENG6's own numbered sequence.
 
 **Track note (2026-07-26):** ENG4's remaining Slice 10 external blockers (Play signing
 fingerprint, GitHub branch protection, Railway spend alerts/backup drill, signed TestFlight/

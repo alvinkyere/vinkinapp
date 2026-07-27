@@ -33,6 +33,8 @@ export const vinkAndContributionIdParams = z.object({
 });
 export const contributionIdParams = z.object({ contributionId: z.uuid() });
 export const authorizationIdParams = z.object({ authorizationId: z.uuid() });
+export const webhookEventIdParams = z.object({ webhookEventId: z.uuid() });
+export const findingIdParams = z.object({ findingId: z.uuid() });
 export const publicCodeParams = z.object({
   publicCode: z.string().min(1).max(64),
 });

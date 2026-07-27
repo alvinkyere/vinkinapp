@@ -28,6 +28,9 @@ export default function SearchPage() {
           <Link href="/analytics" className="text-blue-600 hover:underline">
             Pilot metrics
           </Link>
+          <Link href="/reconciliation" className="text-blue-600 hover:underline">
+            Reconciliation
+          </Link>
           <span>{operatorName}</span>
           <button type="button" onClick={logout} className="text-blue-600 hover:underline">
             Sign out
@@ -112,7 +115,10 @@ export default function SearchPage() {
               {query.data.vinks.map((vink) => (
                 <tr key={vink.id}>
                   <td className="px-4 py-2">
-                    <Link href={`/vinks/${vink.id}`} className="font-medium text-blue-600 hover:underline">
+                    <Link
+                      href={`/vinks/${vink.id}`}
+                      className="font-medium text-blue-600 hover:underline"
+                    >
                       {vink.publicCode}
                     </Link>
                   </td>

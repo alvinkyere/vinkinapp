@@ -60,10 +60,30 @@
       "Bash(VINKIN_INTEGRATION=1 node --test)",
       "Bash(node --test)",
       "Bash(VINKIN_INTEGRATION=1 node --test src/reconciliation.integration.test.ts)",
-      "Bash(pnpm --filter @vinkin/reconciliation test)"
+      "Bash(pnpm --filter @vinkin/reconciliation test)",
+      "Bash(VINKIN_INTEGRATION=1 node --test src/reconciliation-ops.integration.test.ts)",
+      "Bash(mkdir -p /Users/alvinkyere870gmail.com/code/vinkin/apps/operations-console/app/reconciliation/findings/\\\\[findingId\\\\])",
+      "Bash(pnpm build *)",
+      "Bash(node --experimental-strip-types -e ' *)",
+      "Bash(df -h / | tail -2 *)",
+      "Read(//Users/alvinkyere870gmail.com/Library/Caches/ms-playwright/**)",
+      "Bash(pkill -f \"next start\")",
+      "Bash(pkill -f \"next-server\")",
+      "Bash(NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3000 PORT=3200 npm start)",
+      "Bash(curl -s -o /dev/null -w \"console root: %{http_code}\\\\n\" http://127.0.0.1:3200/)",
+      "Bash(curl -s -o /dev/null -w \"reconciliation page: %{http_code}\\\\n\" http://127.0.0.1:3200/reconciliation)",
+      "Bash(node --experimental-vm-modules /private/tmp/claude-501/-Users-alvinkyere870gmail-com-code-vinkin/a341bdaa-3353-4194-b3dc-cd879b59de04/scratchpad/smoke-reconciliation.mjs)",
+      "Bash(node /private/tmp/claude-501/-Users-alvinkyere870gmail-com-code-vinkin/a341bdaa-3353-4194-b3dc-cd879b59de04/scratchpad/smoke-reconciliation.mjs)",
+      "Bash(node smoke-reconciliation.mjs)",
+      "Bash(NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3000 pnpm build)",
+      "Bash(pnpm test:unit)",
+      "Bash(pnpm test *)",
+      "Bash(psql postgres://vinkin:vinkin@localhost:5432/postgres -c \"DROP DATABASE IF EXISTS vinkin;\")",
+      "Bash(psql postgres://vinkin:vinkin@localhost:5432/postgres -c \"CREATE DATABASE vinkin;\")"
     ],
     "additionalDirectories": [
-      "/Users/alvinkyere870gmail.com/Downloads/Vinkin - v1/docs"
+      "/Users/alvinkyere870gmail.com/Downloads/Vinkin - v1/docs",
+      "/Users/alvinkyere870gmail.com/code/vinkin/apps/operations-console/app/reconciliation/findings"
     ]
   }
 }
