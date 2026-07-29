@@ -1,0 +1,29 @@
+# ENG8 ("dependency scanning"). Dependabot alerts (vulnerability scanning) are enabled
+# automatically by GitHub for this repo's manifests once this file exists; this config
+# additionally opts into weekly version-update PRs, grouped to avoid one-PR-per-package noise
+# across a 12-package pnpm workspace. Three ecosystems: npm (the pnpm workspace root — pnpm
+# lockfiles are natively understood), pub (apps/mobile's Flutter dependencies), and
+# github-actions (the workflow files themselves).
+
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      workspace-dependencies:
+        patterns:
+          - '*'
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: 'pub'
+    directory: '/apps/mobile'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'

@@ -53,6 +53,11 @@ export type ExtensionEventName =
   // still joins immediately (organizer-at-create, guests, and the flag-off add-member path).
   | 'ParticipantInvited'
   | 'ParticipantInviteAccepted'
-  | 'ParticipantInviteDeclined';
+  | 'ParticipantInviteDeclined'
+  // RM1 (D47): the card-phase timeout half of the dual-timer lifecycle — the Vink's own
+  // submission_deadline (SUBMISSION_DEADLINE_REACHED) is the other half. Reuses the existing
+  // CARD_READY -> FUNDING_REVERSAL -> EXPIRED exit path (same shape as CARD_PROVISIONING_
+  // FAILED), since an unused card is the same "wind down and refund" outcome either way.
+  | 'CardWindowExpired';
 
 export type DomainEventName = PlanCoreEventName | ExtensionEventName;

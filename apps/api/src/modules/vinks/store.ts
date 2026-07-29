@@ -20,6 +20,11 @@ import {
   type VinkTx,
 } from '../../../../../packages/application/src/index.ts';
 import type {
+  Card,
+  CardAssignment,
+  CardAssignmentId,
+  CardId,
+  CardWalletToken,
   Contribution,
   CurrencyCode,
   GuestIdentityId,
@@ -164,6 +169,46 @@ function rowToSettlement(row: Row): Settlement {
     status: row.status as Settlement['status'],
     settledAt: toIso(row.settled_at),
     createdAt: toIso(row.created_at),
+  };
+}
+
+function rowToCardPool(row: Row): Card {
+  return {
+    id: row.id as Card['id'],
+    providerCardId: row.provider_card_id as string,
+    displayLastFour: row.display_last_four as string,
+    status: row.status as Card['status'],
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+function rowToCardAssignment(row: Row): CardAssignment {
+  const currency: CurrencyCode = 'USD';
+  return {
+    id: row.id as CardAssignment['id'],
+    cardId: row.card_id as CardAssignment['cardId'],
+    vinkId: row.vink_id as VinkId,
+    status: row.status as CardAssignment['status'],
+    provisioningStatus: row.provisioning_status as CardAssignment['provisioningStatus'],
+    spendingLimit: { amountMinor: asMinor(row.spending_limit_minor, 'spending_limit'), currency },
+    merchantLockKey: (row.merchant_lock_key ?? null) as string | null,
+    reservedAt: toIso(row.reserved_at),
+    usageWindowExpiresAt: toIso(row.usage_window_expires_at),
+    returnedAt:
+      row.returned_at === null || row.returned_at === undefined ? null : toIso(row.returned_at),
+  };
+}
+
+function rowToCardWalletToken(row: Row): CardWalletToken {
+  return {
+    id: row.id as CardWalletToken['id'],
+    cardAssignmentId: row.card_assignment_id as CardWalletToken['cardAssignmentId'],
+    providerTokenId: row.provider_token_id as string,
+    status: row.status as CardWalletToken['status'],
+    provisionedAt: toIso(row.provisioned_at),
+    revokedAt:
+      row.revoked_at === null || row.revoked_at === undefined ? null : toIso(row.revoked_at),
   };
 }
 
@@ -459,9 +504,9 @@ class PostgresVinkTx implements VinkTx {
 
   async appendContributionHistory(row: ContributionStatusHistoryRow): Promise<void> {
     await this.#sql`INSERT INTO contribution_status_history
-      (contribution_id, from_status, event, to_status, actor, correlation_id)
+      (contribution_id, from_status, event, to_status, actor, correlation_id, provider_reference)
       VALUES (${row.contributionId}, ${row.fromStatus}, ${row.event}, ${row.toStatus},
-              ${row.actor}, ${row.correlationId})`;
+              ${row.actor}, ${row.correlationId}, ${row.providerReference ?? null})`;
   }
 
   async insertLedgerPosting(posting: LedgerPostingInput): Promise<void> {
@@ -507,6 +552,87 @@ class PostgresVinkTx implements VinkTx {
     await this.#sql`UPDATE temporary_cards SET
       status = ${card.status}, merchant_lock_key = ${card.merchantLockKey},
       closed_at = ${card.closedAt} WHERE id = ${card.id}`;
+  }
+
+  // -------------------------------------------------------------------------------------
+  // RM1 (D47) — the reusable card pool.
+  // -------------------------------------------------------------------------------------
+
+  async reserveAvailableCard(): Promise<Card | null> {
+    // FOR UPDATE SKIP LOCKED — the same idiom `outbox-publisher.ts`/the reconciliation
+    // runner already use for concurrent-safe claiming: two simultaneous reservations each
+    // lock a DIFFERENT available row instead of one blocking on the other.
+    const rows = await this.#sql`SELECT * FROM cards
+      WHERE status = 'AVAILABLE' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`;
+    return rows.length === 0 ? null : rowToCardPool(rows[0] as Row);
+  }
+
+  async getCard(id: CardId): Promise<Card | null> {
+    const rows = await this.#sql`SELECT * FROM cards WHERE id = ${id}`;
+    return rows.length === 0 ? null : rowToCardPool(rows[0] as Row);
+  }
+
+  async insertCardAssignment(assignment: CardAssignment): Promise<void> {
+    await this.#sql`INSERT INTO card_assignments (
+      id, card_id, vink_id, status, provisioning_status, spending_limit_minor,
+      merchant_lock_key, reserved_at, usage_window_expires_at, returned_at
+    ) VALUES (
+      ${assignment.id}, ${assignment.cardId}, ${assignment.vinkId}, ${assignment.status},
+      ${assignment.provisioningStatus}, ${assignment.spendingLimit.amountMinor},
+      ${assignment.merchantLockKey}, ${assignment.reservedAt},
+      ${assignment.usageWindowExpiresAt}, ${assignment.returnedAt}
+    )`;
+    await this.#sql`UPDATE cards SET status = 'RESERVED', updated_at = now()
+      WHERE id = ${assignment.cardId}`;
+  }
+
+  async getCardAssignmentForVink(vinkId: VinkId): Promise<CardAssignment | null> {
+    const rows = await this.#sql`SELECT * FROM card_assignments WHERE vink_id = ${vinkId}`;
+    return rows.length === 0 ? null : rowToCardAssignment(rows[0] as Row);
+  }
+
+  async getCardAssignmentForUpdate(id: CardAssignmentId): Promise<CardAssignment | null> {
+    const rows = await this.#sql`SELECT * FROM card_assignments WHERE id = ${id} FOR UPDATE`;
+    return rows.length === 0 ? null : rowToCardAssignment(rows[0] as Row);
+  }
+
+  async updateCardAssignment(assignment: CardAssignment): Promise<void> {
+    await this.#sql`UPDATE card_assignments SET
+      status = ${assignment.status}, provisioning_status = ${assignment.provisioningStatus},
+      merchant_lock_key = ${assignment.merchantLockKey},
+      returned_at = ${assignment.returnedAt} WHERE id = ${assignment.id}`;
+  }
+
+  async releaseCardToPool(cardId: CardId): Promise<void> {
+    await this.#sql`UPDATE cards SET status = 'AVAILABLE', updated_at = now()
+      WHERE id = ${cardId}`;
+  }
+
+  async quarantineCard(cardId: CardId): Promise<void> {
+    await this.#sql`UPDATE cards SET status = 'QUARANTINED', updated_at = now()
+      WHERE id = ${cardId}`;
+  }
+
+  async insertCardWalletToken(token: CardWalletToken): Promise<void> {
+    await this.#sql`INSERT INTO card_wallet_tokens (
+      id, card_assignment_id, provider_token_id, status, provisioned_at, revoked_at
+    ) VALUES (
+      ${token.id}, ${token.cardAssignmentId}, ${token.providerTokenId}, ${token.status},
+      ${token.provisionedAt}, ${token.revokedAt}
+    )`;
+  }
+
+  async getCardWalletTokenForAssignment(
+    assignmentId: CardAssignmentId,
+  ): Promise<CardWalletToken | null> {
+    const rows = await this.#sql`SELECT * FROM card_wallet_tokens
+      WHERE card_assignment_id = ${assignmentId}`;
+    return rows.length === 0 ? null : rowToCardWalletToken(rows[0] as Row);
+  }
+
+  async updateCardWalletToken(token: CardWalletToken): Promise<void> {
+    await this.#sql`UPDATE card_wallet_tokens SET
+      status = ${token.status}, revoked_at = ${token.revokedAt} WHERE id = ${token.id}`;
   }
 
   async insertPurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void> {

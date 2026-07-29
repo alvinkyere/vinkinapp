@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vinkin_mobile/core/realtime/realtime_client.dart';
 
@@ -109,6 +110,103 @@ void main() {
           shouldReconnectOnConnectivityChange(wasOnline: null, isOnline: false),
           isFalse,
         );
+      },
+    );
+  });
+
+  group('ENG9 #6: AppLifecycleListener wiring (real backgrounding/resume, not just pure fns)', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+
+    // AppLifecycleListener enforces the REAL OS transition sequence via internal asserts
+    // (flutter/lib/src/widgets/app_lifecycle_listener.dart): resumed -> inactive -> hidden ->
+    // paused going to the background, and the reverse coming back. `onPause` specifically
+    // only fires when the previous state was `hidden` (or null) — jumping straight from
+    // `resumed` to `paused` is silently a no-op, not an error, which is what made the first
+    // version of this test file fail confusingly. These helpers walk the full real sequence,
+    // exactly like backgrounding/foregrounding a real device does.
+    Future<void> goToBackground() async {
+      for (final state in [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+      ]) {
+        TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(state);
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    Future<void> returnToForeground() async {
+      for (final state in [
+        AppLifecycleState.hidden,
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]) {
+        TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(state);
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    // The binding is a process-global singleton, not reset per-test. Every test both starts
+    // and ends in `resumed` so each one gets a genuine, real transition boundary.
+    setUp(returnToForeground);
+    tearDown(returnToForeground);
+
+    test('a real backgrounding sequence sets isPausedInBackground', () async {
+      final client = RealtimeClient(
+        vinkId: 'test-vink',
+        accessToken: 'test-token',
+        connectivityChanges: const Stream<bool>.empty(),
+      );
+      addTearDown(client.dispose);
+
+      expect(client.isPausedInBackground, isFalse);
+      await goToBackground();
+      expect(client.isPausedInBackground, isTrue);
+    });
+
+    test(
+      'a real return-to-foreground sequence (after backgrounding) clears isPausedInBackground',
+      () async {
+        final client = RealtimeClient(
+          vinkId: 'test-vink',
+          accessToken: 'test-token',
+          connectivityChanges: const Stream<bool>.empty(),
+        );
+        addTearDown(client.dispose);
+
+        await goToBackground();
+        expect(client.isPausedInBackground, isTrue);
+
+        await returnToForeground();
+        expect(client.isPausedInBackground, isFalse);
+      },
+    );
+
+    test(
+      'connect() is a genuine no-op while backgrounded — no socket attempt, returns without hanging',
+      () async {
+        final client = RealtimeClient(
+          vinkId: 'test-vink',
+          accessToken: 'test-token',
+          connectivityChanges: const Stream<bool>.empty(),
+        );
+        addTearDown(client.dispose);
+
+        await goToBackground();
+        expect(client.isPausedInBackground, isTrue);
+
+        // connect() returns synchronously due to the _pausedInBackground guard — no real
+        // WebSocket connection is ever attempted (which would otherwise hang for up to the
+        // 8s connectTimeout against an unreachable/fake host).
+        client.connect();
+        var messageOrErrorFired = false;
+        final sub = client.messages.listen(
+          (_) => messageOrErrorFired = true,
+          onError: (_) => messageOrErrorFired = true,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await sub.cancel();
+        expect(messageOrErrorFired, isFalse);
       },
     );
   });

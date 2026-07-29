@@ -1026,9 +1026,52 @@ construction (verified by a dedicated integration test and by reading every quer
 `ops-queries.ts`: none write to `contributions`/`settlements`/`purchase_authorizations`/
 `temporary_cards`/any ledger table).
 
-Next: ENG6 Slice 7 — sandbox golden path: an end-to-end proof that a real Stripe sandbox
-event flows through webhook ingestion → reconciliation → the operations console, closing out
-ENG6's own numbered sequence.
+**ENG6 Slice 7 done** (`milestone-reports/ENG6-SLICE-7-SANDBOX-GOLDEN-PATH.md`): the
+end-to-end proof, closing ENG6's own numbered slice sequence. A real Stripe sandbox
+object (customer, payment method, authorized-then-captured PaymentIntent — every id genuine,
+via a real `api.stripe.com` call) created by calling `StripeFinancialProvider` directly
+(never through a command, M0/D15 unchanged); a real `payment_intent.succeeded` event
+referencing it submitted to the live `/webhooks/stripe/sandbox` route; reconciliation
+correctly classifies it **ORPHANED** — the accurate outcome, since no `contributions` row
+references an object the command layer never touched, not a gap; the finding is visible,
+correctly detailed (`linkedVinkId: null`, real payload), and acknowledgeable through the real
+operations console endpoints Slice 6 built. **`apps/api` 254/254** without Stripe
+credentials (44 suites, the new golden-path suite skips cleanly), **259/259** with real
+credentials, `pnpm typecheck/lint/format:check/guard` clean, 12/12 packages.
+
+**Genuine live Stripe delivery verified same day**, after the owner authenticated the Stripe
+CLI (`stripe login`): `stripe listen --forward-to .../webhooks/stripe/sandbox` (fresh
+ephemeral webhook secret captured straight into `apps/api/.env`, never displayed) +
+`stripe trigger payment_intent.succeeded` — Stripe's own servers delivered 4 real events over
+real HTTP; 3 were correctly dead-lettered (no `mapStripeEventType` mapping, accurate, not a
+bug) and `payment_intent.succeeded` was correctly verified/stored/mapped to `payment.captured`
+with its real `occurred_at`. Reconciliation (via the real `/internal/ops/reconciliation/run`
+endpoint) created exactly one `ORPHANED` finding, correctly reasoned, visible through the real
+findings API. This closes the one disclosed gap in the automated test. Two secret-handling
+slips happened during this pass (an unredacted CLI `config --list` printing the test-mode key;
+a log `tail` re-displaying the webhook signing secret) — both immediately disclosed; owner
+confirmed no rotation needed (test-mode key; a webhook signing secret can't be used to derive
+what it's computed from). Temp log files deleted after use.
+
+**ENG6 Slice 8 (closure report) done** (`milestone-reports/ENG6-SLICE-8-CLOSURE.md`,
+documentation only, no new code). Summarizes all seven implementation slices, the M0-gate
+D45→D46 resolution sequence, and confirms every hard boundary from the original brief held
+throughout: no live-mode credentials anywhere (`assertSandboxModeKey`'s unconditional guard,
+never bypassed), no Stripe command adapter wired into the running app (`server.ts` still
+hardcodes `MockFinancialProvider`), no Financial Accounts/bank-account infrastructure, no
+automatic reconciliation repairs (proven by dedicated tests in both Slice 5 and Slice 6), no
+KYC/AML/merchant-acquiring/fee-model/UI-redesign/domain-rewrite scope creep. Two gaps carried
+forward as genuinely open, not silently resolved: Issuing's Stripe v2 Financial Account
+requirement (separate decision note, 4 contract tests remain disclosed skips) and no
+scheduled/recurring reconciliation trigger (manual-only, by the owner's own Slice 6 scope).
+Final tally: **`apps/api` 254/254** without Stripe credentials, **259/259** with;
+`packages/application` 137/137 unchanged across all seven slices (confirms zero domain/command
+code was ever touched by ENG6); `pnpm typecheck/lint/format:check/guard` clean, 12/12
+packages.
+
+**ENG6 is fully closed.** All eight slices (capability audit, adapter contract hardening,
+sandbox adapter, webhook ingestion, reconciliation scaffolding, operations console, sandbox
+golden path, closure report) are done.
 
 **Track note (2026-07-26):** ENG4's remaining Slice 10 external blockers (Play signing
 fingerprint, GitHub branch protection, Railway spend alerts/backup drill, signed TestFlight/
@@ -1210,6 +1253,293 @@ historical record (including the reversal itself) is preserved. **`apps/api` 221
 Next: ENG6 Slice 3 — a real Stripe sandbox adapter, now unblocked by D46 but needing real
 (free, sandbox-only) Stripe API keys from the owner before it can build against an actual
 sandbox — the same external-credential dependency ENG5's Apple/Google slices hit.
+
+**ENG7 in progress** ("Observability and auditability," owner-directed after asking "go on
+with ENG7" with no brief attached — the full ENG0–ENG15 roadmap was requested and saved
+verbatim to `docs/architecture/eng-roadmap.md` per explicit instruction, and is now the
+authoritative source for every ENG-numbered milestone's exact scope going forward). An
+Explore-agent audit (mirroring ENG6 Slice 1's own precedent) checked ENG7's four named
+subsections — Logging, Metrics, Alerts, Audit trail — against real code before any change:
+Logging's mechanism existed (ENG4 Slice 3's `CommandLogger`) but was wired into almost no
+command; Metrics had real gaps against the roadmap's 13 named metrics; Alerts was 100%
+unbuilt, no vendor/channel ever selected; Audit trail had two genuine, previously-undiscovered
+holes (`createVinkCommand`/`setSplitCommand` wrote to no audit mechanism at all). Asked the
+owner narrowly, only for the one piece needing a real vendor/infra decision (Alerts' delivery
+channel) — answer: **"Defer alerts, build the rest first."**
+
+**ENG7 Slices A–C done** (`milestone-reports/ENG7-SLICES-A-C-LOGGING-METRICS-AUDIT.md`):
+structured logging, metrics, and audit trail completion — the three pure-application-code
+subsections, Alerts deferred per the owner's own choice above. New
+`packages/application/src/support/command-logging.ts` (`logCommand`) wired into all 18
+exported commands across 7 files; new `RELEASE_VERSION` env var (sourced from
+`RAILWAY_GIT_COMMIT_SHA` when unset, ENG4 Slice 2's Railway topology already provides it for
+free) threaded into the Fastify logger, the shared job-process logger, and Sentry's `release`
+tag. **Real bug caught**: Pino's `base` logger option *replaces* rather than merges its
+default `{pid, hostname}` binding — setting `base: { release }` would have silently dropped
+both from every HTTP log line; fixed by restating them explicitly. New `CommandMetrics` port
+on `CommandContext`/`PublicCommandContext` (mirroring `CommandLogger` exactly) plus 7 new
+Prometheus instruments (`vinkin_job_duration_ms`, `vinkin_sweep_delay_ms`,
+`vinkin_webhook_events_total`, `vinkin_command_replay_total`,
+`vinkin_contribution_outcome_total`, `vinkin_merchant_authorization_outcome_total`,
+`vinkin_refund_outcome_total`), wired at all real route/job choke points. `createVinkCommand`
+and `setSplitCommand` now write real `tx.appendHistory(...)` rows directly (neither is a
+domain-legal state-machine transition `applyVinkTransition` could validate, so neither ever
+had an audit path before this); migration `0022` adds `provider_reference` to
+`contribution_status_history` and `correlation_id` to `operator_audit_log`, both now
+populated on every write. Two existing tests updated (not weakened) to assert the now-complete
+`['VINK_CREATED', 'SPLIT_CONFIGURED', 'VINK_OPENED']` history sequence instead of the old,
+incomplete single-event assertion. **`apps/api` 260/260** (up from 254), **`packages/
+application` 137/137** unchanged, `pnpm typecheck/lint/format:check/guard` clean, 12/12
+packages. Verified against real running processes: a live server boot with metrics enabled, a
+real HTTP-driven command, and a real `curl` scrape confirming the new sweep/job instruments
+genuinely populated from the actual running scheduler. Disclosed gaps: reconnect-frequency
+metric (needs client-side reporting from `apps/mobile`/`apps/guest-web`, out of scope here),
+database query latency (no per-query hook on the `postgres` client without wrapping the most
+pervasively used object in the codebase — same reasoning as ENG4 Slice 4's identical gap), and
+`apps/operations-console` not yet updated to display the new `correlationId` column.
+
+**ENG7's Alerts subsection remains open**, deferred pending an owner decision on delivery
+channel — no code should be written for it without that direction.
+
+**ENG8 done** (`milestone-reports/ENG8-SECURITY-HARDENING.md`,
+`docs/architecture/eng8-threat-model-and-security-decisions.md`): security hardening, the
+roadmap's own "before any external pilot" gate. An Explore-agent audit against all 17 named
+items found token rotation/webhook verification/CORS/replay-protection/deadline-manipulation
+already solid; real gaps in secure headers, input-size limits, least-privilege DB roles,
+audit-log DB-level immutability, Redis-backed rate limiting, and dependency/SAST scanning
+(neither existed in CI at all). Three genuine policy/tooling decisions resolved via
+`AskUserQuestion` before building: Dependabot + `pnpm audit` for dependency scanning, Semgrep
+(no-login public rulesets) for SAST, data-retention rules/privacy review deferred (no policy
+exists anywhere in this project to build against). **`@fastify/helmet`** wired with two
+disclosed deviations from its defaults — CSP off (would break the two real inline-`<script>`
+auth confirm pages) and CORP set to `cross-origin` (the default blocks the exact cross-origin
+fetches `apps/guest-web`/`apps/operations-console` exist to make — verified live, a real
+gotcha). **Real bug caught by live verification**: the global error handler was collapsing
+Fastify's own genuine `413 body too large` into a fabricated `500` — pre-existing under the
+old implicit body limit, just never exercised until this slice made the limit explicit; fixed
+narrowly (only trusts `FST_ERR_*`-tagged errors' own status code). **Redis-backed rate
+limiting** closes the gap disclosed since PV4, fails open (not closed) on a Redis error so an
+outage degrades rate limiting instead of 500ing real traffic. **Migration `0023`**: a
+least-privilege `vinkin_app` DB role (code-complete, not yet provisioned into the running
+connection — needs a real password + `DATABASE_URL` swap per environment, same shape as ENG4
+Slice 2's Railway topology) plus mirrors the ledger's own append-only trigger onto
+`operator_audit_log`/`vink_state_history`/`contribution_status_history` (previously
+append-only by convention only). **CSRF: documented as not applicable, not silently
+skipped** — no cookie-based auth exists anywhere in this API (confirmed by grep), so there is
+no ambient credential for a forged cross-site request to exploit. **Dependency scanning's
+first-ever run surfaced 11 real high-severity CVEs**, not theoretical — `find-my-way`
+(Fastify's own router, production runtime), 4 separate `next` CVEs (middleware/proxy bypass,
+DoS, 2 SSRF variants, both Next.js apps' production runtime), `fast-uri`, `sharp`, `postcss`.
+Fixed 10 of 11 via patch/minor bumps only (`next` 16.2.10→16.2.11 direct; the rest via scoped
+`pnpm-workspace.yaml` overrides — `next>postcss` scoped specifically since a second,
+already-patched postcss lineage existed via `@tailwindcss/postcss`); both Next.js apps
+rebuilt clean on 16.2.11. One (`brace-expansion`, ESLint-only, never shipped to runtime)
+deliberately left unfixed and disclosed via `auditConfig.ignoreGhsas` — its patch is a
+major-version jump its own direct dependent declares incompatible. Full 10-scenario threat
+model written with file:line citations; 7 mitigated, 3 partial-with-disclosed-gap (including
+the pre-existing WS-token-in-URL issue already flagged in `realtime/routes.ts`'s own header
+comment, not new to ENG8, not fixed here). **`apps/api` 263/263** (up from 260), `packages/
+application` 137/137 unchanged, `pnpm typecheck/lint/format:check/guard` clean, 12/12
+packages. **Real environment incident mid-verification**: local disk hit 0 bytes free; asked
+the owner before any cleanup (per house rule, same precedent as I6.md), then freed ~1.8GB via
+`pnpm store prune` + build-cache deletion — reversible, no project files touched. Disclosed,
+not claimed done: the full Playwright regression suite wasn't re-run end-to-end this pass
+(the disk incident); `e9.spec.ts` specifically — the suite most exposed to the CORS/CORP/
+helmet changes — was re-run twice via `git stash` isolation and confirmed unaffected (same 6
+pre-existing, unrelated failures both times); Semgrep's real findings against this codebase
+are unverified until its first live CI run (local disk too constrained to install its
+toolchain).
+
+Separately, mid-session the owner asked about attaching a 1TB external drive to relieve local
+disk pressure going forward. Found the actual internal-disk offenders were Xcode DerivedData
+(3.7GB, safe to delete — rebuilds from source) and two disposable, unnamed duplicate iOS
+Simulator devices left over from repeated setup/erase cycles (5.5GB combined; kept the
+one named device, "iPhone 16 Pro (Screenshots)," used by the PV13 screenshot pipeline) — not
+pnpm/turbo caches, which were already small post-prune. Freed 5.2GB this way alone, resolving
+the crisis without needing the drive. The attached drive (`/Volumes/My Passport`, 931GB free)
+is NTFS — fine for cold/archival storage (e.g. Downloads) but a poor fit for actively-used
+dev caches (pnpm store, Xcode DerivedData) given no real Unix permissions/symlinks and likely
+spinning-disk speed; reformatting to APFS would be needed to safely relocate those, and would
+wipe the drive, so it wasn't done unprompted. Owner declined moving Downloads (446MB,
+contains personal files) since it wasn't the actual problem.
+
+**ENG9 done** (`milestone-reports/ENG9-REMOTE-WORKFLOW-CERTIFICATION.md`): remote workflow
+certification — 17 named failure scenarios, formal pass/fail evidence. An Explore-agent audit
+found 9 already solidly proven by existing tests, 4 proven only by design reasoning with zero
+test evidence, and 2 genuinely open gaps. Two owner decisions resolved before building:
+**contribution-during-cutoff (#15) stays undocumented as a gap, not built** (would be new
+product/business behavior, no soft-close window exists anywhere in this codebase); **API/
+worker/Redis/Postgres restart + deployment-during-active-Vink (#1–4, #17) are certified via
+equivalent LOCAL tests, not the live hosted Railway deployment** — this environment has no
+Railway CLI/credentials at all, confirmed before asking. New test infrastructure:
+`testing/child-server.ts` (spawns real `node src/server.ts`/`jobs/worker.ts` OS processes,
+HTTP-poll or real-log-line readiness detection) and `testing/child-process-db.ts` (a
+dedicated full PostgreSQL database per spawned-process suite, since a real child process
+needs its own connectable `DATABASE_URL`). **A real, previously-undiscovered production
+defect found and fixed**: the first live SIGTERM-mid-request test failed consistently (not
+flakily) — Fastify's default `forceCloseConnections: 'idle'` force-closes any connection
+Node's own idle-heuristic considers inactive, and that heuristic looks at socket-level I/O,
+not the application handler's lifecycle, so a request whose handler was still mid-database-
+transaction (no socket I/O at that instant) was silently killed on every graceful shutdown —
+a defect present since `server.ts` was first written in PV1, never caught because nothing had
+ever exercised a real OS-level kill against a real in-flight request before. Root-caused with
+a minimal reproduction outside this app before touching production code. Fixed with the
+standard "grace period, then force" pattern (`server.ts` only — dozens of existing test files
+rely on Fastify's normal idle-connection-closing behavior for their own WebSocket-test
+cleanup, so the override is scoped narrowly via a new `AppDeps.forceCloseConnections`, not
+applied globally): a 500ms grace window lets a genuinely in-flight request finish naturally,
+then any still-open connection gets force-closed, with a 10s hard backstop. Tuning this took
+two more iterations, both caught live: the naive all-or-nothing fix reintroduced a full
+10-second delay on *every* shutdown (confirmed by the test's own timing pinning to the hard
+timeout), and the first version of the fix hung the entire `apps/api` test suite (a
+concurrently-running WebSocket test's own `app.close()` call never returned) before being
+scoped to `server.ts` only. Also closed two real, previously-untested coverage gaps: **#14**
+(the existing concurrent-contribution test only raced one participant against itself — a new
+test races two genuinely different participants, proving the D5 single-resolver fires exactly
+once even when two independent requests could each plausibly believe they completed funding)
+and **#16** (the existing token test only covered reuse of an already-rotated refresh token —
+new tests age a real refresh token's `expires_at` into the past directly in PostgreSQL and
+construct a real backdated-`exp` JWT access token, proving actual TTL expiry is enforced, not
+just reuse detection). **#6** (app backgrounding) went from zero test coverage of the real
+`AppLifecycleListener` wiring (only its pure backoff/connectivity helper functions were
+tested) to three new tests walking the actual Flutter lifecycle transition sequence — caught
+a real test-writing gotcha along the way: `AppLifecycleListener` enforces the genuine OS
+sequence (`resumed → inactive → hidden → paused`) via internal asserts, and a direct
+`resumed → paused` jump is silently a no-op, not an error, which is what made the first
+version of this test fail confusingly until diagnosed by reading Flutter's own SDK source.
+**`apps/api` 269/269** (up from 260), **`apps/mobile` 254/254** (up from 251, `flutter
+analyze` unchanged at the 26-issue baseline), **`packages/application` 137/137** unchanged
+(confirms this milestone stayed entirely inside the transport/client layers).
+`pnpm typecheck/lint/format:check/guard` clean, 12/12 packages. Disclosed gaps: #15 not built
+(owner choice); #1–4/#17 certified locally only, not against hosted Railway (no credentials
+here); the new Redis/Postgres-restart suite (`eng9-infra-restart.manual.ts`, deliberately
+excluded from the default `npm test` glob after it broke a concurrently-running suite on its
+first real run — `node --test` runs test files in parallel by default, and this suite stops
+shared local infrastructure) is not CI-wired, since `brew services` has no equivalent in
+GitHub Actions' Docker-service-container topology.
+
+**Real-Money Beta track opened (D47, 2026-07-28).** The owner supplied and approved a full
+"VinkIn Real Money Beta" specification — VinkIn as the legal cardholder, every card spending
+from VinkIn's own Stripe Financial Account, a 15-card reusable pool, a dual-timer lifecycle
+(7-minute maximum Vink lifetime, a separate 10-minute card usage window once a card is
+assigned), wallet-only card exposure (no "View Card Details" screen anywhere, Apple/Google
+Wallet is the sole primary action), beta caps (config, not hardcoded), and a manual-review
+dispute policy through the Operations Console. Two further clarifications, confirmed via
+direct question during implementation planning: participant payments **capture immediately
+per payment** (a real change from today's authorize-then-capture-on-completion engine, not
+merely the eventual destination of funds), and **authorizations are approved against the
+assigned wallet token, not solely the underlying reusable card** — a real security
+requirement (a stale device from a prior assignment must never authorize against a card now
+assigned elsewhere), not a detail. Recorded as `D47` in `docs/spec/decision-log.md` (owner
+directed recording it now, matching the D45→D46 precedent), explicitly amending D32/D35 (their
+own named revisit trigger, "M0 gate closure / provider selection," is this decision) and the
+reconciliation module's own "no route here can move money or issue a refund" guarantee
+(amended to allow one new, narrowly-scoped, audited operator-refund route for disputes — RM6's
+job, not built yet). `docs/architecture/06-milestone-0-gate.md` gained a second, narrow
+sandbox-only carve-out (alongside D46's) permitting the full Real-Money Beta architecture,
+including card-display UI — previously unconditionally Forbidden — against the sandbox
+provider only. **This does not close the M0 gate**: it advances conditions #2
+(cardholder/account ownership, now defined) and #3 (funds-flow documented —
+`docs/feasibility/funds-flow.md` rewritten from a generic placeholder to the actual decided
+architecture) and leverages #7's existing passing sandbox suite, but conditions #1/#5/#6/#8/#10
+still need external evidence (provider written confirmation, KYC program, counsel review, a
+risk register) per the gate's own rule that a condition without a linked evidence artifact is
+not met regardless of internal approval. Two things explicitly disclosed as still blocked,
+not guessed around: real Apple/Google Wallet push-provisioning needs the same class of
+external credential Sign in with Apple/Google (ENG5) and Android App Links (ENG4 Slice 10)
+already hit; VinkIn's own real Stripe Financial Account is an owner-side Stripe action, not
+code. A 7-slice breakdown (RM1–RM7) was planned and approved (plan file:
+`declarative-roaming-hanrahan.md`) — schema/domain model, provider-interface/wallet-token
+methods, the capture-timing funding-engine change, the dual-timer Vink/card lifecycle, wallet
+provisioning, ops-console dispute review, beta-cap configuration, in that recommended order.
+
+**RM1 done** (`milestone-reports/RM1-CARD-POOL-SCHEMA.md`): the card pool schema and domain
+model, built entirely additively — `temporary_cards` and the existing one-shot-per-Vink
+`provisionCardCommand`/`authorizeMerchantPurchaseCommand`/`settlePurchaseCommand` flow are
+untouched, same "code-complete, not yet wired into the live path" shape as ENG8's `vinkin_app`
+role and ENG6 Slice 4's webhook ingestion. New migration `0024`: `cards` (long-lived,
+reusable — the structural inverse of `temporary_cards.vink_id UNIQUE`), `card_assignments`
+(`UNIQUE(vink_id)` + a partial `UNIQUE(card_id) WHERE status='ACTIVE'` — the actual DB-level
+guarantee that a card belongs to one active Vink at a time), and `card_wallet_tokens` as its
+own table (not a column) since the token, not the card, is the real authorization-time
+identity per D47's clarification. New domain types (`Card`/`CardAssignment`/
+`CardWalletToken`) and a new Vink state-machine transition, `CARD_WINDOW_EXPIRED`
+(`CARD_READY → FUNDING_REVERSAL`) — the card-phase half of the dual-timer model; the state
+machine's own exhaustiveness test and `apps/api`'s exhaustive `DomainEventName →
+ClientMessageType` map both caught the gap immediately, exactly as designed. New
+`reserveCardFromPoolCommand`/`returnCardToPoolCommand` (`packages/application/src/
+card-pool.ts`), with `FOR UPDATE SKIP LOCKED` reservation (the same concurrent-claim idiom the
+outbox publisher/reconciliation runner already use) and `returnCardToPoolCommand` enforcing
+the load-bearing security property — a card cannot return to (and become reassignable from)
+the pool until its assignment's wallet token is confirmed REVOKED, fail-closed on a missing
+token row, not assumed harmless. Proven at two levels: 6 in-memory unit tests
+(`packages/application`) and 2 real-PostgreSQL integration tests (`apps/api`) — including a
+genuinely concurrent 5-way `Promise.allSettled` race for one seeded card (exactly one
+reservation wins, the other four see `CARD_POOL_EXHAUSTED`, exactly one `card_assignments` row
+exists), proving `FOR UPDATE SKIP LOCKED` is doing real work, not just the application-layer
+pre-check. **`packages/domain` 48/48** unchanged (exhaustiveness test updated, not weakened),
+**`packages/application` 143/143** (up from 137), **`apps/api` 271/271** (up from 269),
+`pnpm typecheck/lint/format:check/guard` clean, 12/12 packages. Disclosed gaps, all
+deliberately out of RM1's own scope: not wired into the live FUNDED-Vink flow (RM2/RM3's job);
+no provider calls anywhere in this slice (RM2/RM5's job — tests simulate the wallet-token
+lifecycle via direct writes, standing in for what RM2's real provider calls will eventually
+drive); no pool-seeding mechanism (needs real Stripe Issuing cards, blocked on the same
+Financial Account v2 wall ENG6 flagged); `CARD_WINDOW_EXPIRED` has no sweep triggering it yet
+(RM4's job).
+
+**RM2 done** (`milestone-reports/RM2-CARD-PROVISIONING-LIFECYCLE.md`): the provider-boundary
+half of the card pool lifecycle — enable/disable a pool card, provision/revoke its wallet
+token, the token (not the card) as the real authorization-time identity per D47's own
+clarification. `FinancialProvider` gained `enableCard` (no prior inverse of `freezeCard`
+existed), `freezeCard` renamed `disableCard` (confirmed zero production blast radius before
+renaming), `getCardStatus`, and four wallet methods — touching the interface, the D7
+conformance suite, the mock, and the Stripe adapter together per the hard rule. New
+`walletProvisioning` capability flag (mock: `true`; Stripe: `false`, verified live against the
+real sandbox — card creation itself is still blocked on the same Financial Account v2 wall
+ENG6 already documented, so there's no real card to provision a wallet token against yet — not
+guessed, not simulated). `WalletProvisioningPayload` keeps `provisioningData: Record<string,
+unknown>` deliberately opaque rather than encoding Apple/Google-specific field names, per the
+owner's own explicit scoping caution. New migration `0025`: `cards.status` gains `QUARANTINED`;
+`card_assignments` gains a `provisioning_status` sub-machine (`RESERVED → ENABLING →
+AWAITING_WALLET_PROVISIONING → READY_TO_PAY`, teardown `DISABLING →
+TOKEN_REVOCATION_PENDING → SANITIZED`) layered *alongside*, not merged into, RM1's own
+`status` column — deliberate, to avoid touching RM1's already-proven constraints/tests. New
+commands `enableCardCommand`/`provisionWalletTokenCommand`/`disableCardCommand`/
+`revokeWalletTokenCommand` (`packages/application/src/card-pool.ts`), each idempotent and each
+routing every provider call through `callProviderOrQuarantine`, which quarantines the
+underlying card on a genuinely ambiguous (`UNKNOWN_OUTCOME`) provider outcome.
+
+**A real bug, caught by the live-Postgres integration test itself**: the first cut of
+`callProviderOrQuarantine` wrote the quarantine and then threw, both from inside
+`ctx.uow.run(...)` — throwing from inside `sql.begin(...)` rolls back the *whole* transaction,
+silently undoing the quarantine write. The exact same defect class `purchases.ts`'s own header
+comment already documents from PV3. Fixed by having the helper return a
+`{kind:'OK'|'ERROR', ...}` outcome instead of throwing; all four commands now check the
+outcome only after their transaction has committed, re-throwing then. Re-running the
+integration test that first caught this (real Postgres, a genuinely ambiguous provider
+outcome) now correctly shows `cards.status = 'QUARANTINED'`.
+
+The owner's own specified completion test — Card A serves Vink 1 (reserve → enable → provision
+Token 1), is fully torn down (disable → revoke → return to pool), then genuinely serves Vink 2
+(reserve → enable → provision Token 2), with Token 1 proven dead forever and only Token 2 valid
+— passes at both layers: `packages/application/src/card-pool.test.ts` (in-memory) and
+`apps/api/src/card-pool.integration.test.ts` (real PostgreSQL + a real seeded provider card via
+`createCardholder`/`issueTemporaryCard`/`disableCard`, real HTTP-created Vinks via
+`app.inject()`). **`packages/domain` 48/48** unchanged, **`packages/application` 147/147** (up
+from 143), **`apps/api` 273/273** (up from 271), **`packages/payment-provider-contract-tests`
+31/31** against the mock (up from 26) and **14/14** passing with 16 disclosed skips against the
+real Stripe sandbox (up from 9/9, 11 skips — the 5 new skips are exactly the wallet/enable
+tests, all skipped for the same disclosed reason), `pnpm typecheck/lint/format:check/guard`
+clean, 12/12 packages. Disclosed gaps, all deliberately out of RM2's own scope: still not wired
+into the live FUNDED-Vink flow, `authorizeMerchantPurchaseCommand`'s decision logic still
+doesn't check the presented wallet token (RM3's job); Stripe wallet provisioning remains
+genuinely blocked, not simulated; no pool-seeding mechanism yet (same Financial Account wall);
+`returnCardToPoolCommand`'s own gate is unchanged from RM1 by design.
+
+Next: RM3 — the capture-timing funding-engine change (capture immediately per contribution
+rather than holding until the Vink completes) and cutting the live FUNDED-Vink flow over to
+this schema, including wiring `authorizeMerchantPurchaseCommand`'s decision to the presented
+wallet token.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

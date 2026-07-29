@@ -8,6 +8,9 @@ import type { Money, CurrencyCode } from './money.ts';
 import { compareMoney } from './money.ts';
 import { invariant } from './errors.ts';
 import type {
+  CardAssignmentId,
+  CardId,
+  CardWalletTokenId,
   ContributionId,
   GuestIdentityId,
   ParticipantId,
@@ -111,6 +114,79 @@ export interface TemporaryCard {
   expiresAt: string;
   issuedAt: string;
   closedAt: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// RM1 (D47) — the reusable card pool. Distinct from TemporaryCard above, which stays
+// unchanged until a later RM slice cuts the live FUNDED-Vink flow over to this schema.
+// ---------------------------------------------------------------------------
+
+/** RM2 (D47) adds `QUARANTINED`: a card an ambiguous provider outcome touched during the
+ * enable/provision/disable/revoke handshake — excluded from `reserveAvailableCard`'s own
+ * query by construction, never silently returned to the pool (the invariant "provider
+ * failures leave the card RESERVED or QUARANTINED, never AVAILABLE by accident"). Clearing a
+ * QUARANTINED card is a manual operator action, not built in this slice. */
+export type CardPoolStatus = 'AVAILABLE' | 'RESERVED' | 'QUARANTINED';
+
+/** Long-lived and reusable — never stores PAN or CVV (Plan §7/§21, unchanged discipline). */
+export interface Card {
+  id: CardId;
+  providerCardId: string;
+  displayLastFour: string;
+  status: CardPoolStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CardAssignmentStatus = 'ACTIVE' | 'RETURNED';
+
+/** RM2 (D47) — fine-grained tracking of the enable -> wallet-provision -> disable -> revoke
+ * handshake within one ACTIVE assignment. Deliberately narrower than the full chain a
+ * provisioning design review proposed: `TOKEN_PROVISIONED` is folded into `READY_TO_PAY`
+ * (nothing observes them as separate persisted states within one transaction) and `SETTLED`
+ * is omitted (driving a card-pool assignment from a real purchase settlement is RM3's job,
+ * not built here) — both disclosed simplifications, not silent gaps. Orthogonal to
+ * `CardAssignmentStatus` above: `returnCardToPoolCommand`'s own RM1-proven security gate
+ * (checking the wallet token directly) is unchanged by this column's existence. */
+export type CardAssignmentProvisioningStatus =
+  | 'RESERVED'
+  | 'ENABLING'
+  | 'AWAITING_WALLET_PROVISIONING'
+  | 'READY_TO_PAY'
+  | 'DISABLING'
+  | 'TOKEN_REVOCATION_PENDING'
+  | 'SANITIZED';
+
+/** One row per Vink's use of a pool card — a Vink is assigned a card at most once (never
+ * reassigned across attempts); a card is assigned to many Vinks over its lifetime,
+ * sequentially, never concurrently (enforced at the DB level, migration 0024). */
+export interface CardAssignment {
+  id: CardAssignmentId;
+  cardId: CardId;
+  vinkId: VinkId;
+  status: CardAssignmentStatus;
+  provisioningStatus: CardAssignmentProvisioningStatus;
+  spendingLimit: Money;
+  merchantLockKey: string | null;
+  reservedAt: string;
+  /** The D47 10-minute card usage window — distinct from the Vink's own submission deadline. */
+  usageWindowExpiresAt: string;
+  returnedAt: string | null;
+}
+
+export type CardWalletTokenStatus = 'PROVISIONED' | 'REVOKED';
+
+/** D47: authorizations are approved against the assigned wallet token, not solely the
+ * underlying card — a card is only returnable to the pool once its assignment's token is
+ * confirmed REVOKED (enforced by the command performing the return, `returnCardToPoolCommand`
+ * — this is the actual fix for the reassignment security gap the token model exists for). */
+export interface CardWalletToken {
+  id: CardWalletTokenId;
+  cardAssignmentId: CardAssignmentId;
+  providerTokenId: string;
+  status: CardWalletTokenStatus;
+  provisionedAt: string;
+  revokedAt: string | null;
 }
 
 export interface PurchaseAuthorization {

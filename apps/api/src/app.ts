@@ -5,9 +5,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import websocketPlugin from '@fastify/websocket';
 import corsPlugin from '@fastify/cors';
+import helmetPlugin from '@fastify/helmet';
+import type { Redis } from 'ioredis';
 import { ZodError } from 'zod';
 import type { Env } from './config/env.ts';
 import type { Sql } from './db/client.ts';
@@ -67,13 +70,58 @@ export interface AppDeps extends HealthChecks {
    * supplies one (server.ts does so only when `VINKIN_STRIPE_WEBHOOKS_ENABLED === '1'`).
    * Empty/undefined preserves today's exact route surface byte-for-byte. */
   webhookRoutes?: WebhookRouteConfig[];
+  /** ENG8 — threaded into every rate-limited route module so windows are correct across
+   * multiple API instances (Redis-backed) rather than per-process only. Undefined preserves
+   * the original in-memory behavior (all existing tests, local dev without Redis). */
+  redis?: Redis;
+  /** ENG9 — `server.ts` sets this `false` so a genuinely in-flight request survives a real
+   * shutdown (see the constant's own doc comment below for the confirmed defect this closes).
+   * Deliberately NOT the default for every caller of `buildApp`: several existing integration
+   * suites open real WebSocket connections and call `app.close()` in their own `after()` hook
+   * with no timeout of their own — Fastify's normal `forceCloseConnections: 'idle'` is what
+   * lets THAT `close()` resolve promptly (an idle WS connection is exactly the case that
+   * setting exists for). `server.ts` is the one caller with its own bounded-timeout wrapper
+   * around `close()`, so it's the only one that needs and can safely use `false`. */
+  forceCloseConnections?: boolean;
 }
+
+// ENG8 ("input-size limits"): Fastify's own undocumented-in-code default (1 MiB) was already
+// the effective limit — this makes it an explicit, intentional value instead of an unexamined
+// default. Every real request body in this app is a small JSON payload; the largest is a
+// provider webhook event, which Stripe's own docs bound well under this (a few KB typically,
+// low hundreds of KB in pathological cases) — 1 MiB leaves headroom without being large enough
+// to be a meaningful DoS vector on its own.
+const MAX_BODY_BYTES = 1_048_576;
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
+    bodyLimit: MAX_BODY_BYTES,
+    // ENG9 ("deployment during an active Vink") — a real, confirmed defect a live SIGTERM
+    // test caught: Fastify's DEFAULT (`forceCloseConnections: 'idle'`, on by default whenever
+    // the Node version supports `closeIdleConnections()`) force-closes any connection Node's
+    // own idle-heuristic considers inactive — and that heuristic looks at socket-level I/O,
+    // not the application's handler lifecycle. A connection whose request has been fully
+    // received but whose async handler is still mid-flight (e.g. inside a DB transaction) has
+    // no socket I/O happening at that instant, so Node's `closeIdleConnections()` treated it
+    // as idle and destroyed it — silently dropping an already-committed-or-committing request
+    // on every graceful shutdown, proven with a minimal reproduction outside this app (a bare
+    // Fastify instance with a `setTimeout`-delayed handler) before touching this file. Setting
+    // this to `false` (only `server.ts` does — see `AppDeps.forceCloseConnections`'s own doc
+    // comment for why every other caller keeps Fastify's normal default) disables that
+    // automatic force-close entirely; `server.ts`'s own shutdown wraps `app.close()` in a
+    // bounded timeout instead, so a shutdown can't hang forever on a connection that never
+    // voluntarily closes (the risk `forceCloseConnections` exists to prevent) while still
+    // letting genuinely in-flight requests finish first.
+    forceCloseConnections: deps.forceCloseConnections,
     logger: {
       level: deps.env.LOG_LEVEL,
       redact: ['req.headers.authorization'],
+      // ENG7 — every log line carries the deployed release identifier (Railway's own commit
+      // SHA in production, 'unknown' locally), so a specific build is identifiable in logs
+      // without cross-referencing a deploy timestamp. Pino's `base` option REPLACES its
+      // default `{pid, hostname}` binding rather than merging with it, so both are restated
+      // explicitly here — otherwise this change would silently drop them from every log line.
+      base: { pid: process.pid, hostname: hostname(), release: deps.env.RELEASE_VERSION },
       ...(deps.logStream !== undefined && { stream: deps.logStream }),
     },
     genReqId: () => randomUUID(),
@@ -137,6 +185,23 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     origin: [deps.env.VINKIN_PUBLIC_BASE_URL, deps.env.OPERATIONS_CONSOLE_BASE_URL],
   });
 
+  // ENG8 ("secure headers"). Two deliberate deviations from @fastify/helmet's defaults, both
+  // disclosed rather than silently accepted:
+  //   - `contentSecurityPolicy: false` — the default policy's `script-src 'self'` would break
+  //     the two real inline-`<script>` HTML pages this API serves (password-reset confirm,
+  //     magic-link confirm; see auth/routes.ts). A correct CSP for those two pages (nonces or
+  //     externalizing the scripts) is a real follow-up, not invented here.
+  //   - `crossOriginResourcePolicy: { policy: 'cross-origin' }` — the default (`same-origin`)
+  //     blocks this API's responses from being read by apps/guest-web and
+  //     apps/operations-console, which run on different origins and are the entire reason
+  //     `corsPlugin` above exists. This API is deliberately fetched cross-origin by two known,
+  //     allowlisted first-party apps; CORP's same-origin default is for APIs that never expect
+  //     that.
+  await app.register(helmetPlugin, {
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  });
+
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
       return reply.code(400).send({
@@ -146,6 +211,25 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
           message: issue.message,
         })),
       });
+    }
+    // ENG8 real bug found via live verification (not a new regression — the implicit 1 MiB
+    // default body limit already produced this same FastifyError before `bodyLimit` was made
+    // explicit; nobody had exercised the path). Fastify's own framework-generated errors
+    // (`FST_ERR_*` — body too large, malformed content-type, unsupported media type, etc.)
+    // already carry the correct client-facing status; collapsing every one of them to a bare
+    // 500 hid a real, well-formed 413/400/415 behind an "INTERNAL_ERROR" that implies a server
+    // defect. Only trusted for Fastify's own tagged errors, not arbitrary thrown errors —
+    // application code never sets `.code`/`.statusCode` this way.
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      typeof error.code === 'string' &&
+      error.code.startsWith('FST_ERR_') &&
+      'statusCode' in error &&
+      typeof error.statusCode === 'number' &&
+      error.statusCode < 500
+    ) {
+      return reply.code(error.statusCode).send({ error: error.code, message: error.message });
     }
     deps.crashReporter?.captureException(error, {
       requestId: request.id,
@@ -166,10 +250,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       deps.authRateLimits,
       deps.appleKeyResolver,
       deps.googleKeyResolver,
+      deps.redis,
     );
     registerVinkRoutes(app, deps.env, deps.sql, deps.deliveryProvider, metrics);
-    registerSharingRoutes(app, deps.env, deps.sql, deps.publicRateLimits);
-    registerAnalyticsRoutes(app, deps.sql);
+    registerSharingRoutes(app, deps.env, deps.sql, deps.publicRateLimits, deps.redis);
+    registerAnalyticsRoutes(app, deps.sql, undefined, deps.redis);
     if (deps.provider !== undefined) {
       registerContributionRoutes(app, deps.env, deps.sql, deps.provider, metrics);
       registerPurchaseRoutes(app, deps.env, deps.sql, deps.provider, metrics);
@@ -184,7 +269,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       metrics,
     );
     for (const webhookConfig of deps.webhookRoutes ?? []) {
-      registerWebhookRoutes(app, deps.sql, webhookConfig);
+      registerWebhookRoutes(app, deps.sql, webhookConfig, metrics);
     }
     registerReconciliationOpsRoutes(
       app,

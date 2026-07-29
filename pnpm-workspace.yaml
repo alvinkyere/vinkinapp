@@ -1,6 +1,21 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+# ENG8 ("dependency scanning"): forces three transitive packages to their patched versions —
+# each was a real `pnpm audit --audit-level=high` finding, none needed a major-version jump.
+# `next>postcss` is scoped (not a bare `postcss` override) because a second, already-patched
+# postcss lineage exists via @tailwindcss/postcss; a bare override would have masked which one
+# was actually the problem. `brace-expansion` (an ESLint-only transitive dependency, never
+# shipped or exposed to runtime/attacker input) is deliberately NOT overridden here — its
+# advisory's patched version is a major-version jump (1.x -> 5.x) with unclear compatibility
+# against the `minimatch@3.1.5` that requires it; forcing it risked breaking the lint pipeline
+# for a dev-tooling-only DoS finding. Disclosed as a known, deliberately-open gap, not silently
+# dropped.
+overrides:
+  find-my-way: '^9.6.1'
+  fast-uri: '^3.1.4'
+  sharp: '^0.35.0'
+  next>postcss: '^8.5.18'
 # Optional native/postinstall builds we deliberately skip: msgpackr-extract is a bullmq
 # performance optimization with a pure-JS fallback; protobufjs' postinstall is unneeded here.
 allowBuilds:
@@ -9,3 +24,6 @@ allowBuilds:
   protobufjs: false
   sharp: true
   unrs-resolver: true
+auditConfig:
+  ignoreGhsas:
+    - GHSA-mh99-v99m-4gvg

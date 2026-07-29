@@ -4,6 +4,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { Redis } from 'ioredis';
 import { z } from 'zod';
 import type { Sql } from '../../db/client.ts';
 import type { Env } from '../../config/env.ts';
@@ -228,16 +229,22 @@ export function registerAuthRoutes(
   appleKeyResolver?: Parameters<typeof verifyAppleIdentityToken>[2],
   /** ENG5 Slice 5 — same test-only override, for Google's key resolver. */
   googleKeyResolver?: Parameters<typeof verifyGoogleIdentityToken>[2],
+  /** ENG8 — Redis-backed rate-limit windows, correct across multiple API instances.
+   * Undefined falls back to the original per-process in-memory windows (unit tests, local
+   * dev without Redis). */
+  redis?: Redis,
 ): void {
   const passwordResetEnabled = env.VINKIN_PASSWORD_RESET_ENABLED === '1';
   const passwordResetRequestLimiter = makeRateLimiter(
     'password-reset-request',
     authRateLimits.passwordResetRequest,
+    redis,
   );
   const magicLinkEnabled = env.VINKIN_MAGIC_LINK_ENABLED === '1';
   const magicLinkRequestLimiter = makeRateLimiter(
     'magic-link-request',
     authRateLimits.magicLinkRequest,
+    redis,
   );
   const emailVerificationEnabled = env.VINKIN_EMAIL_VERIFICATION_ENABLED === '1';
   const appleSignInEnabled = env.VINKIN_APPLE_SIGN_IN_ENABLED === '1';

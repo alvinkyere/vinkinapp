@@ -19,6 +19,7 @@ import type { Contribution, ContributionId, VinkId } from '../../domain/src/inde
 import { ApplicationError } from './errors.ts';
 import type { PublicCommandContext, VinkTx } from './ports.ts';
 import { applyContributionTransition } from './support/contribution-transition.ts';
+import { logCommand } from './support/command-logging.ts';
 
 export interface RefundCommandContext extends PublicCommandContext {
   provider: FinancialProvider;
@@ -115,9 +116,17 @@ export async function refundFailedSessionCommand(
     for (const contribution of contributions) {
       if (contribution.status !== 'CAPTURED') continue;
       const result = await refundOne(tx, ctx, contribution, false, now);
+      ctx.metrics?.recordRefundOutcome(result.status);
       if (result.status === 'REFUNDED') summary.refunded += 1;
       else summary.failed += 1;
     }
+    logCommand(ctx.logger, 'refundFailedSession', {
+      correlationId: ctx.correlationId,
+      actor: 'refund',
+      vinkId: vink.id,
+      refunded: summary.refunded,
+      failed: summary.failed,
+    });
     return summary;
   });
 }
@@ -141,6 +150,15 @@ export async function retryRefundCommand(
     }
     if (contribution.status !== 'REFUND_FAILED') return contribution; // idempotent no-op
     const now = ctx.clock.now();
-    return refundOne(tx, ctx, contribution, true, now);
+    const result = await refundOne(tx, ctx, contribution, true, now);
+    ctx.metrics?.recordRefundOutcome(result.status);
+    logCommand(ctx.logger, 'retryRefund', {
+      correlationId: ctx.correlationId,
+      actor: 'refund',
+      vinkId: vink.id,
+      idempotencyKey: contribution.idempotencyKey,
+      status: result.status,
+    });
+    return result;
   });
 }

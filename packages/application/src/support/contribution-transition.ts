@@ -40,6 +40,10 @@ export async function applyContributionTransition(
     toStatus: to,
     actor,
     correlationId,
+    // ENG7 — whatever the contribution's own providerReference is AFTER this patch (the same
+    // value the just-updated row now carries), not before — this is what the roadmap's own
+    // audit-trail field template asks for at each transition.
+    providerReference: updated.providerReference,
   });
   await tx.insertOutbox({
     eventType: emits,

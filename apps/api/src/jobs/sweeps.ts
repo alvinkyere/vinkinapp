@@ -24,6 +24,7 @@ import type { Sql } from '../db/client.ts';
 import { createBullMqRedis } from '../redis/client.ts';
 import { createLogger } from '../observability/logger.ts';
 import { toCommandLogger, type PinoLike } from '../observability/command-logger.ts';
+import { toCommandMetrics } from '../observability/command-metrics.ts';
 import { withProviderLogging } from '../observability/provider-logging.ts';
 import { NOOP_METRICS, type Metrics } from '../observability/metrics.ts';
 import { withSpan } from '../observability/tracing.ts';
@@ -45,7 +46,9 @@ export async function runSweeps(
   provider: FinancialProvider,
   now: Date = new Date(),
   log?: PinoLike,
+  metrics: Metrics = NOOP_METRICS,
 ): Promise<SweepResult> {
+  const startedAt = Date.now();
   // ENG4 Slice 3 ("every worker job carries a correlation id"): one id per sweep tick,
   // distinct from a request id since no HTTP request triggered this — same idea, same shape
   // (VinkStateHistoryRow/ContributionStatusHistoryRow already store whatever correlationId is
@@ -60,6 +63,7 @@ export async function runSweeps(
     correlationId,
     provider: withProviderLogging(provider, correlationId, logger),
     logger,
+    metrics: toCommandMetrics(metrics),
   };
 
   // ENG4 Slice 5 ("propagate trace context through… background jobs"): no HTTP request
@@ -118,6 +122,7 @@ export async function runSweeps(
     }
 
     logger.info('sweep_end', { correlationId, ...result });
+    metrics.recordJobDuration({ job: 'sweep', durationMs: Date.now() - startedAt });
     return result;
   });
 }
@@ -134,10 +139,22 @@ export async function startSweepScheduler(
   await queue.upsertJobScheduler('vink-sweeps-repeat', {
     every: env.VINK_SWEEP_INTERVAL_SECONDS * 1000,
   });
+  const intervalMs = env.VINK_SWEEP_INTERVAL_SECONDS * 1000;
+  // ENG7 ("deadline sweep delay") — the wall-clock gap between when a tick was due (the
+  // previous tick's own start time plus the configured interval) and when it actually
+  // started. `undefined` on the very first tick — there is no prior tick to measure drift
+  // against yet, and recording a fabricated baseline would misrepresent real drift.
+  let previousTickStartedAt: number | undefined;
   const worker = new Worker(
     SWEEP_QUEUE,
     async () => {
-      await runSweeps(sql, provider, new Date(), log);
+      const tickStartedAt = Date.now();
+      if (previousTickStartedAt !== undefined) {
+        const expectedAt = previousTickStartedAt + intervalMs;
+        metrics.recordSweepDelay({ delayMs: Math.max(tickStartedAt - expectedAt, 0) });
+      }
+      previousTickStartedAt = tickStartedAt;
+      await runSweeps(sql, provider, new Date(), log, metrics);
     },
     { connection: createBullMqRedis(env) },
   );

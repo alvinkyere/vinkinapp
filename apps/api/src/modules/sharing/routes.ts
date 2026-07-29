@@ -5,6 +5,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { Redis } from 'ioredis';
 import { z } from 'zod';
 import {
   ApplicationError,
@@ -58,10 +59,12 @@ export function registerSharingRoutes(
   env: Env,
   sql: Sql,
   limits: PublicRateLimits = DEFAULT_PUBLIC_RATE_LIMITS,
+  /** ENG8 — Redis-backed rate-limit windows; undefined falls back to in-memory. */
+  redis?: Redis,
 ): void {
   const store = new PostgresVinkStore(sql);
-  const viewLimiter = makeRateLimiter('public-view', limits.publicView);
-  const joinLimiter = makeRateLimiter('public-join', limits.publicJoin);
+  const viewLimiter = makeRateLimiter('public-view', limits.publicView, redis);
+  const joinLimiter = makeRateLimiter('public-join', limits.publicJoin, redis);
 
   function joinUrl(publicCode: string): string {
     return `${env.VINKIN_PUBLIC_BASE_URL.replace(/\/$/, '')}/join/${publicCode}`;

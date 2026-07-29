@@ -30,6 +30,7 @@ import {
   type ContributionProgressView,
 } from './queries.ts';
 import { loadOwnedVink } from './support/guards.ts';
+import { logCommand } from './support/command-logging.ts';
 
 export const GUEST_TOKEN_TTL_DAYS = 7;
 
@@ -277,6 +278,12 @@ export async function guestJoinVinkCommand(
     const participantCount = (await tx.listParticipants(vink.id)).filter(
       (row) => row.status !== 'REMOVED',
     ).length;
+    logCommand(ctx.logger, 'guestJoinVink', {
+      correlationId: ctx.correlationId,
+      actor: `guest:${guest.id}`,
+      vinkId: vink.id,
+      participantId: participant.id,
+    });
     return { vink: toPublicSummary(vink, participantCount, now), participant, guest };
   });
 }
@@ -403,7 +410,7 @@ export async function inviteGuestCommand(
   const key = input.invitationIdempotencyKey;
   assertDeliveryModeContract(input.deliveryMode, input.accessTokenHash, input.contactDestination);
   try {
-    return await ctx.uow.run(async (tx) => {
+    const result = await ctx.uow.run(async (tx) => {
       const vink = await loadOwnedVink(tx, input.vinkId, ctx.actorUserId, input.expectedVersion);
       if (vink.state !== 'DRAFT' && vink.state !== 'OPEN') {
         throw new ApplicationError('INVALID_COMMAND', `guests cannot be invited in ${vink.state}`);
@@ -454,6 +461,14 @@ export async function inviteGuestCommand(
       });
       return { participant, guest, vink };
     });
+    logCommand(ctx.logger, 'inviteGuest', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: result.vink.id,
+      participantId: result.participant.id,
+      idempotencyKey: key,
+    });
+    return result;
   } catch (error) {
     if (!(error instanceof InviteIdempotencyRaceError)) throw error;
     // Lost a genuine concurrent race (both requests missed each other's pre-check) — the
@@ -527,6 +542,12 @@ export async function resendGuestInvitationCommand(
       );
     }
     await tx.setGuestDeliveryToken(guest.id, input.tokenHash, input.expiresAt);
+    logCommand(ctx.logger, 'resendGuestInvitation', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: vink.id,
+      participantId: participant.id,
+    });
     return {
       vink,
       participant,
@@ -649,6 +670,12 @@ export async function editGuestParticipantCommand(
       finalExpiresAt = null;
     }
 
+    logCommand(ctx.logger, 'editGuestParticipant', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: vink.id,
+      participantId: participant.id,
+    });
     return {
       participant: { ...participant, displayName: input.displayName },
       guest: { ...updatedGuest, accessTokenHash: finalHash, expiresAt: finalExpiresAt },

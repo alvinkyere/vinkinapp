@@ -9,10 +9,12 @@ import type {
   CaptureContributionInput,
   CaptureResult,
   CardResult,
+  CardStatusResult,
   CardholderResult,
   ContributionDeclineReason,
   CreateCardholderInput,
   CreateCustomerInput,
+  CreateWalletProvisioningSessionInput,
   CustomerResult,
   IssueTemporaryCardInput,
   Money,
@@ -27,6 +29,8 @@ import type {
   SetupPaymentMethodInput,
   SetupPaymentMethodResult,
   UpdateCardControlsInput,
+  WalletProvisioningPayload,
+  WalletTokenResult,
 } from '../types.ts';
 import { assertMoney } from '../types.ts';
 
@@ -61,12 +65,26 @@ interface PaymentRecord {
 interface CardRecord {
   id: string;
   cardholderId: string;
-  status: 'ACTIVE' | 'INACTIVE' | 'FROZEN' | 'CLOSED';
+  // RM2 (D47): consolidated from a 4-value (ACTIVE/INACTIVE/FROZEN/CLOSED) mock-only
+  // vocabulary to the real 3 states Stripe Issuing cards actually have — the mock's own
+  // invented `FROZEN` had no real-provider counterpart and no test asserted on it
+  // specifically (confirmed by grep before this change); `disableCard` now sets `INACTIVE`,
+  // matching what `freezeCard` always really meant.
+  status: 'ACTIVE' | 'INACTIVE' | 'CLOSED';
   spendLimitMinor: number;
   authorizedTotalMinor: number;
   capturedTotalMinor: number;
   allowedMccs: readonly string[] | null;
   blockedMccs: readonly string[];
+}
+
+/** RM2 (D47) — a simulated wallet-provisioning token, tracked separately from the card it
+ * belongs to (mirrors migration 0024's real `card_wallet_tokens` being its own table, not a
+ * column on the card/assignment — the token is its own revocable identity). */
+interface WalletTokenRecord {
+  id: string;
+  providerCardId: string;
+  status: 'ACTIVE' | 'REVOKED';
 }
 
 interface IdempotencyRecord {
@@ -110,6 +128,7 @@ export class MockFinancialProvider implements FinancialProvider {
     virtualCardIssuing: true,
     consumerCardholders: true,
     offSessionRecovery: true,
+    walletProvisioning: true,
   };
 
   private readonly now: () => Date;
@@ -124,6 +143,7 @@ export class MockFinancialProvider implements FinancialProvider {
   private readonly cardholders = new Map<string, CreateCardholderInput>();
   private readonly cards = new Map<string, CardRecord>();
   private readonly cardTransactions = new Map<string, ProviderCardTransaction>();
+  private readonly walletTokens = new Map<string, WalletTokenRecord>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
   private readonly events: ProviderEvent[] = [];
 
@@ -183,6 +203,29 @@ export class MockFinancialProvider implements FinancialProvider {
       throw new ProviderError('PROVIDER_UNAVAILABLE', 'simulated response loss after execution');
     }
     return result;
+  }
+
+  /** RM2 (D47): the same chaos hooks as `idempotent()` above, for the naturally-idempotent
+   * PUT-style card calls (`enableCard`/`disableCard`) that take no idempotency key at all —
+   * calling either twice is always safe by construction (setting a fixed target state), so
+   * there's no replay cache to key against, but they can still transiently fail or return an
+   * ambiguous outcome, and RM2's `callProviderOrQuarantine` needs to be exercisable against
+   * that. `execute`'s side effect is applied exactly once, mirroring `idempotent()`'s own
+   * "sideEffectHappened" ground-truth semantics for UNKNOWN_OUTCOME. */
+  private simulateChaosThenExecute<T>(execute: () => T): T {
+    if (this.transientFailures > 0) {
+      this.transientFailures -= 1;
+      throw new ProviderError('PROVIDER_UNAVAILABLE', 'simulated failure before execution');
+    }
+    if (this.unknownOutcomes.length > 0) {
+      const { sideEffectHappened } = this.unknownOutcomes.shift()!;
+      if (sideEffectHappened) execute();
+      throw new ProviderError(
+        'UNKNOWN_OUTCOME',
+        'simulated ambiguous outcome — verify via getCardStatus',
+      );
+    }
+    return execute();
   }
 
   /** Mock-only chaos: the next idempotent call fails BEFORE executing (clean transient). */
@@ -463,16 +506,86 @@ export class MockFinancialProvider implements FinancialProvider {
     if (input.blockedMccs) card.blockedMccs = input.blockedMccs;
   }
 
-  async freezeCard(cardId: string): Promise<void> {
+  async enableCard(cardId: string): Promise<void> {
     const card = this.requireCard(cardId);
     if (card.status === 'CLOSED') {
       throw new ProviderError('INVALID_STATE', `card ${cardId} is CLOSED`);
     }
-    card.status = 'FROZEN';
+    this.simulateChaosThenExecute(() => {
+      card.status = 'ACTIVE';
+    });
+  }
+
+  async disableCard(cardId: string): Promise<void> {
+    const card = this.requireCard(cardId);
+    if (card.status === 'CLOSED') {
+      throw new ProviderError('INVALID_STATE', `card ${cardId} is CLOSED`);
+    }
+    this.simulateChaosThenExecute(() => {
+      card.status = 'INACTIVE';
+    });
   }
 
   async closeCard(cardId: string): Promise<void> {
     this.requireCard(cardId).status = 'CLOSED';
+  }
+
+  async getCardStatus(cardId: string): Promise<CardStatusResult> {
+    const card = this.requireCard(cardId);
+    return { providerCardId: card.id, status: card.status };
+  }
+
+  // -- RM2 (D47): wallet-token provisioning -----------------------------------
+
+  async createWalletProvisioningSession(
+    input: CreateWalletProvisioningSessionInput,
+  ): Promise<WalletProvisioningPayload> {
+    return this.idempotent(input.idempotencyKey, input, () => {
+      const card = this.requireCard(input.providerCardId);
+      if (card.status !== 'ACTIVE') {
+        // Real Apple/Google push provisioning requires an activatable card — provisioning a
+        // token for a card that isn't enabled would hand out a credential for something not
+        // yet spendable, exactly the state D47's "enabled only while assigned" rule forbids.
+        throw new ProviderError(
+          'INVALID_STATE',
+          `card ${input.providerCardId} is not ACTIVE — cannot provision a wallet token`,
+        );
+      }
+      const providerTokenId = this.nextId('wtok');
+      this.walletTokens.set(providerTokenId, {
+        id: providerTokenId,
+        providerCardId: card.id,
+        status: 'ACTIVE',
+      });
+      return {
+        providerReference: providerTokenId,
+        walletType: input.walletType,
+        // Deliberately opaque mock filler — RM5's real wallet integration is the only code
+        // that should ever need to interpret real provisioning material, and this mock
+        // never claims to produce real Apple/Google payload shapes.
+        provisioningData: { mock: true, providerTokenId },
+      };
+    });
+  }
+
+  async revokeWalletToken(providerTokenId: string): Promise<void> {
+    const token = this.walletTokens.get(providerTokenId);
+    if (!token) throw new ProviderError('OBJECT_NOT_FOUND', `no wallet token ${providerTokenId}`);
+    this.simulateChaosThenExecute(() => {
+      token.status = 'REVOKED';
+    });
+  }
+
+  async getWalletToken(providerTokenId: string): Promise<WalletTokenResult> {
+    const token = this.walletTokens.get(providerTokenId);
+    if (!token) throw new ProviderError('OBJECT_NOT_FOUND', `no wallet token ${providerTokenId}`);
+    return { providerTokenId: token.id, status: token.status };
+  }
+
+  async listWalletTokens(providerCardId: string): Promise<WalletTokenResult[]> {
+    return [...this.walletTokens.values()]
+      .filter((token) => token.providerCardId === providerCardId)
+      .map((token) => ({ providerTokenId: token.id, status: token.status }));
   }
 
   private requireCard(cardId: string): CardRecord {

@@ -35,6 +35,7 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import postgres from 'postgres';
 import type { Sql } from '../../db/client.ts';
+import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
 import {
   ProviderError,
   type FinancialProvider,
@@ -162,6 +163,7 @@ export function registerWebhookRoutes(
   app: FastifyInstance,
   sql: Sql,
   config: WebhookRouteConfig,
+  metrics: Metrics = NOOP_METRICS,
 ): void {
   app.register(async (instance) => {
     // Raw-body capture, scoped to THIS encapsulated Fastify context only — Fastify's plugin
@@ -185,6 +187,10 @@ export function registerWebhookRoutes(
       }
 
       const result = await ingestWebhookEvent(sql, config, rawBody, signatureHeader);
+      metrics.recordWebhookIngestion({
+        provider: config.provider.providerName,
+        outcome: result.outcome,
+      });
 
       if (result.outcome === 'invalid_signature') {
         request.log.warn({ provider: config.provider.providerName }, 'webhook signature rejected');

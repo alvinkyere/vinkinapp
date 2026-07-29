@@ -11,6 +11,7 @@ export * from './guest.ts';
 export * from './delivery.ts';
 export * from './contributions.ts';
 export * from './purchases.ts';
+export * from './card-pool.ts';
 export * from './recovery.ts';
 export * from './refunds.ts';
 export * from './invites.ts';

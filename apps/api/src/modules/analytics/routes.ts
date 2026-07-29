@@ -7,6 +7,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { Redis } from 'ioredis';
 import { z } from 'zod';
 import type { Sql } from '../../db/client.ts';
 import { makeRateLimiter, type RateLimitConfig } from '../../middleware/rate-limit.ts';
@@ -34,8 +35,10 @@ export function registerAnalyticsRoutes(
   app: FastifyInstance,
   sql: Sql,
   limit: RateLimitConfig = DEFAULT_LIMIT,
+  /** ENG8 — Redis-backed rate-limit window; undefined falls back to in-memory. */
+  redis?: Redis,
 ): void {
-  const limiter = makeRateLimiter('analytics-events', limit);
+  const limiter = makeRateLimiter('analytics-events', limit, redis);
 
   app.post('/api/v1/analytics/events', { preHandler: limiter }, async (request, reply) => {
     const body = batchSchema.parse(request.body);

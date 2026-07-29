@@ -17,6 +17,7 @@ import { assertNoLiveContributions } from './commands.ts';
 import { ApplicationError } from './errors.ts';
 import type { CommandContext, VinkReader } from './ports.ts';
 import { loadVink } from './support/guards.ts';
+import { logCommand } from './support/command-logging.ts';
 
 export interface AcceptInviteInput {
   vinkId: VinkId;
@@ -80,6 +81,12 @@ export async function acceptInviteCommand(
       aggregateId: vink.id,
       payload: { vinkId: vink.id, participantId: participant.id },
     });
+    logCommand(ctx.logger, 'acceptInvite', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: vink.id,
+      participantId: participant.id,
+    });
     return updated;
   });
 }
@@ -111,6 +118,12 @@ export async function declineInviteCommand(
       aggregateType: 'vink',
       aggregateId: vink.id,
       payload: { vinkId: vink.id, participantId: participant.id },
+    });
+    logCommand(ctx.logger, 'declineInvite', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: vink.id,
+      participantId: participant.id,
     });
     return updated;
   });

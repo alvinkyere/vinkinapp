@@ -5,6 +5,11 @@
  */
 
 import type {
+  Card,
+  CardAssignment,
+  CardAssignmentId,
+  CardId,
+  CardWalletToken,
   Contribution,
   GuestIdentityId,
   Participant,
@@ -43,6 +48,11 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
   readonly cards = new Map<string, TemporaryCard>();
   readonly purchaseAuthorizations = new Map<string, PurchaseAuthorization>();
   readonly settlements = new Map<string, Settlement>();
+  /** RM1 (D47) — the reusable card pool; separate from `cards` above (TemporaryCard,
+   * untouched until a later RM slice cuts the live flow over). */
+  readonly cardPool = new Map<string, Card>();
+  readonly cardAssignments = new Map<string, CardAssignment>();
+  readonly cardWalletTokens = new Map<string, CardWalletToken>();
   readonly recoveryObligations = new Map<string, RecoveryObligation>();
   readonly history: VinkStateHistoryRow[] = [];
   readonly outbox: OutboxEventInput[] = [];
@@ -333,6 +343,74 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
 
   async updateCard(card: TemporaryCard): Promise<void> {
     this.cards.set(card.id, card);
+  }
+
+  // -------------------------------------------------------------------------------------
+  // RM1 (D47) — the reusable card pool.
+  // -------------------------------------------------------------------------------------
+
+  async reserveAvailableCard(): Promise<Card | null> {
+    for (const card of this.cardPool.values()) {
+      if (card.status === 'AVAILABLE') return card;
+    }
+    return null;
+  }
+
+  async getCard(id: CardId): Promise<Card | null> {
+    return this.cardPool.get(id) ?? null;
+  }
+
+  async insertCardAssignment(assignment: CardAssignment): Promise<void> {
+    for (const existing of this.cardAssignments.values()) {
+      if (existing.vinkId === assignment.vinkId) {
+        throw new Error('unique violation: one card assignment per vink');
+      }
+    }
+    this.cardAssignments.set(assignment.id, assignment);
+    const card = this.cardPool.get(assignment.cardId);
+    if (card !== undefined) this.cardPool.set(card.id, { ...card, status: 'RESERVED' });
+  }
+
+  async getCardAssignmentForVink(vinkId: VinkId): Promise<CardAssignment | null> {
+    for (const assignment of this.cardAssignments.values()) {
+      if (assignment.vinkId === vinkId) return assignment;
+    }
+    return null;
+  }
+
+  async getCardAssignmentForUpdate(id: CardAssignmentId): Promise<CardAssignment | null> {
+    return this.cardAssignments.get(id) ?? null;
+  }
+
+  async updateCardAssignment(assignment: CardAssignment): Promise<void> {
+    this.cardAssignments.set(assignment.id, assignment);
+  }
+
+  async releaseCardToPool(cardId: CardId): Promise<void> {
+    const card = this.cardPool.get(cardId);
+    if (card !== undefined) this.cardPool.set(cardId, { ...card, status: 'AVAILABLE' });
+  }
+
+  async quarantineCard(cardId: CardId): Promise<void> {
+    const card = this.cardPool.get(cardId);
+    if (card !== undefined) this.cardPool.set(cardId, { ...card, status: 'QUARANTINED' });
+  }
+
+  async insertCardWalletToken(token: CardWalletToken): Promise<void> {
+    this.cardWalletTokens.set(token.id, token);
+  }
+
+  async getCardWalletTokenForAssignment(
+    assignmentId: CardAssignmentId,
+  ): Promise<CardWalletToken | null> {
+    for (const token of this.cardWalletTokens.values()) {
+      if (token.cardAssignmentId === assignmentId) return token;
+    }
+    return null;
+  }
+
+  async updateCardWalletToken(token: CardWalletToken): Promise<void> {
+    this.cardWalletTokens.set(token.id, token);
   }
 
   async insertPurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void> {

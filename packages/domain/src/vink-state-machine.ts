@@ -49,6 +49,7 @@ export type VinkEvent =
   | 'CARD_PROVISIONING_STARTED'
   | 'CARD_ISSUED'
   | 'CARD_PROVISIONING_FAILED'
+  | 'CARD_WINDOW_EXPIRED' // RM1 (D47): the 10-minute card usage window elapsed unused
   | 'FUNDING_REVERSAL_COMPLETED' // G13 edge, ratified (D11 amendment)
   | 'MERCHANT_AUTHORIZATION_APPROVED'
   | 'PURCHASE_CAPTURED'
@@ -102,6 +103,11 @@ const TRANSITIONS: Readonly<Record<VinkState, Partial<Record<VinkEvent, VinkTran
       to: 'PURCHASE_AUTHORIZED',
       emits: 'MerchantAuthorizationApproved',
     },
+    // RM1 (D47): the organizer's 10-minute card usage window elapsed with no purchase made —
+    // same exit shape as CARD_PROVISIONING_FAILED (wind down via FUNDING_REVERSAL, refund
+    // every already-captured contribution). The sweep that actually fires this is RM4's job;
+    // this slice only makes the transition itself real and tested.
+    CARD_WINDOW_EXPIRED: { to: 'FUNDING_REVERSAL', emits: 'CardWindowExpired' },
   },
   FUNDING_REVERSAL: {
     FUNDING_REVERSAL_COMPLETED: { to: 'EXPIRED', emits: 'VinkExpired' },

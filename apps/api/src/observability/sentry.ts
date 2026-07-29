@@ -17,6 +17,9 @@ export function startCrashReporter(env: Env): CrashReporter {
   Sentry.init({
     dsn: env.SENTRY_DSN,
     environment: env.VINKIN_ENV,
+    // ENG7 — the same release identifier every log line now carries, so a crash report can
+    // be tied to the exact deployed build without cross-referencing a deploy timestamp.
+    release: env.RELEASE_VERSION,
     tracesSampleRate: 0,
     sendDefaultPii: false,
   });

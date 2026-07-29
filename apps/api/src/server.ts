@@ -69,6 +69,14 @@ const app = await buildApp({
   checkRedis,
   crashReporter,
   webhookRoutes,
+  // ENG8: the same connection `checkRedis` already uses — rate-limit windows are now correct
+  // across multiple API instances instead of per-process only. Reusing it (not a dedicated
+  // connection, unlike `realtimePub`/`realtimeSub`) because INCR/PEXPIRE/PTTL are all regular
+  // commands, not SUBSCRIBE — no mode-locking concern.
+  redis,
+  // ENG9 — see `AppDeps.forceCloseConnections`'s own doc comment in app.ts. Only the real
+  // process sets this; `shutdown()` below is the bounded-timeout wrapper that makes it safe.
+  forceCloseConnections: false,
 });
 
 // ENG4 Slice 4 ("health status" metric): reuses the exact same checks `/health/ready` already
@@ -98,12 +106,47 @@ try {
   app.log.warn({ err: error }, 'sweep scheduler not started (Redis unavailable?)');
 }
 
+// ENG9 ("deployment during an active Vink") — `app.ts` now sets `forceCloseConnections:
+// false` so a genuinely in-flight request survives shutdown (a real defect a live SIGTERM
+// test caught: the default force-closed connections Node's own idle-heuristic misjudged, and
+// killed, a connection that had merely finished RECEIVING its request but whose handler was
+// still running — treating "no socket I/O this instant" as "idle").
+//
+// That fix alone reintroduces the exact problem `forceCloseConnections` exists to prevent:
+// with it off, `app.close()` also stops force-closing connections that are GENUINELY idle
+// (a keep-alive client, or a request that already finished) — the same live test above
+// initially showed shutdown taking the full hard timeout on every run, not just slow ones,
+// because Node's own `close()` has no way to distinguish "still working" from "done, but the
+// client hasn't hung up yet." The standard fix (a real grace period, then force) is
+// implemented explicitly here rather than left to a single all-or-nothing setting: idle
+// connections get force-closed after a short, generous window — long enough for this app's
+// real request latencies (single/low-double-digit ms, per this repo's own test timings) to
+// finish naturally — and a longer hard deadline is still the absolute backstop.
+const IDLE_CONNECTION_GRACE_MS = 500;
+const GRACEFUL_SHUTDOWN_TIMEOUT_MS = 10_000;
+
 let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   app.log.info({ signal }, 'shutting down');
-  await app.close();
+  const idleGraceTimer = setTimeout(() => {
+    app.server.closeIdleConnections();
+  }, IDLE_CONNECTION_GRACE_MS);
+  idleGraceTimer.unref();
+  const closed = await Promise.race([
+    app.close().then(() => true),
+    new Promise<boolean>((resolve) =>
+      setTimeout(() => resolve(false), GRACEFUL_SHUTDOWN_TIMEOUT_MS).unref(),
+    ),
+  ]);
+  clearTimeout(idleGraceTimer);
+  if (!closed) {
+    app.log.warn(
+      { timeoutMs: GRACEFUL_SHUTDOWN_TIMEOUT_MS },
+      'graceful shutdown timed out waiting for connections to drain; forcing exit',
+    );
+  }
   stopOutboxPublisher();
   if (stopSweeps !== null) await stopSweeps();
   await sql.end({ timeout: 5 });

@@ -23,6 +23,11 @@ export type TemporaryCardId = Branded<'TemporaryCardId'>;
 export type PurchaseAuthorizationId = Branded<'PurchaseAuthorizationId'>;
 export type SettlementId = Branded<'SettlementId'>;
 export type RecoveryObligationId = Branded<'RecoveryObligationId'>;
+/** RM1 (D47) — the reusable card pool. Distinct from `TemporaryCardId`, which stays exactly
+ * as-is until a later RM slice cuts the live FUNDED-Vink flow over to this new schema. */
+export type CardId = Branded<'CardId'>;
+export type CardAssignmentId = Branded<'CardAssignmentId'>;
+export type CardWalletTokenId = Branded<'CardWalletTokenId'>;
 
 export const newUserId = (): UserId => randomUUID() as UserId;
 export const newGuestIdentityId = (): GuestIdentityId => randomUUID() as GuestIdentityId;
@@ -35,6 +40,9 @@ export const newPurchaseAuthorizationId = (): PurchaseAuthorizationId =>
 export const newSettlementId = (): SettlementId => randomUUID() as SettlementId;
 export const newRecoveryObligationId = (): RecoveryObligationId =>
   randomUUID() as RecoveryObligationId;
+export const newCardId = (): CardId => randomUUID() as CardId;
+export const newCardAssignmentId = (): CardAssignmentId => randomUUID() as CardAssignmentId;
+export const newCardWalletTokenId = (): CardWalletTokenId => randomUUID() as CardWalletTokenId;
 
 /** Plan §11 idempotency-key formats, verbatim. Server-derived, never minted per tap. */
 export const idempotencyKey = {
@@ -56,4 +64,11 @@ export const idempotencyKey = {
 
   refundContribution: (vinkId: VinkId, contributionId: ContributionId): string =>
     `vink:${vinkId}:contribution:${contributionId}:refund`,
+
+  /** RM2 (D47) — card-assignment-scoped, not Vink-scoped: a wallet token belongs to one
+   * specific card assignment, and re-provisioning after a return-and-reassign must be a
+   * genuinely fresh key (a new CardAssignmentId), never collide with the previous
+   * assignment's own provisioning attempt. */
+  provisionWalletToken: (cardAssignmentId: CardAssignmentId): string =>
+    `card-assignment:${cardAssignmentId}:wallet-provision`,
 } as const;

@@ -6,6 +6,11 @@
  */
 
 import type {
+  Card,
+  CardAssignment,
+  CardAssignmentId,
+  CardId,
+  CardWalletToken,
   Contribution,
   ContributionId,
   DomainEventName,
@@ -101,6 +106,10 @@ export interface ContributionStatusHistoryRow {
   toStatus: string;
   actor: string;
   correlationId: string;
+  /** ENG7 — the roadmap's own audit-trail field template names this explicitly. Whatever the
+   * contribution's own `providerReference` is at the moment of this transition (often still
+   * `null` for early-lifecycle events, e.g. before a provider ever assigns one). */
+  providerReference?: string | null;
 }
 
 export interface LedgerPostingInput {
@@ -207,6 +216,37 @@ export interface VinkTx {
   insertCard(card: TemporaryCard): Promise<void>;
   getCardByVinkForUpdate(vinkId: VinkId): Promise<TemporaryCard | null>;
   updateCard(card: TemporaryCard): Promise<void>;
+  // -------------------------------------------------------------------------------------
+  // RM1 (D47) — the reusable card pool. Separate methods from the TemporaryCard ones
+  // above, which stay untouched until a later RM slice cuts the live FUNDED-Vink flow over.
+  // -------------------------------------------------------------------------------------
+  /** Atomically claims and locks one AVAILABLE pool card, or null if the pool is exhausted
+   * right now. The adapter must use `FOR UPDATE SKIP LOCKED` (same idiom as the outbox
+   * publisher / reconciliation runner) so concurrent reservation attempts each claim a
+   * DIFFERENT card rather than blocking on one another. */
+  reserveAvailableCard(): Promise<Card | null>;
+  /** RM2 (D47) — a plain read by id, for commands that already have a `CardAssignment` (and
+   * thus a `cardId`) and need the card's own `providerCardId` to make a provider call. */
+  getCard(id: CardId): Promise<Card | null>;
+  insertCardAssignment(assignment: CardAssignment): Promise<void>;
+  getCardAssignmentForVink(vinkId: VinkId): Promise<CardAssignment | null>;
+  /** Row-locked read by assignment id, for the return-to-pool command's own re-check of the
+   * assignment/token state under lock. */
+  getCardAssignmentForUpdate(id: CardAssignmentId): Promise<CardAssignment | null>;
+  updateCardAssignment(assignment: CardAssignment): Promise<void>;
+  /** Marks the underlying pool card AVAILABLE again. Callers must confirm the assignment's
+   * wallet token is REVOKED first — this method itself does not check, by design: it is a
+   * plain write, the same way `updateVink`/`updateCard` are plain writes whose callers own
+   * the precondition (matching this codebase's existing convention throughout `ports.ts`). */
+  releaseCardToPool(cardId: CardId): Promise<void>;
+  /** RM2 (D47) — a provider call whose outcome was genuinely ambiguous (UNKNOWN_OUTCOME)
+   * during the enable/provision/disable/revoke handshake removes the card from the
+   * reservable pool entirely (never AVAILABLE by accident) until an operator manually
+   * clears it — not built in this slice, deliberately (out of scope). */
+  quarantineCard(cardId: CardId): Promise<void>;
+  insertCardWalletToken(token: CardWalletToken): Promise<void>;
+  getCardWalletTokenForAssignment(assignmentId: CardAssignmentId): Promise<CardWalletToken | null>;
+  updateCardWalletToken(token: CardWalletToken): Promise<void>;
   insertPurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void>;
   listPurchaseAuthorizationsForUpdate(vinkId: VinkId): Promise<PurchaseAuthorization[]>;
   updatePurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void>;
@@ -293,6 +333,18 @@ export interface CommandLogger {
   error(event: string, data?: Record<string, unknown>): void;
 }
 
+/** ENG7 ("Observability and auditability") — same "minimal, dependency-free port; a real
+ * apps/api implementation adapts its own Prometheus-backed Metrics" pattern as `CommandLogger`
+ * immediately above, for the exact reason: the application layer stays pure orchestration,
+ * with no metrics-library dependency of its own. Every method optional-safe via `ctx.metrics?.`
+ * at call sites, same "omit to get pre-existing behavior" convention as `logger`. */
+export interface CommandMetrics {
+  recordReplay(command: string): void;
+  recordContributionOutcome(outcome: string): void;
+  recordAuthorizationOutcome(outcome: string): void;
+  recordRefundOutcome(outcome: string): void;
+}
+
 export interface CommandContext {
   uow: UnitOfWork;
   clock: Clock;
@@ -309,6 +361,8 @@ export interface CommandContext {
   invitesEnabled?: boolean;
   /** ENG4 Slice 3. */
   logger?: CommandLogger;
+  /** ENG7. */
+  metrics?: CommandMetrics;
 }
 
 /** Context for unauthenticated public commands (guest join) — no actor user exists. */
@@ -318,4 +372,6 @@ export interface PublicCommandContext {
   correlationId: string;
   /** ENG4 Slice 3. */
   logger?: CommandLogger;
+  /** ENG7. */
+  metrics?: CommandMetrics;
 }

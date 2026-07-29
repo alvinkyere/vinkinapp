@@ -163,9 +163,14 @@ describe('vink lifecycle end-to-end (PostgreSQL)', { skip: !RUN }, () => {
       'ParticipantAllocationChanged',
       'VinkOpened',
     ]);
+    // ENG7 ("audit trail completion"): createVinkCommand and setSplitCommand now also write a
+    // history row (VINK_CREATED, SPLIT_CONFIGURED) — previously the only entry here was
+    // VINK_OPENED, since those two commands wrote to no audit mechanism at all.
     const transitions = entries.filter((entry) => entry.kind === 'transition');
-    assert.equal(transitions.length, 1);
-    assert.equal(transitions[0]!.detail.event, 'VINK_OPENED');
+    assert.deepEqual(
+      transitions.map((entry) => entry.detail.event),
+      ['VINK_CREATED', 'SPLIT_CONFIGURED', 'VINK_OPENED'],
+    );
 
     const cancelled = await app.inject({
       method: 'POST',

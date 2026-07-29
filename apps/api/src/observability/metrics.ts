@@ -32,6 +32,29 @@ export interface Metrics {
   recordInvitationDelivery(data: { outcome: 'SENT' | 'FAILED'; method: 'EMAIL' | 'SMS' }): void;
   connectionOpened(): void;
   connectionClosed(): void;
+  /** ENG7 — how long one job execution (a sweep tick today) actually took, by job name. */
+  recordJobDuration(data: { job: string; durationMs: number }): void;
+  /** ENG7 — how much later than its own configured interval a sweep tick actually started
+   * (wall-clock drift), not how long the tick itself took (`recordJobDuration` covers that). */
+  recordSweepDelay(data: { delayMs: number }): void;
+  /** ENG7 — every webhook ingestion outcome, by provider. Filtering by `outcome: 'duplicate'`
+   * is the "duplicate webhook count" the roadmap names; the same counter also gives a general
+   * ingestion-volume/dead-letter-rate view for free. */
+  recordWebhookIngestion(data: {
+    provider: string;
+    outcome: 'received' | 'duplicate' | 'dead_letter' | 'invalid_signature';
+  }): void;
+  /** ENG7 — a command served an idempotent replay instead of executing fresh (the roadmap's
+   * "idempotency replay count"), by command name. */
+  recordCommandReplay(data: { command: string }): void;
+  /** ENG7 — "contribution success rate": every contribution outcome the resolver/authorize
+   * path reaches, by status. A rate is `rate(...{status="CAPTURED"}) / rate(...)` in Prometheus
+   * itself — no separate ratio needs computing in application code. */
+  recordContributionOutcome(data: { outcome: string }): void;
+  /** ENG7 — "authorization success rate": every §17 merchant-authorization decision. */
+  recordAuthorizationOutcome(data: { outcome: string }): void;
+  /** ENG7 — "refund status": every refund attempt's terminal outcome. */
+  recordRefundOutcome(data: { outcome: string }): void;
   /** Registers a callback invoked on every scrape — the async-gauge pattern (BullMQ queue
    * depth, health-check status) needs, since both are polled facts, not events. `observe` may
    * be called any number of times per invocation (once per label combination). */
@@ -51,6 +74,13 @@ export const NOOP_METRICS: Metrics = {
   connectionOpened: () => {},
   connectionClosed: () => {},
   registerObservableGauge: () => {},
+  recordJobDuration: () => {},
+  recordSweepDelay: () => {},
+  recordWebhookIngestion: () => {},
+  recordCommandReplay: () => {},
+  recordContributionOutcome: () => {},
+  recordAuthorizationOutcome: () => {},
+  recordRefundOutcome: () => {},
 };
 
 export async function startMetrics(
@@ -83,6 +113,29 @@ export async function startMetrics(
   const realtimeConnections = meter.createUpDownCounter('vinkin_realtime_connections', {
     description: 'Currently-open realtime WebSocket connections',
   });
+  const jobDuration = meter.createHistogram('vinkin_job_duration_ms', {
+    unit: 'ms',
+    description: 'Background job execution duration, by job name',
+  });
+  const sweepDelay = meter.createHistogram('vinkin_sweep_delay_ms', {
+    unit: 'ms',
+    description: 'Wall-clock drift between a sweep tick’s configured interval and its actual start',
+  });
+  const webhookIngestion = meter.createCounter('vinkin_webhook_events_total', {
+    description: 'Webhook ingestion outcomes, by provider/outcome',
+  });
+  const commandReplays = meter.createCounter('vinkin_command_replay_total', {
+    description: 'Commands served as an idempotent replay instead of executing fresh, by command',
+  });
+  const contributionOutcomes = meter.createCounter('vinkin_contribution_outcome_total', {
+    description: 'Contribution terminal/observed outcomes, by status',
+  });
+  const authorizationOutcomes = meter.createCounter('vinkin_merchant_authorization_outcome_total', {
+    description: 'Merchant-authorization decisions (§17), by outcome',
+  });
+  const refundOutcomes = meter.createCounter('vinkin_refund_outcome_total', {
+    description: 'Refund attempt terminal outcomes, by status',
+  });
 
   const metrics: Metrics = {
     recordApiRequest: ({ method, route, statusCode, durationMs }) =>
@@ -94,6 +147,14 @@ export async function startMetrics(
       invitationDeliveries.add(1, { outcome, method }),
     connectionOpened: () => realtimeConnections.add(1),
     connectionClosed: () => realtimeConnections.add(-1),
+    recordJobDuration: ({ job, durationMs }) => jobDuration.record(durationMs, { job }),
+    recordSweepDelay: ({ delayMs }) => sweepDelay.record(delayMs),
+    recordWebhookIngestion: ({ provider: providerName, outcome }) =>
+      webhookIngestion.add(1, { provider: providerName, outcome }),
+    recordCommandReplay: ({ command }) => commandReplays.add(1, { command }),
+    recordContributionOutcome: ({ outcome }) => contributionOutcomes.add(1, { outcome }),
+    recordAuthorizationOutcome: ({ outcome }) => authorizationOutcomes.add(1, { outcome }),
+    recordRefundOutcome: ({ outcome }) => refundOutcomes.add(1, { outcome }),
     registerObservableGauge: (name, callback) => {
       meter.createObservableGauge(name).addCallback(async (result) => {
         await callback((value, attributes) => result.observe(value, attributes));

@@ -32,6 +32,7 @@ import type { CommandContext, VinkTx } from './ports.ts';
 import { applyVinkTransition } from './support/transition.ts';
 import { loadOwnedVink } from './support/guards.ts';
 import { newPublicCode } from './support/public-code.ts';
+import { logCommand } from './support/command-logging.ts';
 
 // ENG1 timer semantics: these match VINK_OPEN_DURATION_SECONDS/VINK_PROCESSING_GRACE_SECONDS'
 // own defaults (apps/api/src/config/env.ts) exactly — the fallback for any caller (most
@@ -184,11 +185,15 @@ export async function createVinkCommand(
   };
 
   try {
-    return await ctx.uow.run(async (tx) => {
+    let wasReplay = false;
+    const result = await ctx.uow.run(async (tx) => {
       // The common case (response lost after the original request already committed): the
       // retry finds the earlier row and replays it, no new insert, no duplicate VinkCreated.
       const replay = await findVinkReplay(tx, vink.organizerUserId, creationIdempotencyKey);
-      if (replay !== null) return replay;
+      if (replay !== null) {
+        wasReplay = true;
+        return replay;
+      }
 
       await tx.insertVink(vink);
       await tx.insertParticipant(organizer);
@@ -198,8 +203,31 @@ export async function createVinkCommand(
         aggregateId: vink.id,
         payload: { vinkId: vink.id, requiredAmountMinor: vink.requiredAmount.amountMinor },
       });
+      // ENG7 ("audit trail completion") — a real gap the roadmap's own audit found:
+      // creation writes no row to any audit mechanism at all. Not `applyVinkTransition`
+      // (D12's own single write path for state-machine-governed transitions) — creation has
+      // no prior state to transition FROM, and `transitionVink` has no such entry; this is a
+      // direct, deliberately synthetic `appendHistory` call, `fromState: 'NONE'` naming
+      // exactly what happened without inventing a fake domain event.
+      await tx.appendHistory({
+        vinkId: vink.id,
+        fromState: 'NONE',
+        event: 'VINK_CREATED',
+        toState: vink.state,
+        actor: ctx.actorUserId,
+        correlationId: ctx.correlationId,
+      });
       return { vink, participants: [organizer] };
     });
+    if (wasReplay) ctx.metrics?.recordReplay('createVink');
+    logCommand(ctx.logger, 'createVink', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: result.vink.id,
+      idempotencyKey: creationIdempotencyKey,
+      replayed: wasReplay,
+    });
+    return result;
   } catch (error) {
     if (!(error instanceof CreationIdempotencyRaceError)) throw error;
     // Rarer case: two truly concurrent requests both missed each other's pre-check and both
@@ -209,6 +237,14 @@ export async function createVinkCommand(
       findVinkReplay(tx, vink.organizerUserId, creationIdempotencyKey),
     );
     if (winner === null) throw error; // unreachable: the constraint only fires if a winner exists
+    ctx.metrics?.recordReplay('createVink');
+    logCommand(ctx.logger, 'createVink', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: winner.vink.id,
+      idempotencyKey: creationIdempotencyKey,
+      replayed: true,
+    });
     return winner;
   }
 }
@@ -265,6 +301,11 @@ export async function configureVinkCommand(
     };
     assertVinkAmounts(updated);
     await tx.updateVink(updated);
+    logCommand(ctx.logger, 'configureVink', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: updated.id,
+    });
     return updated;
   });
 }
@@ -338,6 +379,12 @@ export async function addParticipantCommand(
         await dispatchMemberInvitation(ctx, tx, vink, participant, organizer.displayName);
       }
     }
+    logCommand(ctx.logger, 'addParticipant', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: vink.id,
+      participantId: participant.id,
+    });
     return participant;
   });
 }
@@ -389,6 +436,12 @@ export async function removeParticipantCommand(
       aggregateType: 'vink',
       aggregateId: vink.id,
       payload: { vinkId: vink.id, participantId: participant.id },
+    });
+    logCommand(ctx.logger, 'removeParticipant', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: vink.id,
+      participantId: participant.id,
     });
     return updated;
   });
@@ -505,6 +558,24 @@ export async function setSplitCommand(
         })),
       },
     });
+    // ENG7 — the other command the audit found writing to no audit mechanism at all. Split
+    // never changes `vink.state` (only participant allocations), so `fromState === toState`
+    // here is accurate, not a bug — the `event` name is what carries the real meaning, same
+    // as createVinkCommand's own synthetic-but-honest entry above.
+    await tx.appendHistory({
+      vinkId: bumped.id,
+      fromState: vink.state,
+      event: 'SPLIT_CONFIGURED',
+      toState: bumped.state,
+      actor: ctx.actorUserId,
+      correlationId: ctx.correlationId,
+    });
+    logCommand(ctx.logger, 'setSplit', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: bumped.id,
+      method: input.method,
+    });
     return { vink: bumped, participants: updatedParticipants };
   });
 }
@@ -552,6 +623,11 @@ export async function openVinkCommand(
     // has succeeded, inside the same unit of work — a delivery failure here never rolls back
     // or misrepresents the vink's own now-committed OPEN state (Phase 5 §2).
     await dispatchMemberInvitationsOnOpen(ctx, tx, opened, active);
+    logCommand(ctx.logger, 'openVink', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: opened.id,
+    });
     return opened;
   });
 }
@@ -563,7 +639,7 @@ export async function cancelVinkCommand(
   return ctx.uow.run(async (tx) => {
     const vink = await loadOwnedVink(tx, input.vinkId, ctx.actorUserId, input.expectedVersion);
     // The machine enforces legality (OPEN → CANCELLED; DRAFT cancel is unmodeled per G13).
-    return applyVinkTransition(
+    const cancelled = await applyVinkTransition(
       tx,
       vink,
       'ORGANIZER_CANCELLED',
@@ -571,6 +647,12 @@ export async function cancelVinkCommand(
       ctx.correlationId,
       ctx.clock.now(),
     );
+    logCommand(ctx.logger, 'cancelVink', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: cancelled.id,
+    });
+    return cancelled;
   });
 }
 
@@ -628,6 +710,11 @@ export async function coverRemainingCommand(
           },
         ],
       },
+    });
+    logCommand(ctx.logger, 'coverRemaining', {
+      correlationId: ctx.correlationId,
+      actor: ctx.actorUserId,
+      vinkId: bumped.id,
     });
     return { vink: bumped, participants: [updatedOrganizer] };
   });

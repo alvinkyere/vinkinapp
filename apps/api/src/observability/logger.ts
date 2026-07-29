@@ -12,6 +12,10 @@ export function createLogger(env: Env, bindings: Record<string, unknown> = {}): 
   return pino({
     level: env.LOG_LEVEL,
     redact: ['req.headers.authorization'],
-    base: bindings,
+    // ENG7 — same release-identifier binding app.ts's Fastify-embedded logger carries, so
+    // apps/api/src/jobs/worker.ts (a genuinely separate OS process, ENG4 Slice 4's own
+    // documented reason it needs its own metrics port too) is identifiable by build the
+    // same way HTTP-request logs already are.
+    base: { ...bindings, release: env.RELEASE_VERSION },
   });
 }

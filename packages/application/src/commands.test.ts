@@ -542,7 +542,13 @@ describe('queries', () => {
       'ParticipantAllocationChanged',
       'VinkOpened',
     ]);
-    assert.equal(activity.filter((entry) => entry.kind === 'transition').length, 1);
+    // ENG7 ("audit trail completion"): createVinkCommand and setSplitCommand now also write a
+    // history row (VINK_CREATED, SPLIT_CONFIGURED) — previously the only entry here was
+    // VINK_OPENED.
+    assert.deepEqual(
+      activity.filter((entry) => entry.kind === 'transition').map((entry) => entry.detail.event),
+      ['VINK_CREATED', 'SPLIT_CONFIGURED', 'VINK_OPENED'],
+    );
     await assert.rejects(getVinkActivity(store, vink.id, 'stranger'), isAppError('FORBIDDEN'));
   });
 

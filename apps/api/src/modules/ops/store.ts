@@ -150,6 +150,10 @@ export interface AuditLogEntry {
   operatorName: string;
   action: string;
   vinkId: string | null;
+  /** ENG7 — the roadmap's own audit-trail field template names this; without it, an operator
+   * action couldn't be correlated back to the request/trace id every log line and history row
+   * already carries. Nullable — rows written before this column existed have none. */
+  correlationId: string | null;
   details: Record<string, unknown>;
   createdAt: string;
 }
@@ -160,11 +164,12 @@ export async function insertAuditEntry(
     operatorName: string;
     action: string;
     vinkId?: string;
+    correlationId: string;
     details: Record<string, unknown>;
   },
 ): Promise<void> {
-  await sql`INSERT INTO operator_audit_log (operator_name, action, vink_id, details)
-    VALUES (${entry.operatorName}, ${entry.action}, ${entry.vinkId ?? null},
+  await sql`INSERT INTO operator_audit_log (operator_name, action, vink_id, correlation_id, details)
+    VALUES (${entry.operatorName}, ${entry.action}, ${entry.vinkId ?? null}, ${entry.correlationId},
             ${sql.json(entry.details as postgres.JSONValue)})`;
 }
 
@@ -183,6 +188,7 @@ export async function listAuditLog(
     operatorName: row.operator_name as string,
     action: row.action as string,
     vinkId: (row.vink_id as string | null) ?? null,
+    correlationId: (row.correlation_id as string | null) ?? null,
     details: row.details as Record<string, unknown>,
     createdAt: toIso(row.created_at),
   }));

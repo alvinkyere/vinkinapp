@@ -27,6 +27,7 @@ import type {
   CaptureContributionInput,
   CaptureResult,
   CardResult,
+  CardStatusResult,
   CardholderResult,
   CreateCardholderInput,
   CreateCustomerInput,
@@ -44,6 +45,8 @@ import type {
   SetupPaymentMethodInput,
   SetupPaymentMethodResult,
   UpdateCardControlsInput,
+  WalletProvisioningPayload,
+  WalletTokenResult,
 } from '../../../payment-provider/src/types.ts';
 import { ProviderError } from '../../../payment-provider/src/errors.ts';
 import { loadStripeAdapterConfig, type StripeAdapterConfig } from './config.ts';
@@ -72,6 +75,10 @@ export class StripeFinancialProvider implements FinancialProvider {
     virtualCardIssuing: true,
     consumerCardholders: true,
     offSessionRecovery: true,
+    // RM2 (D47): see the four wallet methods' own doc comment below — verified live that
+    // card creation itself is currently blocked on this account's Financial Account v2
+    // requirement, so there is no way to verify Stripe's real push-provisioning API yet.
+    walletProvisioning: false,
   };
 
   private readonly stripe: Stripe;
@@ -288,7 +295,21 @@ export class StripeFinancialProvider implements FinancialProvider {
     }
   }
 
-  async freezeCard(cardId: string): Promise<void> {
+  async enableCard(cardId: string): Promise<void> {
+    // The identical call `issueTemporaryCard` already makes to activate a freshly issued
+    // card (line ~256 above) — already proven against the real sandbox by that call site;
+    // this is the same API surface reused as its own explicit, callable operation, which
+    // RM2 (D47) needs for "disabled by default, enabled only while assigned."
+    try {
+      await this.stripe.issuing.cards.update(cardId, { status: 'active' });
+    } catch (error) {
+      translateStripeError(error);
+    }
+  }
+
+  /** Renamed from `freezeCard` (RM2, D47) — identical real call, only the caller-facing name
+   * changed, for symmetry with `enableCard`. */
+  async disableCard(cardId: string): Promise<void> {
     try {
       await this.stripe.issuing.cards.update(cardId, { status: 'inactive' });
     } catch (error) {
@@ -302,6 +323,51 @@ export class StripeFinancialProvider implements FinancialProvider {
     } catch (error) {
       translateStripeError(error);
     }
+  }
+
+  async getCardStatus(cardId: string): Promise<CardStatusResult> {
+    try {
+      const card = await this.stripe.issuing.cards.retrieve(cardId);
+      const status: CardStatusResult['status'] =
+        card.status === 'active' ? 'ACTIVE' : card.status === 'canceled' ? 'CLOSED' : 'INACTIVE';
+      return { providerCardId: card.id, status };
+    } catch (error) {
+      translateStripeError(error);
+    }
+  }
+
+  // -- RM2 (D47): wallet-token provisioning ------------------------------------------------
+  //
+  // Declared NOT_SUPPORTED (walletProvisioning: false above), disclosed rather than guessed:
+  // verified live against the real sandbox (this file's own package, `packages/providers`)
+  // that `POST /v1/issuing/cards` — card creation itself — is currently blocked on this
+  // Stripe account needing a v2 Financial Account (`ENG6-SLICE-5-STRIPE-FINANCIAL-ACCOUNT-
+  // NOTE.md`), so there is no real card to provision a wallet token for and no way to verify
+  // Stripe's actual push-provisioning API shape against this sandbox. Rather than guess at
+  // undocumented behavior (this package's own established discipline, ENG6 Slice 1), these
+  // four methods throw NOT_SUPPORTED until that wall clears and the real API can be verified
+  // live — the honest per-provider capability gate (§21, D7) is what's supposed to happen
+  // here, not a fabricated implementation.
+
+  async createWalletProvisioningSession(): Promise<WalletProvisioningPayload> {
+    throw new ProviderError(
+      'NOT_SUPPORTED',
+      'wallet provisioning is not yet verified against the real Stripe sandbox for this ' +
+        'account (blocked on the Financial Account v2 requirement — see ' +
+        'ENG6-SLICE-5-STRIPE-FINANCIAL-ACCOUNT-NOTE.md)',
+    );
+  }
+
+  async revokeWalletToken(): Promise<void> {
+    throw new ProviderError('NOT_SUPPORTED', 'wallet provisioning is not yet supported');
+  }
+
+  async getWalletToken(): Promise<WalletTokenResult> {
+    throw new ProviderError('NOT_SUPPORTED', 'wallet provisioning is not yet supported');
+  }
+
+  async listWalletTokens(): Promise<WalletTokenResult[]> {
+    throw new ProviderError('NOT_SUPPORTED', 'wallet provisioning is not yet supported');
   }
 
   async retrievePaymentStatus(providerPaymentId: string): Promise<ProviderPaymentStatus> {

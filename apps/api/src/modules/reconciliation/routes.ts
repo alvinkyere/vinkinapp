@@ -151,6 +151,7 @@ export function registerReconciliationOpsRoutes(
       await insertAuditEntry(sql, {
         operatorName: operator.operatorName,
         action: 'WEBHOOK_EVENT_REPLAYED',
+        correlationId: String(request.id),
         details: {
           findingId: null,
           webhookEventId,
@@ -211,6 +212,7 @@ export function registerReconciliationOpsRoutes(
       operatorName: operator.operatorName,
       action,
       vinkId: before.linkedVinkId ?? undefined,
+      correlationId: String(request.id),
       details: {
         findingId,
         previousReviewStatus: before.reviewStatus,
@@ -272,6 +274,7 @@ export function registerReconciliationOpsRoutes(
       await insertAuditEntry(sql, {
         operatorName: operator.operatorName,
         action: 'RECONCILIATION_RUN_TRIGGERED',
+        correlationId: String(request.id),
         details: { ...result },
       });
       return reply.send(lastRun);

@@ -92,6 +92,15 @@ class RealtimeClient {
   late final StreamSubscription<bool> _connectivitySubscription;
   bool? _lastKnownOnline;
 
+  /// ENG9 #6: the only way to observe the real [AppLifecycleListener] wiring (onPause/
+  /// onResume) from a test without a full widget tree — `connect()`'s own guard already
+  /// reads this field, so a test can simulate a real lifecycle transition via
+  /// `TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(...)` and assert on
+  /// this getter, proving the listener is genuinely wired, not just that the pure
+  /// backoff/connectivity functions elsewhere in this file are correct.
+  @visibleForTesting
+  bool get isPausedInBackground => _pausedInBackground;
+
   Stream<Map<String, dynamic>> get messages => _controller.stream;
 
   void _onConnectivityChanged(bool online) {

@@ -5,6 +5,8 @@
 
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { SignJWT } from 'jose';
 import { buildApp } from './app.ts';
 import { createIsolatedTestDb, type IsolatedTestDb } from './testing/integration-db.ts';
 
@@ -119,6 +121,66 @@ describe('auth end-to-end (PostgreSQL)', { skip: !RUN }, () => {
       payload: { refreshToken: relogin.json().refreshToken },
     });
     assert.equal(refreshAfterLogout.statusCode, 401);
+  });
+
+  it('ENG9 #16: a refresh token past its real expires_at is rejected as INVALID, distinct from reuse detection', async () => {
+    // Deliberately distinct from the reuse-detection test above: this token is NEVER rotated
+    // or reused — it is a genuinely still-valid, never-consumed session whose expires_at has
+    // simply passed. Ages the row directly rather than waiting REFRESH_TOKEN_TTL_SECONDS
+    // (30 days) of real wall-clock time.
+    const registered = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        username: `expiry_${Date.now()}`,
+        displayName: 'Expiry Test',
+        password: 'integration-password-1',
+      },
+    });
+    assert.equal(registered.statusCode, 201);
+    const { refreshToken } = registered.json();
+
+    await db.sql`UPDATE auth_sessions SET expires_at = now() - interval '1 second'
+      WHERE refresh_token_hash = ${createHash('sha256').update(refreshToken).digest('hex')}`;
+
+    const expired = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      payload: { refreshToken },
+    });
+    assert.equal(expired.statusCode, 401);
+  });
+
+  it('ENG9 #16: an access token past its real JWT exp claim is rejected, not silently accepted', async () => {
+    const registered = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        username: `access_expiry_${Date.now()}`,
+        displayName: 'Access Expiry Test',
+        password: 'integration-password-1',
+      },
+    });
+    assert.equal(registered.statusCode, 201);
+    const { user } = registered.json();
+
+    // Constructed with the app's own real JWT_SECRET and the exact same claim shape
+    // `signAccessToken` produces — only `exp` is deliberately backdated, proving
+    // `verifyAccessToken`'s real jose expiry check, not a mocked clock.
+    const expiredAccessToken = await new SignJWT({ sid: 'irrelevant-session-id' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject(user.id)
+      .setIssuer('vinkin-api')
+      .setIssuedAt(Math.floor(Date.now() / 1000) - 120)
+      .setExpirationTime(Math.floor(Date.now() / 1000) - 60)
+      .sign(new TextEncoder().encode(db.env.JWT_SECRET));
+
+    const me = await app.inject({
+      method: 'GET',
+      url: '/api/v1/me',
+      headers: { authorization: `Bearer ${expiredAccessToken}` },
+    });
+    assert.equal(me.statusCode, 401);
   });
 
   it('rejects invalid request bodies with 400 VALIDATION_FAILED', async () => {

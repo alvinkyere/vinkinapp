@@ -51,6 +51,7 @@ import { requireUser } from '../../auth/http.ts';
 import { vinkAndParticipantIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from './store.ts';
 import { toCommandLogger } from '../../observability/command-logger.ts';
+import { toCommandMetrics } from '../../observability/command-metrics.ts';
 import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
 import { tagActiveSpan, withSpan } from '../../observability/tracing.ts';
 
@@ -255,6 +256,7 @@ export function registerVinkRoutes(
       actorUserId,
       correlationId: String(request.id),
       logger: toCommandLogger(request.log),
+      metrics: toCommandMetrics(metrics),
       timers: {
         openDurationSeconds: env.VINK_OPEN_DURATION_SECONDS,
         processingGraceSeconds: env.VINK_PROCESSING_GRACE_SECONDS,

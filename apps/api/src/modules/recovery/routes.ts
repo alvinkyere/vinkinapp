@@ -28,6 +28,7 @@ import { simulatorRoutesPermitted } from '../../config/simulator-guard.ts';
 import { vinkAndContributionIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
 import { toCommandLogger } from '../../observability/command-logger.ts';
+import { toCommandMetrics } from '../../observability/command-metrics.ts';
 import { withProviderLogging } from '../../observability/provider-logging.ts';
 import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
 import { tagActiveSpan } from '../../observability/tracing.ts';
@@ -69,6 +70,7 @@ export function registerRecoveryRoutes(
       correlationId,
       provider: withProviderLogging(provider, correlationId, logger, metrics),
       logger,
+      metrics: toCommandMetrics(metrics),
     };
   }
   function refundCtx(request: FastifyRequest): RefundCommandContext {
@@ -81,6 +83,7 @@ export function registerRecoveryRoutes(
       correlationId,
       provider: withProviderLogging(provider, correlationId, logger, metrics),
       logger,
+      metrics: toCommandMetrics(metrics),
     };
   }
 

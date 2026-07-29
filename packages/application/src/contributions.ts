@@ -37,6 +37,7 @@ import { ApplicationError } from './errors.ts';
 import type { PublicCommandContext, VinkTx } from './ports.ts';
 import { applyVinkTransition } from './support/transition.ts';
 import { applyContributionTransition } from './support/contribution-transition.ts';
+import { logCommand } from './support/command-logging.ts';
 
 /** How long an AUTHORIZATION_PENDING may sit before the sweep declares it unknown. */
 export const AUTHORIZATION_TIMEOUT_MS = 30_000;
@@ -128,7 +129,7 @@ export async function authorizeContributionCommand(
   input: AuthorizeContributionInput,
 ): Promise<AuthorizeContributionResult> {
   const scenario = input.scenario ?? 'SUCCESS';
-  return ctx.uow.run(async (tx) => {
+  const result = await ctx.uow.run(async (tx) => {
     const vink = await tx.getVinkForUpdate(input.vinkId);
     if (vink === null)
       throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
@@ -258,6 +259,17 @@ export async function authorizeContributionCommand(
       throw error;
     }
   });
+  if (result.replayed) ctx.metrics?.recordReplay('authorizeContribution');
+  ctx.metrics?.recordContributionOutcome(result.contribution.status);
+  logCommand(ctx.logger, 'authorizeContribution', {
+    correlationId: ctx.correlationId,
+    actor: requesterActor(input.requester),
+    vinkId: input.vinkId,
+    idempotencyKey: result.contribution.idempotencyKey,
+    status: result.contribution.status,
+    replayed: result.replayed,
+  });
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -503,7 +515,14 @@ export async function closeSubmissionsCommand(
       now,
     );
     const deadlineReached = now.getTime() >= new Date(current.processingGraceDeadline).getTime();
-    return (await resolveFunding(tx, ctx, current, now, deadlineReached)).outcome;
+    const outcome = (await resolveFunding(tx, ctx, current, now, deadlineReached)).outcome;
+    logCommand(ctx.logger, 'closeSubmissions', {
+      correlationId: ctx.correlationId,
+      actor: 'timer',
+      vinkId: current.id,
+      outcome,
+    });
+    return outcome;
   });
 }
 
@@ -530,7 +549,14 @@ export async function resolveGraceCommand(
     }
     if (current.state !== 'PROCESSING_GRACE') return 'NOT_DUE';
     const deadlineReached = now.getTime() >= new Date(current.processingGraceDeadline).getTime();
-    return (await resolveFunding(tx, ctx, current, now, deadlineReached)).outcome;
+    const outcome = (await resolveFunding(tx, ctx, current, now, deadlineReached)).outcome;
+    logCommand(ctx.logger, 'resolveGrace', {
+      correlationId: ctx.correlationId,
+      actor: 'timer',
+      vinkId: current.id,
+      outcome,
+    });
+    return outcome;
   });
 }
 
@@ -668,6 +694,14 @@ export async function resolveContributionCommand(
         await tx.updateContribution(resolved);
       }
     }
+    ctx.metrics?.recordContributionOutcome(resolved.status);
+    logCommand(ctx.logger, 'resolveContribution', {
+      correlationId: ctx.correlationId,
+      actor: 'resolver',
+      vinkId: vink.id,
+      idempotencyKey: resolved.idempotencyKey,
+      status: resolved.status,
+    });
     return resolved;
   });
 }

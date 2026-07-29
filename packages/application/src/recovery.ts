@@ -27,6 +27,7 @@ import {
 import { ApplicationError } from './errors.ts';
 import type { PublicCommandContext, VinkTx } from './ports.ts';
 import { applyVinkTransition } from './support/transition.ts';
+import { logCommand } from './support/command-logging.ts';
 
 /** Retry ladder: default after this many failed charge attempts (§23). */
 export const RECOVERY_MAX_ATTEMPTS = 3;
@@ -161,7 +162,7 @@ export async function startRecoveryCommand(
   ctx: RecoveryCommandContext,
   input: { vinkId: VinkId; scenario?: RecoveryScenario },
 ): Promise<RecoveryResult> {
-  return ctx.uow.run(async (tx) => {
+  const result = await ctx.uow.run(async (tx) => {
     const vink = await tx.getVinkForUpdate(input.vinkId);
     if (vink === null)
       throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
@@ -224,6 +225,13 @@ export async function startRecoveryCommand(
     );
     return applyChargeResult(tx, ctx, pending, obligation, charged, now);
   });
+  logCommand(ctx.logger, 'startRecovery', {
+    correlationId: ctx.correlationId,
+    actor: 'recovery',
+    vinkId: input.vinkId,
+    outcome: result.outcome,
+  });
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +242,7 @@ export async function retryRecoveryCommand(
   ctx: RecoveryCommandContext,
   input: { vinkId: VinkId; scenario?: RecoveryScenario },
 ): Promise<RecoveryResult> {
-  return ctx.uow.run(async (tx) => {
+  const result = await ctx.uow.run(async (tx) => {
     const vink = await tx.getVinkForUpdate(input.vinkId);
     if (vink === null)
       throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
@@ -259,4 +267,11 @@ export async function retryRecoveryCommand(
     );
     return applyChargeResult(tx, ctx, vink, attempted, charged, now);
   });
+  logCommand(ctx.logger, 'retryRecovery', {
+    correlationId: ctx.correlationId,
+    actor: 'recovery',
+    vinkId: input.vinkId,
+    outcome: result.outcome,
+  });
+  return result;
 }

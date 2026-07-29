@@ -8,6 +8,126 @@ contract.
 
 ---
 
+## D47 — Real-Money Beta: VinkIn-as-cardholder funds flow, reusable card pool, dual-timer Vink/card lifecycle, wallet-only card exposure
+
+- **Decision:** the owner supplied and approved a full "VinkIn Real Money Beta" specification,
+  recorded here close to verbatim as the canonical reference (the source documents are the
+  owner's own messages in this session; this entry is the durable record):
+  - **Cardholder/funds flow:** VinkIn (not the organizer) is the legal cardholder. Every issued
+    card spends from VinkIn's own Stripe Financial Account. Canonical flow: Participant Payment
+    → Stripe PaymentIntent → VinkIn Stripe Financial Account → Internal Ledger → Vink reaches
+    100% → Reserve Card → Configure Spending Controls → Provision to Apple/Google Wallet →
+    Organizer receives card → Merchant Purchase → Settlement → Card returns to pool.
+  - **Capture timing (owner-clarified during planning):** participant payments CAPTURE
+    immediately per payment — money lands in VinkIn's Financial Account as each participant
+    pays, not held as an authorization until the Vink completes. This is a real change from
+    the engine's existing authorize-then-capture-on-completion model (D5's single resolver),
+    not merely a restatement of the eventual destination of funds.
+  - **Card pool:** 15 reusable virtual cards, never shared, one active Vink at a time per card.
+    Disabled by default; enabled only while assigned to an active funded Vink. A card is
+    reserved only after every required participant has paid, the Vink reaches 100%, and system
+    validation confirms no outstanding issues. Every assignment configures spending controls
+    (amount, merchant restrictions, permissions, expiration). A card returns to the pool only
+    after purchase completes and settlement occurs.
+  - **Wallet-token-scoped authorization (owner-clarified during planning):** authorizations are
+    approved against the assigned wallet token, not solely the underlying reusable card. The
+    token — not the card row — is the real authorization-time identity for a given assignment;
+    it must be independently provisioned per assignment and revoked before the card is treated
+    as returned to the pool, so a stale device from a prior assignment can never authorize
+    against a card now assigned elsewhere.
+  - **Dual-timer lifecycle, distinct from each other:** Vink maximum lifetime is 7 minutes
+    (down from today's 24h `VINK_OPEN_DURATION_SECONDS` default); on expiry the Vink closes
+    permanently, no further participants may join, no card is assigned, and refunds begin
+    automatically for every contribution already captured. Separately, once a card is
+    provisioned to the organizer's wallet, the organizer has 10 minutes to complete the
+    purchase; if unused, the card is disabled, contributors are refunded, and the card returns
+    to the pool after the refund process completes. All of the above are configuration values,
+    not hardcoded.
+  - **Beta caps (configuration, not hardcoded):** max Vink amount $100, max participants 8, max
+    active Vinks 10, card pool size 15, invite-only, US region only.
+  - **Wallet-only card exposure:** no "View Card Details" screen exists at all; the organizer
+    is always prompted to add the issued card to Apple Wallet/Google Wallet as the sole primary
+    action once a Vink reaches 100% — never a choice among payment methods, never raw card
+    number/expiry/CVV manually copied or displayed anywhere in VinkIn's systems.
+  - **Merchant support:** all merchant categories the issuing program supports; no
+    VinkIn-imposed category restriction beyond the spending controls configured per card.
+    Engineering still accounts for delayed captures, incremental authorizations, and refunds.
+  - **Merchant declines (initial beta policy, may evolve):** reuse the same assigned card and
+    retry after appropriate handling, rather than reassigning a different pool card.
+  - **Refunds/disputes:** expired Vinks and unused-card expiry both trigger automatic refunds
+    to every contributor; VinkIn absorbs Stripe's refund processing costs during the beta.
+    Participant disputes go through manual review in the Operations Console (an operator-
+    triggered, narrowly scoped, fully audited refund path — not a general refund capability).
+  - **Guests remain permanent and frictionless:** no account creation, identity verification,
+    or app install required to participate as a guest.
+  - **Pricing:** no organizer fee, no member fee, during the beta.
+  - **Beta success targets:** ~50 invited testers, 100 successfully completed Vinks; primary
+    metrics are Vinks created per week, average funding time, completion rate, repeat users.
+  - **Payment methods:** every method the selected Stripe integration supports (Apple Pay,
+    Google Pay, debit, credit) is available to participants.
+- **Date:** 2026-07-28
+- **Status:** ACCEPTED (owner-directed; the funds-flow/cardholder/card-pool/wallet decisions
+  above were supplied pre-approved; the capture-timing and wallet-token-scoped-authorization
+  clarifications were confirmed via direct question during the resulting implementation
+  planning session)
+- **Reason:** resolves VinkIn's central unresolved question — what the production funds-flow
+  and card architecture actually are once the M0 gate's conditions are eventually met — and
+  gives engineering a concrete target to build against (in sandbox mode, under D46's existing
+  guard) instead of continuing to leave the post-funding experience an unresolved slot.
+- **Alternatives considered:** keep capture-on-completion (today's model) and treat "refunds
+  begin automatically" as hold-cancellation only (rejected — the owner's own flow diagram
+  describes money landing in VinkIn's account as each participant pays, and confirmed this
+  explicitly when asked directly, since the two models have materially different refund/dispute
+  and reconciliation implications); scope wallet-token validation as a card-level concern only,
+  relying on `card.status` alone the way `authorizeMerchantPurchaseCommand` does today
+  (rejected — the owner explicitly clarified authorization is token-scoped, and a card-only
+  check would leave a real reassignment-security gap where a previous holder's device could
+  still authorize against a card now assigned to a different Vink); defer recording this as a
+  decision-log entry until individual RM slices land (rejected — owner directed recording it
+  now, matching the D45→D46 precedent of writing the decision down before the code that acts on
+  it).
+- **Affected modules/decisions amended:**
+  - **D32** (Deliberate Ready-to-Pay entry with provider-dependent presentment) and **D35**
+    (provider-dependent payment copy remains an unresolved slot) — both explicitly named "M0
+    gate closure / provider selection" as their revisit trigger; this decision is that trigger.
+    Their placeholder ("Ready to Pay" shell / unresolved presentment copy) gets real content
+    from the RM-slice work this decision authorizes; D32/D35 are resolved, not superseded.
+  - `docs/architecture/06-milestone-0-gate.md` — needs a second, narrower carve-out alongside
+    D46's existing sandbox exception, since "Card-display UI" is currently explicitly Forbidden
+    while the gate is open. This decision authorizes that amendment; it does not itself edit
+    the gate document (a separate, immediate follow-up action).
+  - `apps/api/src/modules/reconciliation/routes.ts`'s own header comment ("no route here can
+    move money, approve a payment, issue a refund, create a card, or alter a provider/ledger
+    record") — amended to permit exactly one new, narrowly scoped, fully audited
+    operator-triggered refund route for participant disputes (RM6), not a general refund
+    capability.
+  - `packages/domain` (card pool states/events, dual-timer Vink lifecycle, wallet-token
+    lifecycle), `packages/application/src/{purchases,refunds,contributions,commands}.ts`
+    (capture-on-payment funding engine, card reservation/return, wallet-token provisioning/
+    revocation), `packages/payment-provider` + `packages/providers` (new provider-interface
+    methods: enable/activate a card, provision/revoke a wallet token — touches the D7
+    conformance suite and both the mock and Stripe adapters together, per the existing hard
+    rule), `apps/api/src/db/migrations` (new `cards`/`card_assignments`/`card_wallet_tokens`
+    schema replacing today's DB-`UNIQUE` 1:1 `temporary_cards`), `apps/mobile` (wallet
+    provisioning, no card-details screen, dual-timer countdown UI), `apps/operations-console`
+    (dispute review screen + scoped refund route), `docs/feasibility/funds-flow.md` (gate
+    condition #3's own named evidence file, to be filled in as RM slices land against the real
+    Stripe sandbox).
+  - **Explicitly does not close the M0 gate.** This decision advances gate conditions #2
+    (cardholder/account ownership — now defined), #3 (funds-flow documented — evidence file
+    started as a direct consequence), and #7 (sandbox tests — ENG6's existing passing Stripe
+    sandbox suite extends to cover this). It does not satisfy conditions #1, #5, #6, #8, #10 —
+    those still need external evidence (a provider's own written funds-flow confirmation, KYC
+    program definition, counsel review, a scored risk register) per the gate document's own
+    rule that a condition without a linked evidence artifact is not met regardless of internal
+    approval. All RM-track engineering proceeds against the sandbox provider under D46's
+    existing guard; no live-mode credential or real-money movement is authorized by this entry.
+- **Revisit trigger:** the M0 gate's own ten conditions closing in full (unchanged authority);
+  any owner change to the capture-timing or wallet-token-scoped-authorization clarifications
+  above, since multiple RM slices are built directly on them; the merchant-decline "reuse same
+  card" policy is explicitly disclosed as likely to evolve after real-world observation, so a
+  future change there does not require re-litigating this whole entry.
+
 ## D46 — M0 gate amended with a narrow, hard-guarded sandbox-only exception for ENG6
 
 - **Decision:** `docs/architecture/06-milestone-0-gate.md` is amended (not discarded) with a

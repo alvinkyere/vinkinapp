@@ -14,6 +14,9 @@ export type ApplicationErrorCode =
   | 'PARTICIPANT_ALREADY_ADDED' // ENG1 #4: this exact user is already a participant — HTTP 409
   | 'INVITE_ALREADY_SENT' // ENG1 #4: this exact invite idempotency key was already used — HTTP 409
   | 'INVITE_ALREADY_RESOLVED' // Invites feature: this invite was already accepted/declined — HTTP 409
+  | 'CARD_POOL_EXHAUSTED' // RM1 (D47): no AVAILABLE card in the pool right now — HTTP 409
+  | 'CARD_ASSIGNMENT_NOT_FOUND' // RM1 (D47)
+  | 'WALLET_TOKEN_NOT_REVOKED' // RM1 (D47): return-to-pool attempted before token revocation
   | 'INVALID_COMMAND'; // command-level validation that is not a domain invariant
 
 export class ApplicationError extends Error {

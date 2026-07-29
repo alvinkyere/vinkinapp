@@ -58,6 +58,38 @@ still require.
 - Authorize a public launch or any production traffic
 - Change the dividing line below for anything outside sandbox-mode work specifically
 
+## Real-Money Beta architecture exception (D47, 2026-07-28) — narrow, does not close the gate
+
+The gate still governs all ten conditions above. A second, equally narrow exception — carved
+out alongside D46's, not replacing it — permits building the **full intended shape** of the
+Real-Money Beta architecture the owner approved and recorded in `docs/spec/decision-log.md`
+D47 (VinkIn-as-cardholder funds flow, the reusable card pool, the dual-timer Vink/card
+lifecycle, wallet-only card exposure), **against the sandbox provider only**, under the exact
+same hard guards D46 already established (sandbox/test-mode credentials only in every
+environment, a live-mode key fails to boot, feature-flagged and off-by-default outside
+development/test).
+
+This is what specifically permits, in sandbox mode only:
+
+- **Card-display UI** — narrowed, not removed wholesale, from the Forbidden list below: the
+  wallet-provisioning-only experience D47 specifies (no "View Card Details" screen exists in
+  that design at all) may be built and demoed against sandbox-issued cards
+- The reusable-card-pool schema, dual-timer lifecycle, and wallet-token provisioning/
+  revocation flows D47 describes, built against `MockFinancialProvider`/the sandbox
+  `StripeFinancialProvider` exactly as ENG6's existing sandbox work already does
+
+**This exception does NOT:**
+
+- Do anything D46's own "does NOT" list already says it doesn't (real-money movement, live
+  card issuance, consumer fund custody, public launch, gate conditions 1–10)
+- Authorize VinkIn's own real Stripe Financial Account to be provisioned or used — that is a
+  real Stripe account action outside sandbox scope entirely, gated on the owner performing it,
+  not a code decision
+- Authorize real Apple/Google Wallet push-provisioning credentials to be requested or used —
+  wallet UX may be built and demoed with whatever the sandbox/test tooling for each platform
+  allows; the same external-credential dependency that kept Sign in with Apple/Google
+  server-only (ENG5) and Android App Links unfinished (ENG4 Slice 10) applies here too
+
 ## While the gate is open
 
 **Permitted** (provider-neutral, no funds-flow assumptions baked in):
@@ -72,17 +104,24 @@ still require.
 - **Sandbox-only** provider adapter code, webhook tables, and demos under the D46 exception
   above — schemas/tables isolated from any future live-mode equivalent, sandbox credentials
   only
+- **Sandbox-only** Real-Money Beta architecture under the D47 exception above — card pool,
+  dual-timer lifecycle, wallet-token provisioning/revocation, and wallet-only card-display UI,
+  built and demoed against the sandbox provider only
 
 **Forbidden** (would build production architecture on an unconfirmed funds flow):
 
 - Real contribution capture flows (i.e., against live-mode provider credentials or real funds)
 - **Live-mode** Stripe schemas, webhook tables, or credentials of any kind
-- Card-display UI
+- Card-display UI **outside the D47 sandbox exception above** (i.e., against anything other
+  than sandbox-issued cards)
+- Real Apple/Google Wallet push-provisioning credentials (sandbox/test tooling for each
+  platform is permitted under D47; the real merchant identifier/entitlement is not)
 - Organizer onboarding tied to Stripe Connect (or any provider's program object model)
 - Production ledger migrations
 - Treating `StripeFinancialProvider` as production architecture in any form — a sandbox-mode
   adapter passing the contract suite is a technical proof, not a production-readiness one
+- VinkIn's own real (non-sandbox) Stripe Financial Account being provisioned or used
 
 The dividing line: anything whose shape would change if condition 1 or 2 came back "no" is
 forbidden until those conditions are met — this now includes anything that would change if
-the sandbox exception above were narrowed or revoked.
+either the D46 or D47 sandbox exception were narrowed or revoked.

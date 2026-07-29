@@ -84,6 +84,51 @@ jobs:
           node src/db/migrate.ts
           npm test
 
+  security-scans:
+    name: Security scans (dependency audit + Semgrep SAST)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # ENG8 ("dependency scanning"): Dependabot (.github/dependabot.yml) covers alerting on
+      # new advisories over time; this is the point-in-time gate on every PR. Fails only on
+      # high/critical to avoid CI noise from low-severity transitive advisories that have no
+      # realistic exploit path here — a real finding at that severity should block merge, not
+      # get silently ignored in a report nobody reads.
+      - name: pnpm audit (high/critical only)
+        run: pnpm audit --audit-level=high
+      # ENG8 ("static analysis" beyond ESLint): Semgrep's free, no-login-required public
+      # rulesets. p/security-audit + p/secrets + p/typescript + p/javascript were chosen over
+      # `--config auto` specifically because `auto` nudges toward a Semgrep account/login in
+      # recent CLI versions — these four rulesets need neither an account nor a token.
+      # `--severity ERROR` only (not the bare default, which fails on any WARNING/INFO match
+      # too): this is this ruleset's first-ever run against this codebase, never dry-run
+      # locally (this environment's disk was too constrained to install Semgrep's toolchain
+      # to verify — disclosed in the ENG8 milestone report, not hidden), so gating on its
+      # highest-confidence tier first avoids an unreviewed flood of WARNING/INFO findings
+      # blocking every PR on day one. Lower-severity findings still print in the job log.
+      - name: install Semgrep
+        run: pip install semgrep
+      - name: Semgrep scan
+        run: |
+          semgrep scan \
+            --config p/security-audit \
+            --config p/secrets \
+            --config p/typescript \
+            --config p/javascript \
+            --severity ERROR \
+            --error \
+            --exclude 'apps/mobile/**' \
+            --exclude '**/*.test.ts' \
+            --exclude '**/*.integration.test.ts' \
+            --exclude '**/.next/**' \
+            --exclude '**/node_modules/**'
+
   mobile:
     name: Mobile — analyze and test hosted configuration
     runs-on: ubuntu-latest

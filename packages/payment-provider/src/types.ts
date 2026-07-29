@@ -42,6 +42,13 @@ export interface ProviderCapabilities {
   virtualCardIssuing: boolean;
   consumerCardholders: boolean;
   offSessionRecovery: boolean;
+  /** RM2 (D47) — real Apple/Google Wallet push-provisioning. Declared `false` honestly by
+   * the Stripe adapter in this slice: verified live against the real sandbox that card
+   * creation itself is currently blocked on Stripe's own Financial Account v2 requirement
+   * (the wall ENG6 Slice 5's own decision note documents), so there is no real card to
+   * provision a wallet token for and no way to verify this against the real sandbox yet —
+   * `true` only for the mock. Never assumed true because another provider has it (§21, D7). */
+  walletProvisioning: boolean;
 }
 
 /** Provider-neutral payment (contribution) statuses — §11 attempt vocabulary, provider side. */
@@ -176,6 +183,58 @@ export interface UpdateCardControlsInput {
   spendLimit?: Money;
   allowedMccs?: readonly string[]; // policy-family MCC set (§19)
   blockedMccs?: readonly string[]; // cash-like blocks always on (§3.2, §36)
+}
+
+// ---------------------------------------------------------------------------
+// RM2 (D47) — the reusable card pool's enable/disable + wallet-token lifecycle.
+// `freezeCard` is renamed `disableCard` (its only real caller was the conformance suite's
+// own test — confirmed by grep before renaming, zero production call sites); `enableCard` is
+// its previously-missing inverse. Real Stripe issuing cards only have three states
+// (active/inactive/canceled) — this vocabulary matches that exactly, not a mock invention.
+// ---------------------------------------------------------------------------
+
+export type CardStatusCode = 'ACTIVE' | 'INACTIVE' | 'CLOSED';
+
+export interface CardStatusResult {
+  providerCardId: string;
+  status: CardStatusCode;
+}
+
+/** D47 (owner-clarified): authorizations are approved against the assigned wallet token, not
+ * solely the underlying card — this is a real security requirement (a stale device from a
+ * prior assignment must never authorize against a card now assigned elsewhere), not
+ * incidental. `walletType` matters because Apple/Google push-provisioning payload shapes are
+ * genuinely different; both are modeled explicitly rather than picking one and assuming. */
+export type WalletType = 'APPLE_PAY' | 'GOOGLE_PAY';
+
+export interface CreateWalletProvisioningSessionInput {
+  idempotencyKey: string; // wallet-provision:v1:{cardAssignmentId} (§12 shape)
+  providerCardId: string;
+  walletType: WalletType;
+}
+
+/**
+ * Deliberately named "session," not "token": VinkIn's own backend does not mint an Apple Pay
+ * / Google Pay token directly — the wallet framework on the organizer's device completes
+ * provisioning using material this call returns. `provisioningData` is intentionally opaque
+ * at this layer (never destructured/interpreted outside an adapter or RM5's real wallet
+ * integration code) — Apple's and Google's real push-provisioning payload shapes are
+ * genuinely different and provider/platform-specific; baking named fields (e.g. Apple's own
+ * `encryptedPassData`/`activationData`/`ephemeralPublicKey`) into this shared, provider-
+ * neutral type would leak platform-specific shape into the domain layer the same way a raw
+ * Stripe type would (§42/§43).
+ */
+export interface WalletProvisioningPayload {
+  providerReference: string; // the provider's own token/session id — this IS the wallet token id
+  walletType: WalletType;
+  provisioningData: Record<string, unknown>;
+}
+
+export type WalletTokenStatusCode = 'ACTIVE' | 'REVOKED';
+
+export interface WalletTokenResult {
+  providerTokenId: string;
+  status: WalletTokenStatusCode;
 }
 
 export interface ProviderCardTransaction {

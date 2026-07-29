@@ -27,6 +27,13 @@ describe('startMetrics (ENG4 Slice 4)', () => {
     NOOP_METRICS.connectionOpened();
     NOOP_METRICS.connectionClosed();
     NOOP_METRICS.registerObservableGauge('x', () => {});
+    NOOP_METRICS.recordJobDuration({ job: 'sweep', durationMs: 1 });
+    NOOP_METRICS.recordSweepDelay({ delayMs: 1 });
+    NOOP_METRICS.recordWebhookIngestion({ provider: 'stripe', outcome: 'received' });
+    NOOP_METRICS.recordCommandReplay({ command: 'createVink' });
+    NOOP_METRICS.recordContributionOutcome({ outcome: 'CAPTURED' });
+    NOOP_METRICS.recordAuthorizationOutcome({ outcome: 'APPROVED' });
+    NOOP_METRICS.recordRefundOutcome({ outcome: 'REFUNDED' });
   });
 
   it('VINKIN_METRICS_ENABLED=0 (default) never opens a port', async () => {
@@ -63,6 +70,15 @@ describe('startMetrics (ENG4 Slice 4)', () => {
         observe(3, { label: 'a' });
         observe(5, { label: 'b' });
       });
+      // ENG7 ("Observability and auditability") — the roadmap's own named metrics that were
+      // genuinely missing before this pass.
+      metrics.recordJobDuration({ job: 'sweep', durationMs: 12 });
+      metrics.recordSweepDelay({ delayMs: 250 });
+      metrics.recordWebhookIngestion({ provider: 'stripe', outcome: 'duplicate' });
+      metrics.recordCommandReplay({ command: 'createVink' });
+      metrics.recordContributionOutcome({ outcome: 'CAPTURED' });
+      metrics.recordAuthorizationOutcome({ outcome: 'DECLINED' });
+      metrics.recordRefundOutcome({ outcome: 'REFUNDED' });
 
       const body = await scrape(port);
 
@@ -76,6 +92,20 @@ describe('startMetrics (ENG4 Slice 4)', () => {
       assert.match(body, /vinkin_realtime_connections\{[^}]*\}\s+1/);
       assert.match(body, /vinkin_test_gauge\{[^}]*label="a"[^}]*\}\s+3/);
       assert.match(body, /vinkin_test_gauge\{[^}]*label="b"[^}]*\}\s+5/);
+      assert.match(body, /vinkin_job_duration_ms/);
+      assert.match(body, /job="sweep"/);
+      assert.match(body, /vinkin_sweep_delay_ms/);
+      assert.match(
+        body,
+        /vinkin_webhook_events_total\{provider="stripe",outcome="duplicate"[^}]*\}\s+1/,
+      );
+      assert.match(body, /vinkin_command_replay_total\{command="createVink"[^}]*\}\s+1/);
+      assert.match(body, /vinkin_contribution_outcome_total\{outcome="CAPTURED"[^}]*\}\s+1/);
+      assert.match(
+        body,
+        /vinkin_merchant_authorization_outcome_total\{outcome="DECLINED"[^}]*\}\s+1/,
+      );
+      assert.match(body, /vinkin_refund_outcome_total\{[^}]*outcome="REFUNDED"[^}]*\}\s+1/);
 
       await stop();
     });

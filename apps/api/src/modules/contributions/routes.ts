@@ -38,6 +38,7 @@ import {
 import { GUEST_TOKEN_PREFIX, hashGuestToken } from '../../auth/guest-tokens.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
 import { toCommandLogger } from '../../observability/command-logger.ts';
+import { toCommandMetrics } from '../../observability/command-metrics.ts';
 import { withProviderLogging } from '../../observability/provider-logging.ts';
 import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
 import { tagActiveSpan } from '../../observability/tracing.ts';
@@ -104,6 +105,7 @@ export function registerContributionRoutes(
       correlationId,
       provider: withProviderLogging(provider, correlationId, logger, metrics),
       logger,
+      metrics: toCommandMetrics(metrics),
     };
   }
 

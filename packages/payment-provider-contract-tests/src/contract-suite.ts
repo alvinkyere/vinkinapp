@@ -77,6 +77,7 @@ export function runFinancialProviderContractTests(name: string, makeKit: MakeKit
         'virtualCardIssuing',
         'consumerCardholders',
         'offSessionRecovery',
+        'walletProvisioning',
       ] as const;
       for (const flag of requiredFlags) {
         assert.equal(
@@ -518,20 +519,123 @@ export function runFinancialProviderContractTests(name: string, makeKit: MakeKit
       assert.equal(grocery.approved, true);
     });
 
-    it('freeze and close both stop new authorizations (§16/§18)', async (t) => {
+    it('disable and close both stop new authorizations (§16/§18)', async (t) => {
       const kit = await makeKit();
       if (!kit.issueCard || !kit.merchantAuthorize)
         return t.skip('no issuing simulation available');
 
-      const frozenCard = await kit.issueCard(10_000);
-      await kit.provider.freezeCard(frozenCard);
-      const onFrozen = await kit.merchantAuthorize(frozenCard, 1_000, '5411');
-      assert.equal(onFrozen.approved, false);
+      const disabledCard = await kit.issueCard(10_000);
+      await kit.provider.disableCard(disabledCard);
+      const onDisabled = await kit.merchantAuthorize(disabledCard, 1_000, '5411');
+      assert.equal(onDisabled.approved, false);
 
       const closedCard = await kit.issueCard(10_000);
       await kit.provider.closeCard(closedCard);
       const onClosed = await kit.merchantAuthorize(closedCard, 1_000, '5411');
       assert.equal(onClosed.approved, false);
+    });
+
+    // ---- RM2 (D47): enable/disable + getCardStatus, and wallet-token provisioning --------
+
+    it('enableCard reverses disableCard and restores authorization capability (RM2, D47)', async (t) => {
+      const kit = await makeKit();
+      if (!kit.issueCard || !kit.merchantAuthorize)
+        return t.skip('no issuing simulation available');
+
+      const cardId = await kit.issueCard(10_000);
+      await kit.provider.disableCard(cardId);
+      const whileDisabled = await kit.merchantAuthorize(cardId, 1_000, '5411');
+      assert.equal(whileDisabled.approved, false);
+
+      await kit.provider.enableCard(cardId);
+      const afterEnable = await kit.merchantAuthorize(cardId, 1_000, '5411');
+      assert.equal(afterEnable.approved, true, 're-enabling must restore authorization capability');
+    });
+
+    it('enableCard on a CLOSED card is INVALID_STATE, never a silent success (RM2, D47)', async (t) => {
+      const kit = await makeKit();
+      if (!kit.issueCard) return t.skip('no issuing simulation available');
+      const cardId = await kit.issueCard(10_000);
+      await kit.provider.closeCard(cardId);
+      await assert.rejects(kit.provider.enableCard(cardId), isProviderError('INVALID_STATE'));
+    });
+
+    it('getCardStatus reports the provider truth through the enable/disable/close lifecycle (RM2, D47)', async (t) => {
+      const kit = await makeKit();
+      if (!kit.issueCard) return t.skip('no issuing simulation available');
+      const cardId = await kit.issueCard(10_000);
+      assert.equal((await kit.provider.getCardStatus(cardId)).status, 'ACTIVE');
+      await kit.provider.disableCard(cardId);
+      assert.equal((await kit.provider.getCardStatus(cardId)).status, 'INACTIVE');
+      await kit.provider.enableCard(cardId);
+      assert.equal((await kit.provider.getCardStatus(cardId)).status, 'ACTIVE');
+      await kit.provider.closeCard(cardId);
+      assert.equal((await kit.provider.getCardStatus(cardId)).status, 'CLOSED');
+    });
+
+    it('THE SECURITY PROPERTY: a revoked wallet token is reported REVOKED and a fresh token for the same card is a genuinely different id (RM2, D47)', async (t) => {
+      const kit = await makeKit();
+      if (!kit.issueCard) return t.skip('no issuing simulation available');
+      if (!kit.provider.capabilities.walletProvisioning) {
+        return t.skip('provider does not declare walletProvisioning');
+      }
+      const cardId = await kit.issueCard(10_000);
+
+      const session1 = await kit.provider.createWalletProvisioningSession({
+        idempotencyKey: `wallet-provision:v1:contract-${randomUUID()}`,
+        providerCardId: cardId,
+        walletType: 'APPLE_PAY',
+      });
+      assert.equal(session1.walletType, 'APPLE_PAY');
+      assert.ok(session1.providerReference.length > 0);
+      assert.equal(
+        (await kit.provider.getWalletToken(session1.providerReference)).status,
+        'ACTIVE',
+      );
+
+      await kit.provider.revokeWalletToken(session1.providerReference);
+      assert.equal(
+        (await kit.provider.getWalletToken(session1.providerReference)).status,
+        'REVOKED',
+        'a revoked token must be reported REVOKED, not silently dropped or left ACTIVE',
+      );
+
+      // The actual security property: a fresh provisioning session for the SAME card is a
+      // genuinely different token id — the old, revoked one is never reused or reactivated.
+      const session2 = await kit.provider.createWalletProvisioningSession({
+        idempotencyKey: `wallet-provision:v1:contract-${randomUUID()}`,
+        providerCardId: cardId,
+        walletType: 'APPLE_PAY',
+      });
+      assert.notEqual(session2.providerReference, session1.providerReference);
+      const tokens = await kit.provider.listWalletTokens(cardId);
+      assert.equal(tokens.length, 2);
+      assert.equal(
+        tokens.find((token) => token.providerTokenId === session1.providerReference)?.status,
+        'REVOKED',
+      );
+      assert.equal(
+        tokens.find((token) => token.providerTokenId === session2.providerReference)?.status,
+        'ACTIVE',
+      );
+    });
+
+    it('createWalletProvisioningSession on a non-ACTIVE card is INVALID_STATE (RM2, D47)', async (t) => {
+      const kit = await makeKit();
+      if (!kit.issueCard) return t.skip('no issuing simulation available');
+      if (!kit.provider.capabilities.walletProvisioning) {
+        return t.skip('provider does not declare walletProvisioning');
+      }
+      const cardId = await kit.issueCard(10_000);
+      await kit.provider.disableCard(cardId);
+      await assert.rejects(
+        kit.provider.createWalletProvisioningSession({
+          idempotencyKey: `wallet-provision:v1:contract-${randomUUID()}`,
+          providerCardId: cardId,
+          walletType: 'APPLE_PAY',
+        }),
+        isProviderError('INVALID_STATE'),
+      );
     });
   });
 }

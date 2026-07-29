@@ -202,6 +202,54 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
     assert.equal(vink.funded, vink.required);
   });
 
+  it('ENG9 #14: two DIFFERENT participants contributing genuinely concurrently cannot double-fund or corrupt the D5 resolver', async () => {
+    // Unlike the "double-taps" test above (one participant racing itself), this races two
+    // different participants against each other for the vink's own row lock — the scenario
+    // that actually decides FUNDED (D5's single resolver runs once, from whichever request
+    // legitimately observes the vink fully funded first).
+    const { vinkId } = await createOpenVink();
+    const [a, b] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: `/api/v1/vinks/${vinkId}/contributions/authorize`,
+        headers: authed('memberA'),
+        payload: {},
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/api/v1/vinks/${vinkId}/contributions/authorize`,
+        headers: authed('memberB'),
+        payload: {},
+      }),
+    ]);
+    assert.equal(a.statusCode, 200);
+    assert.equal(b.statusCode, 200);
+
+    const contributionRows =
+      await db.sql`SELECT id, status FROM contributions WHERE vink_id = ${vinkId}`;
+    assert.equal(
+      contributionRows.length,
+      2,
+      'exactly one contribution per participant, no duplicates',
+    );
+    assert.deepEqual(contributionRows.map((row) => row.status).sort(), ['CAPTURED', 'CAPTURED']);
+
+    const vinkRow = await db.sql`SELECT state, funded_amount_minor::int AS funded,
+      required_amount_minor::int AS required FROM vinks WHERE id = ${vinkId}`;
+    const vink = vinkRow[0] as { state: string; funded: number; required: number };
+    assert.equal(vink.state, 'FUNDED');
+    assert.equal(vink.funded, vink.required, 'funded amount is exactly required — no overfund');
+
+    // The D5 resolver runs exactly once: exactly one VinkFunded event, not zero (resolver
+    // never fired) and not two (resolver raced itself and fired twice).
+    const fundedEvents = await db.sql`SELECT count(*)::int AS n FROM outbox_events
+      WHERE aggregate_id = ${vinkId} AND event_type = 'VinkFunded'`;
+    assert.equal((fundedEvents[0] as { n: number }).n, 1);
+
+    const totals = await ledgerTotals(contributionRows.map((row) => row.id as string));
+    assert.equal(totals.debits, totals.credits);
+  });
+
   it('decline + deadline: submissions close via sweep, grace expiry releases the hold (E2)', async () => {
     const { vinkId } = await createOpenVink({ deadlineMs: 1_200 });
     const declined = await app.inject({

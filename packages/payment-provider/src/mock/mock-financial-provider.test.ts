@@ -284,7 +284,7 @@ describe('temporary card substrate (§16–§19)', () => {
     });
     assert.equal(atm.declineReason, 'MCC_BLOCKED');
 
-    await provider.freezeCard(cardId);
+    await provider.disableCard(cardId);
     const frozen = provider.simulateMerchantAuthorization({
       providerCardId: cardId,
       amount: usd(1_000),

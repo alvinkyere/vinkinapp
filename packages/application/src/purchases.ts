@@ -35,6 +35,7 @@ import {
 import { ApplicationError } from './errors.ts';
 import type { PublicCommandContext } from './ports.ts';
 import { applyVinkTransition } from './support/transition.ts';
+import { logCommand } from './support/command-logging.ts';
 
 /** Cash-like MCCs are always blocked on the temporary card (§3.2/§36). */
 const BLOCKED_MCCS = ['6010', '6011', '6012', '7995'] as const;
@@ -161,6 +162,11 @@ export async function provisionCardCommand(
   if (outcome.kind === 'FAILED') {
     throw new ApplicationError('INVALID_COMMAND', `card issuance failed: ${outcome.message}`);
   }
+  logCommand(ctx.logger, 'provisionCard', {
+    correlationId: ctx.correlationId,
+    actor: 'system',
+    vinkId: input.vinkId,
+  });
   return outcome.card;
 }
 
@@ -178,7 +184,7 @@ export async function authorizeMerchantPurchaseCommand(
   ctx: PurchaseCommandContext,
   input: MerchantAuthorizationRequest,
 ): Promise<MerchantAuthorizationResult> {
-  return ctx.uow.run(async (tx) => {
+  const result = await ctx.uow.run(async (tx): Promise<MerchantAuthorizationResult> => {
     const vink = await tx.getVinkForUpdate(input.vinkId);
     if (vink === null)
       throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
@@ -267,6 +273,15 @@ export async function authorizeMerchantPurchaseCommand(
     });
     return { outcome: 'APPROVED', authorization: approved, vinkState: authorized.state };
   });
+  ctx.metrics?.recordAuthorizationOutcome(result.outcome);
+  logCommand(ctx.logger, 'authorizeMerchantPurchase', {
+    correlationId: ctx.correlationId,
+    actor: 'system',
+    vinkId: input.vinkId,
+    outcome: result.outcome,
+    providerAuthorizationId: input.providerAuthorizationId,
+  });
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +320,12 @@ export async function reverseAuthorizationCommand(
       referenceId: vink.id,
       entries: reserveReleasePosting(authorization.approvedAmount ?? money(0)).entries,
     });
+    logCommand(ctx.logger, 'reverseAuthorization', {
+      correlationId: ctx.correlationId,
+      actor: 'system',
+      vinkId: vink.id,
+      authorizationId: input.authorizationId,
+    });
     return reversed;
   });
 }
@@ -322,7 +343,7 @@ export async function settlePurchaseCommand(
   ctx: PurchaseCommandContext,
   input: { vinkId: VinkId; authorizationId: string; settledAmountMinor: number },
 ): Promise<SettlementResult> {
-  return ctx.uow.run(async (tx) => {
+  const result = await ctx.uow.run(async (tx) => {
     const vink = await tx.getVinkForUpdate(input.vinkId);
     if (vink === null)
       throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
@@ -422,4 +443,12 @@ export async function settlePurchaseCommand(
     );
     return { settlement, vinkState: completed.state };
   });
+  logCommand(ctx.logger, 'settlePurchase', {
+    correlationId: ctx.correlationId,
+    actor: 'system',
+    vinkId: input.vinkId,
+    authorizationId: input.authorizationId,
+    settlementStatus: result.settlement.status,
+  });
+  return result;
 }

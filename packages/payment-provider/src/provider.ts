@@ -6,9 +6,11 @@ import type {
   CaptureContributionInput,
   CaptureResult,
   CardResult,
+  CardStatusResult,
   CardholderResult,
   CreateCardholderInput,
   CreateCustomerInput,
+  CreateWalletProvisioningSessionInput,
   CustomerResult,
   IssueTemporaryCardInput,
   ParseWebhookInput,
@@ -21,6 +23,8 @@ import type {
   SetupPaymentMethodInput,
   SetupPaymentMethodResult,
   UpdateCardControlsInput,
+  WalletProvisioningPayload,
+  WalletTokenResult,
 } from './types.ts';
 
 /**
@@ -59,8 +63,27 @@ export interface FinancialProvider {
   createCardholder(input: CreateCardholderInput): Promise<CardholderResult>;
   issueTemporaryCard(input: IssueTemporaryCardInput): Promise<CardResult>;
   updateCardControls(input: UpdateCardControlsInput): Promise<void>;
-  freezeCard(cardId: string): Promise<void>;
+  /** RM2 (D47) — the reusable card pool's disabled-by-default default state needs a real
+   * inverse of the disable call, which never existed before this slice. */
+  enableCard(cardId: string): Promise<void>;
+  /** Renamed from `freezeCard` (RM2, D47) — same real Stripe call
+   * (`status: 'inactive'`), same only-real-caller (the conformance suite), renamed for
+   * symmetry with `enableCard` and to match D47's own "disabled by default" vocabulary. */
+  disableCard(cardId: string): Promise<void>;
   closeCard(cardId: string): Promise<void>;
+  /** RM2 (D47) — reconciliation and pool-return code needs to confirm the provider's own
+   * truth about a card's status, not just trust VinkIn's local row. */
+  getCardStatus(cardId: string): Promise<CardStatusResult>;
+
+  /** RM2 (D47) — see `walletProvisioning` capability's own doc comment; gated the same way
+   * every other optional capability is (§21, D7) — `NOT_SUPPORTED` when the provider hasn't
+   * proven this against a real sandbox, never a silent emulation. */
+  createWalletProvisioningSession(
+    input: CreateWalletProvisioningSessionInput,
+  ): Promise<WalletProvisioningPayload>;
+  revokeWalletToken(providerTokenId: string): Promise<void>;
+  getWalletToken(providerTokenId: string): Promise<WalletTokenResult>;
+  listWalletTokens(providerCardId: string): Promise<WalletTokenResult[]>;
 
   retrievePaymentStatus(providerPaymentId: string): Promise<ProviderPaymentStatus>;
   retrieveCardTransaction(providerTransactionId: string): Promise<ProviderCardTransaction>;

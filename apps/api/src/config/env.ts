@@ -179,12 +179,22 @@ const envSchema = z.object({
    * in every environment, regardless of this flag — the credential format is the guard, not
    * the environment name. */
   VINKIN_STRIPE_WEBHOOKS_ENABLED: z.enum(['0', '1']).default('0'),
+  /** ENG7 ("Observability and auditability") — a release identifier attached to every log
+   * line (Pino `base` binding, `app.ts`/`observability/logger.ts`) and Sentry event
+   * (`observability/sentry.ts`), so a specific deployed build can be identified in logs and
+   * error reports without cross-referencing a deploy timestamp. Resolution order: an explicit
+   * override, then Railway's own auto-injected commit SHA (the actual hosting platform since
+   * ENG4 — real, not guessed), then `'unknown'` for local development, where neither exists. */
+  RELEASE_VERSION: z.string().default('unknown'),
 });
 
 export type Env = z.infer<typeof envSchema>;
 
 export function loadEnv(source: Record<string, string | undefined> = process.env): Env {
-  const env = envSchema.parse(source);
+  const env = envSchema.parse({
+    ...source,
+    RELEASE_VERSION: source.RELEASE_VERSION ?? source.RAILWAY_GIT_COMMIT_SHA ?? 'unknown',
+  });
   if (
     (env.VINKIN_ENV === 'production' || env.VINKIN_ENV === 'staging') &&
     env.JWT_SECRET === DEV_JWT_SECRET

@@ -74,6 +74,9 @@ const MESSAGE_TYPE: Record<DomainEventName, ClientMessageType> = {
   ParticipantInvited: 'participant_joined',
   ParticipantInviteAccepted: 'participant_joined',
   ParticipantInviteDeclined: 'participant_updated',
+  // RM1 (D47) — the card-phase timeout exit, same shape as TemporaryCardFailed: no listed
+  // Plan §14 message type, additive fallback.
+  CardWindowExpired: 'vink_state_changed',
 };
 
 export function clientMessageType(eventType: DomainEventName): ClientMessageType {

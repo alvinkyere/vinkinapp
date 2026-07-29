@@ -34,6 +34,7 @@ import { PostgresVinkStore } from '../vinks/store.ts';
 import { getVinkDetail, insertAuditEntry, listAuditLog, searchVinks } from './store.ts';
 import { getFunnelSummary } from './analytics.ts';
 import { toCommandLogger } from '../../observability/command-logger.ts';
+import { toCommandMetrics } from '../../observability/command-metrics.ts';
 import { withProviderLogging } from '../../observability/provider-logging.ts';
 import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
 import { tagActiveSpan } from '../../observability/tracing.ts';
@@ -111,6 +112,7 @@ export function registerOpsRoutes(
       correlationId,
       provider: withProviderLogging(provider, correlationId, logger, metrics),
       logger,
+      metrics: toCommandMetrics(metrics),
     };
   }
 
@@ -222,6 +224,7 @@ export function registerOpsRoutes(
         operatorName: operator.operatorName,
         action: 'MERCHANT_AUTHORIZATION',
         vinkId,
+        correlationId: String(request.id),
         details: {
           outcome: result.outcome,
           amountMinor: body.amountMinor,
@@ -258,6 +261,7 @@ export function registerOpsRoutes(
         operatorName: operator.operatorName,
         action: 'CAPTURE',
         vinkId: body.vinkId,
+        correlationId: String(request.id),
         details: {
           settlementStatus: result.settlement.status,
           settledAmountMinor: body.settledAmountMinor,
