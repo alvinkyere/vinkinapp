@@ -60,7 +60,7 @@ dependencies:
   # error) and no mechanism for the app to know its own running version at all — no existing
   # zero-dependency way to cover either without raw platform-channel code, so both are new,
   # narrowly-scoped dependencies rather than a build-it-ourselves shim.
-  connectivity_plus: ^7.3.0
+  connectivity_plus: ^7.3.1
   package_info_plus: ^9.0.1
 
   # ENG3 Slice 4 ("deterministic deep-link routing"): a custom URL scheme (vinkin://), not
