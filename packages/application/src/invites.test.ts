@@ -68,7 +68,8 @@ describe('acceptInviteCommand (Invites feature, D44)', () => {
       { uow: store, clock: { now: () => NOW }, correlationId: 'test', provider },
       { vinkId, requester: { kind: 'user', userId: 'user-a' } },
     );
-    assert.equal(result.contribution.status, 'AUTHORIZED');
+    // RM3A: captured immediately, same as any other successful authorization.
+    assert.equal(result.contribution.status, 'CAPTURED');
   });
 
   it('rejects a wrong actor (not the invitee) with FORBIDDEN', async () => {

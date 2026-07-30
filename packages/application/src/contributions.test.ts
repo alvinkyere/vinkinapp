@@ -8,6 +8,7 @@ import type { CommandContext } from './ports.ts';
 import {
   addParticipantCommand,
   createVinkCommand,
+  DEFAULT_OPEN_DURATION_SECONDS,
   openVinkCommand,
   setSplitCommand,
 } from './commands.ts';
@@ -21,8 +22,17 @@ import {
 
 const ORGANIZER = 'organizer-user' as UserId;
 const NOW = new Date('2026-07-18T10:00:00Z');
-const DEADLINE = '2026-07-18T12:00:00Z'; // grace deadline = +60s
+// RM4A (D47): `openVinkCommand` now recomputes the deadline at open time using the real
+// default (`DEFAULT_OPEN_DURATION_SECONDS`) — this literal is no longer honored (kept only
+// because `createVinkCommand` still accepts an explicit value; `fixture()` below passes it,
+// harmlessly overwritten the moment `openVinkCommand` runs).
+const DEADLINE = '2026-07-18T12:00:00Z';
 const AFTER_DEADLINE = new Date('2026-07-18T12:00:30Z');
+// RM4A (D47): 30s into the 60s processing-grace window that starts after the REAL,
+// open-time-computed deadline — needed by the one test below that specifically exercises the
+// "deadline passed but grace hasn't" WAITING branch. `AFTER_DEADLINE` (deliberately far past
+// everything) is still correct for every other test, which only needs "past everything."
+const WITHIN_GRACE = new Date(NOW.getTime() + DEFAULT_OPEN_DURATION_SECONDS * 1000 + 30_000);
 const AFTER_GRACE = new Date('2026-07-18T12:01:30Z');
 
 interface Fixture {
@@ -94,14 +104,20 @@ const isAppError = (code: string) => (error: unknown) =>
   error instanceof ApplicationError && error.code === code;
 
 describe('mock contribution flow (Plan PV5)', () => {
-  it('funds the vink when the last authorization arrives: capture + balanced ledger + FUNDED', async () => {
+  it('RM3A: captures immediately on the FIRST authorization (not batched until funded), then funds on the last: balanced ledger + FUNDED', async () => {
     const f = await fixture();
     const first = await authorizeContributionCommand(f.ctx, {
       vinkId: f.vinkId,
       requester: f.memberA,
     });
-    assert.equal(first.contribution.status, 'AUTHORIZED');
+    // RM3A: capture happens on THIS contribution's own authorization, immediately — the vink
+    // is still OPEN (nobody else has paid) but this money is already captured.
+    assert.equal(first.contribution.status, 'CAPTURED');
     assert.equal(first.vinkState, 'OPEN');
+    assert.equal(f.store.ledgerPostings.length, 2, 'the first contribution posts immediately');
+    const { debits: firstDebits, credits: firstCredits } = ledgerTotals(f.store);
+    assert.equal(firstDebits, firstCredits);
+    assert.equal(firstDebits, 12_000); // 6000 capture + 6000 funding move
 
     const second = await authorizeContributionCommand(f.ctx, {
       vinkId: f.vinkId,
@@ -124,6 +140,7 @@ describe('mock contribution flow (Plan PV5)', () => {
 
     const eventTypes = f.store.outbox.map((event) => event.eventType);
     for (const expected of [
+      'ContributionCaptureInitiated', // RM3A: the new capture-immediately edge, fired twice
       'SubmissionsClosed',
       'ProcessingGraceStarted',
       'ContributionCaptured',
@@ -147,7 +164,8 @@ describe('mock contribution flow (Plan PV5)', () => {
       vinkId: f.vinkId,
       requester: f.memberA,
     });
-    assert.equal(retried.contribution.status, 'AUTHORIZED');
+    // RM3A: captured immediately, same as any other successful authorization.
+    assert.equal(retried.contribution.status, 'CAPTURED');
     assert.equal(retried.contribution.attemptNumber, 2);
     assert.notEqual(retried.contribution.idempotencyKey, declined.contribution.idempotencyKey);
   });
@@ -183,7 +201,7 @@ describe('mock contribution flow (Plan PV5)', () => {
     await authorizeContributionCommand(f.ctx, { vinkId: f.vinkId, requester: f.memberB });
 
     // Deadline passes with one contribution still pending → grace waits, no decision yet.
-    const outcome = await closeSubmissionsCommand(f.ctx, { vinkId: f.vinkId, now: AFTER_DEADLINE });
+    const outcome = await closeSubmissionsCommand(f.ctx, { vinkId: f.vinkId, now: WITHIN_GRACE });
     assert.equal(outcome, 'WAITING');
     assert.equal((await f.store.getVink(f.vinkId))?.state, 'PROCESSING_GRACE');
 
@@ -192,37 +210,60 @@ describe('mock contribution flow (Plan PV5)', () => {
     await resolveContributionCommand(f.ctx, {
       contributionId: delayed.contribution.id,
       vinkId: f.vinkId,
-      now: AFTER_DEADLINE,
+      now: WITHIN_GRACE,
     });
     const vink = await f.store.getVink(f.vinkId);
     assert.equal(vink?.state, 'FUNDED');
     assert.equal(vink?.fundedAmount.amountMinor, 12_000);
   });
 
-  it('grace expiry with an unresolved contribution: EXPIRED, every hold released', async () => {
+  it('RM3A: grace expiry with one contribution still pending and one already captured — the pending hold is cancelled, the captured money is REFUNDED (via REFUNDS_PENDING), vink lands EXPIRED', async () => {
     const f = await fixture();
     await authorizeContributionCommand(f.ctx, {
       vinkId: f.vinkId,
       requester: f.memberA,
       scenario: 'DELAYED',
     });
+    // RM3A: member B's contribution captures immediately — real money moves before the vink
+    // ever knows whether the whole session will fund.
     const ok = await authorizeContributionCommand(f.ctx, {
       vinkId: f.vinkId,
       requester: f.memberB,
     });
+    assert.equal(ok.contribution.status, 'CAPTURED');
 
-    await closeSubmissionsCommand(f.ctx, { vinkId: f.vinkId, now: AFTER_DEADLINE });
-    const outcome = await resolveGraceCommand(f.ctx, { vinkId: f.vinkId, now: AFTER_GRACE });
-    assert.equal(outcome, 'EXPIRED');
+    // RM4A (D47): with the 7-minute default, `AFTER_DEADLINE`/`AFTER_GRACE` (fixture-era
+    // constants, minutes/hours apart) are now both well past the real (much shorter) deadline
+    // — `closeSubmissionsCommand` itself resolves the outcome in one shot (deadlineReached is
+    // already true by the time it runs); `resolveGraceCommand` afterward is correctly a safe
+    // no-op (`NOT_DUE`), the same "idempotent, whichever call actually gets there first"
+    // shape this codebase's own sweep design already guarantees (Plan §10).
+    const closeOutcome = await closeSubmissionsCommand(f.ctx, {
+      vinkId: f.vinkId,
+      now: AFTER_DEADLINE,
+    });
+    const graceOutcome = await resolveGraceCommand(f.ctx, { vinkId: f.vinkId, now: AFTER_GRACE });
+    assert.ok(
+      closeOutcome === 'EXPIRED' || graceOutcome === 'EXPIRED',
+      `expected one of the two sweep calls to resolve EXPIRED, got close=${closeOutcome} grace=${graceOutcome}`,
+    );
     assert.equal((await f.store.getVink(f.vinkId))?.state, 'EXPIRED');
+    // Passed through REFUNDS_PENDING on its way to EXPIRED — real, audited, not skipped.
+    const history = f.store.history.filter((row) => row.vinkId === f.vinkId);
+    assert.ok(history.some((row) => row.toState === 'REFUNDS_PENDING'));
 
     const statuses = [...f.store.contributions.values()].map((row) => row.status);
-    assert.deepEqual(statuses.sort(), ['CANCELLED', 'CANCELLED']);
-    // The authorized hold was released at the provider too.
+    assert.deepEqual(statuses.sort(), ['CANCELLED', 'REFUNDED']);
+    // The never-captured hold (member A) was released at the provider; the captured
+    // contribution (member B) was genuinely refunded, not merely cancelled.
     const status = await f.provider.retrievePaymentStatus(ok.contribution.providerReference!);
-    assert.equal(status.status, 'CANCELED');
-    // No money moved: nothing was captured, so nothing was posted.
-    assert.equal(f.store.ledgerPostings.length, 0);
+    assert.equal(status.status, 'REFUNDED');
+    // Money DID move (capture + funding-move + refund-reversal) and nets to zero — this is
+    // the exact scenario the pre-RM3A hold model could never produce, since nothing was ever
+    // captured before everyone funded.
+    assert.equal(f.store.ledgerPostings.length, 3);
+    const { debits, credits } = ledgerTotals(f.store);
+    assert.equal(debits, credits);
   });
 
   it('lost response (E5): RESOLUTION_PENDING, then the same key replays without a duplicate', async () => {
@@ -239,12 +280,14 @@ describe('mock contribution flow (Plan PV5)', () => {
       contributionId: lost.contribution.id,
       vinkId: f.vinkId,
     });
-    assert.equal(resolved.status, 'AUTHORIZED');
-    // Exactly one authorization happened at the provider for this participant.
-    const authorizedEvents = f.provider
-      .drainEvents()
-      .filter((event) => event.type === 'payment.authorized');
-    assert.equal(authorizedEvents.length, 1);
+    // RM3A: the resolver captures immediately once it learns the authorization actually
+    // succeeded — the same capture-immediately treatment as the direct-authorize path.
+    assert.equal(resolved.status, 'CAPTURED');
+    // Exactly one authorization AND one capture happened at the provider for this
+    // participant — the resolver's replay didn't duplicate either side effect.
+    const events = f.provider.drainEvents();
+    assert.equal(events.filter((event) => event.type === 'payment.authorized').length, 1);
+    assert.equal(events.filter((event) => event.type === 'payment.captured').length, 1);
   });
 
   it('locks split/cover/remove once a live contribution exists', async () => {

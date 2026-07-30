@@ -341,6 +341,16 @@ export class InMemoryVinkStore implements VinkTx, VinkReader, UnitOfWork {
     return null;
   }
 
+  /** RM3B (D47) — VinkReader's own unlocked counterparts, aliasing the VinkTx methods below
+   * (the in-memory double has no real lock semantics to distinguish). */
+  async getCardAssignmentForVinkRead(vinkId: VinkId): Promise<CardAssignment | null> {
+    return this.getCardAssignmentForVink(vinkId);
+  }
+
+  async getCardRead(id: CardId): Promise<Card | null> {
+    return this.getCard(id);
+  }
+
   async updateCard(card: TemporaryCard): Promise<void> {
     this.cards.set(card.id, card);
   }

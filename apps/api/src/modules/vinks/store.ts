@@ -142,7 +142,8 @@ function rowToPurchaseAuthorization(row: Row): PurchaseAuthorization {
   return {
     id: row.id as PurchaseAuthorization['id'],
     vinkId: row.vink_id as VinkId,
-    temporaryCardId: row.temporary_card_id as PurchaseAuthorization['temporaryCardId'],
+    temporaryCardId: (row.temporary_card_id ?? null) as PurchaseAuthorization['temporaryCardId'],
+    cardAssignmentId: (row.card_assignment_id ?? null) as PurchaseAuthorization['cardAssignmentId'],
     providerAuthorizationId: (row.provider_authorization_id ?? null) as string | null,
     merchantName: row.merchant_name as string,
     merchantIdentifier: row.merchant_identifier as string,
@@ -637,11 +638,12 @@ class PostgresVinkTx implements VinkTx {
 
   async insertPurchaseAuthorization(authorization: PurchaseAuthorization): Promise<void> {
     await this.#sql`INSERT INTO purchase_authorizations (
-      id, vink_id, temporary_card_id, provider_authorization_id, merchant_name,
-      merchant_identifier, mcc, requested_amount_minor, approved_amount_minor, status,
-      created_at, updated_at
+      id, vink_id, temporary_card_id, card_assignment_id, provider_authorization_id,
+      merchant_name, merchant_identifier, mcc, requested_amount_minor, approved_amount_minor,
+      status, created_at, updated_at
     ) VALUES (
       ${authorization.id}, ${authorization.vinkId}, ${authorization.temporaryCardId},
+      ${authorization.cardAssignmentId},
       ${authorization.providerAuthorizationId}, ${authorization.merchantName},
       ${authorization.merchantIdentifier}, ${authorization.mcc},
       ${authorization.requestedAmount.amountMinor}, ${authorization.approvedAmount?.amountMinor ?? null},
@@ -815,6 +817,18 @@ export class PostgresVinkStore implements UnitOfWork, VinkReader {
     const rows = await this.#sql`SELECT * FROM temporary_cards
       WHERE vink_id = ${vinkId} AND status <> 'FAILED'`;
     return rows.length === 0 ? null : rowToCard(rows[0] as Row);
+  }
+
+  /** RM3B (D47) — unlocked read-model counterparts to `PostgresVinkTx`'s own locked
+   * `getCardAssignmentForVink`/`getCard`, for `getVinkSnapshot`'s dual-path `CardView`. */
+  async getCardAssignmentForVinkRead(vinkId: VinkId): Promise<CardAssignment | null> {
+    const rows = await this.#sql`SELECT * FROM card_assignments WHERE vink_id = ${vinkId}`;
+    return rows.length === 0 ? null : rowToCardAssignment(rows[0] as Row);
+  }
+
+  async getCardRead(id: CardId): Promise<Card | null> {
+    const rows = await this.#sql`SELECT * FROM cards WHERE id = ${id}`;
+    return rows.length === 0 ? null : rowToCardPool(rows[0] as Row);
   }
 
   async listRecoveryObligations(vinkId: VinkId): Promise<RecoveryObligation[]> {

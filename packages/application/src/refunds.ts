@@ -7,6 +7,12 @@
  * explicit, observable state the retry-refund job (and the ops console) act on (E8).
  * D12/D13 throughout; the vink stays EXPIRED (contribution-level cleanup, doc 03). Provider
  * calls happen inside the unit of work — ratified for the mock build as D15.
+ *
+ * RM3A (D47): `refundOne` is exported so `contributions.ts`'s `resolveFunding` failure branch
+ * can reuse it directly — that branch runs BEFORE the vink reaches a terminal state (it drives
+ * the vink through REFUNDS_PENDING itself), so it deliberately does not go through
+ * `refundFailedSessionCommand`'s own `vink.state === 'EXPIRED'` precondition. `refundOne` never
+ * had that precondition itself; only its wrapper did.
  */
 
 import {
@@ -17,6 +23,7 @@ import {
 import { contributionRefundPosting } from '../../ledger/src/index.ts';
 import type { Contribution, ContributionId, VinkId } from '../../domain/src/index.ts';
 import { ApplicationError } from './errors.ts';
+import { applyVinkTransition } from './support/transition.ts';
 import type { PublicCommandContext, VinkTx } from './ports.ts';
 import { applyContributionTransition } from './support/contribution-transition.ts';
 import { logCommand } from './support/command-logging.ts';
@@ -25,7 +32,7 @@ export interface RefundCommandContext extends PublicCommandContext {
   provider: FinancialProvider;
 }
 
-async function refundOne(
+export async function refundOne(
   tx: VinkTx,
   ctx: RefundCommandContext,
   contribution: Contribution,
@@ -160,5 +167,50 @@ export async function retryRefundCommand(
       status: result.status,
     });
     return result;
+  });
+}
+
+export type RefundRecoveryOutcome = 'RESOLVED' | 'STILL_PENDING' | 'NOT_DUE';
+
+/**
+ * RM3A (D47) sweep job body: a `REFUND_RECOVERY_REQUIRED` vink resolves to EXPIRED once every
+ * one of its contributions is out of `REFUND_FAILED` and `RESOLUTION_PENDING` — i.e. every
+ * refund attempt has either succeeded or the contribution's true provider state is now known.
+ * Mirrors `closeSubmissionsCommand`'s own vink-row-locked, deadline-job shape
+ * (`contributions.ts`); `retryRefundCommand` above (sweep-triggered per contribution) is what
+ * actually moves a `REFUND_FAILED` row forward — this command only checks whether every row has
+ * settled and, if so, fires the vink-level transition.
+ */
+export async function resolveRefundRecoveryCommand(
+  ctx: RefundCommandContext,
+  input: { vinkId: VinkId },
+): Promise<RefundRecoveryOutcome> {
+  return ctx.uow.run(async (tx) => {
+    const vink = await tx.getVinkForUpdate(input.vinkId);
+    if (vink === null)
+      throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
+    if (vink.state !== 'REFUND_RECOVERY_REQUIRED') return 'NOT_DUE';
+
+    const contributions = await tx.listContributionsForUpdate(vink.id);
+    const stillOutstanding = contributions.some(
+      (row) => row.status === 'REFUND_FAILED' || row.status === 'RESOLUTION_PENDING',
+    );
+    if (stillOutstanding) return 'STILL_PENDING';
+
+    const now = ctx.clock.now();
+    await applyVinkTransition(
+      tx,
+      vink,
+      'REFUND_RECOVERY_RESOLVED',
+      'refund',
+      ctx.correlationId,
+      now,
+    );
+    logCommand(ctx.logger, 'resolveRefundRecovery', {
+      correlationId: ctx.correlationId,
+      actor: 'refund',
+      vinkId: vink.id,
+    });
+    return 'RESOLVED';
   });
 }

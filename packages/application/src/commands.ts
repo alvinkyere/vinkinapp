@@ -34,12 +34,44 @@ import { loadOwnedVink } from './support/guards.ts';
 import { newPublicCode } from './support/public-code.ts';
 import { logCommand } from './support/command-logging.ts';
 
-// ENG1 timer semantics: these match VINK_OPEN_DURATION_SECONDS/VINK_PROCESSING_GRACE_SECONDS'
-// own defaults (apps/api/src/config/env.ts) exactly — the fallback for any caller (most
-// tests, internal tooling) that doesn't thread real `ctx.timers` in, so behavior is
-// unchanged for everyone who doesn't opt into configuring it.
-const DEFAULT_OPEN_DURATION_SECONDS = 86_400;
+// RM4A (D47): these match VINK_OPEN_DURATION_SECONDS/VINK_PROCESSING_GRACE_SECONDS' own
+// defaults (apps/api/src/config/env.ts) exactly — the fallback for any caller (most tests,
+// internal tooling) that doesn't thread real `ctx.timers` in, so behavior is unchanged for
+// everyone who doesn't opt into configuring it. Two sources of truth for the SAME value
+// (packages/application can't depend on apps/api) — apps/api/src/config/env.test.ts asserts
+// they match, so a future edit to only one side fails loudly instead of silently diverging.
+// Exported (not just module-private) specifically so apps/api/src/config/env.test.ts can
+// assert this matches VINK_OPEN_DURATION_SECONDS' own default — the guard against the two
+// literals silently diverging again.
+export const DEFAULT_OPEN_DURATION_SECONDS = 420; // RM4A (D47): 7-min Vink lifetime, was 86_400 (24h)
 const DEFAULT_PROCESSING_GRACE_SECONDS = 60;
+
+/** RM4A (D47): the one place `submissionDeadline`/`processingGraceDeadline` get computed —
+ * shared by `createVinkCommand`, `configureVinkCommand` (only when the caller supplies an
+ * explicit new deadline), and `openVinkCommand` (always, unconditionally — D47's beta model
+ * has no organizer-configurable duration, so open-time is authoritative regardless of
+ * whatever was set at DRAFT creation). */
+function computeVinkDeadlines(
+  now: Date,
+  timers: CommandContext['timers'],
+  explicitSubmissionDeadline?: string,
+): { submissionDeadline: string; processingGraceDeadline: string } {
+  const openDurationSeconds = timers?.openDurationSeconds ?? DEFAULT_OPEN_DURATION_SECONDS;
+  const processingGraceSeconds = timers?.processingGraceSeconds ?? DEFAULT_PROCESSING_GRACE_SECONDS;
+  const deadline =
+    explicitSubmissionDeadline !== undefined
+      ? new Date(explicitSubmissionDeadline)
+      : new Date(now.getTime() + openDurationSeconds * 1000);
+  if (Number.isNaN(deadline.getTime()) || deadline.getTime() <= now.getTime()) {
+    throw new ApplicationError('INVALID_COMMAND', 'submissionDeadline must be in the future');
+  }
+  return {
+    submissionDeadline: deadline.toISOString(),
+    processingGraceDeadline: new Date(
+      deadline.getTime() + processingGraceSeconds * 1000,
+    ).toISOString(),
+  };
+}
 
 export interface VinkWithParticipants {
   vink: Vink;
@@ -128,16 +160,11 @@ export async function createVinkCommand(
   const tip = money(input.tipMinor);
   const required = money(subtotal.amountMinor + tip.amountMinor);
   const now = ctx.clock.now();
-  const openDurationSeconds = ctx.timers?.openDurationSeconds ?? DEFAULT_OPEN_DURATION_SECONDS;
-  const processingGraceSeconds =
-    ctx.timers?.processingGraceSeconds ?? DEFAULT_PROCESSING_GRACE_SECONDS;
-  const deadline =
-    input.submissionDeadline !== undefined
-      ? new Date(input.submissionDeadline)
-      : new Date(now.getTime() + openDurationSeconds * 1000);
-  if (Number.isNaN(deadline.getTime()) || deadline.getTime() <= now.getTime()) {
-    throw new ApplicationError('INVALID_COMMAND', 'submissionDeadline must be in the future');
-  }
+  const { submissionDeadline, processingGraceDeadline } = computeVinkDeadlines(
+    now,
+    ctx.timers,
+    input.submissionDeadline,
+  );
   // A caller that doesn't care about replay protection (internal tooling, most tests) still
   // gets a key so every row satisfies the NOT NULL/unique constraint — a fresh random one
   // never collides, so it behaves exactly like "always insert," same as before this existed.
@@ -157,10 +184,8 @@ export async function createVinkCommand(
     requiredAmount: required,
     fundedAmount: money(0),
     state: 'DRAFT',
-    submissionDeadline: deadline.toISOString(),
-    processingGraceDeadline: new Date(
-      deadline.getTime() + processingGraceSeconds * 1000,
-    ).toISOString(),
+    submissionDeadline,
+    processingGraceDeadline,
     merchantLockStatus: 'UNLOCKED',
     version: 1,
     creationIdempotencyKey,
@@ -278,15 +303,9 @@ export async function configureVinkCommand(
     let submissionDeadline = vink.submissionDeadline;
     let processingGraceDeadline = vink.processingGraceDeadline;
     if (input.submissionDeadline !== undefined) {
-      const deadline = new Date(input.submissionDeadline);
-      if (Number.isNaN(deadline.getTime()) || deadline.getTime() <= now.getTime()) {
-        throw new ApplicationError('INVALID_COMMAND', 'submissionDeadline must be in the future');
-      }
-      submissionDeadline = deadline.toISOString();
-      processingGraceDeadline = new Date(
-        deadline.getTime() +
-          (ctx.timers?.processingGraceSeconds ?? DEFAULT_PROCESSING_GRACE_SECONDS) * 1000,
-      ).toISOString();
+      const computed = computeVinkDeadlines(now, ctx.timers, input.submissionDeadline);
+      submissionDeadline = computed.submissionDeadline;
+      processingGraceDeadline = computed.processingGraceDeadline;
     }
     const updated: Vink = {
       ...vink,
@@ -332,6 +351,15 @@ export async function addParticipantCommand(
         'INVALID_COMMAND',
         `participants cannot be added in ${vink.state}`,
       );
+    }
+    // RM4A (D47): consistent deadline enforcement — mirrors `guest.ts`'s own `isJoinable`
+    // check, which already enforced this directly rather than trusting the sweep. DRAFT is
+    // unaffected (the deadline only governs the OPEN window).
+    if (
+      vink.state === 'OPEN' &&
+      ctx.clock.now().getTime() >= new Date(vink.submissionDeadline).getTime()
+    ) {
+      throw new ApplicationError('INVALID_COMMAND', 'the submission deadline has passed');
     }
     const existing = activeParticipants(await tx.listParticipants(vink.id));
     if (existing.some((participant) => participant.userId === input.userId)) {
@@ -609,13 +637,21 @@ export async function openVinkCommand(
         `allocations must equal the required amount before opening (${remaining.amountMinor} unallocated)`,
       );
     }
+    // RM4A (D47): the deadline is recomputed HERE, unconditionally, not left anchored at
+    // whatever DRAFT creation happened to compute — every second spent setting up the vink
+    // (the 5-step wizard, adding participants, allocating splits) must not burn into the
+    // window before the vink is ever actually OPEN. D47's beta model has no organizer-
+    // configurable duration, so open-time is simply authoritative.
+    const now = ctx.clock.now();
+    const { submissionDeadline, processingGraceDeadline } = computeVinkDeadlines(now, ctx.timers);
+    const retimed: Vink = { ...vink, submissionDeadline, processingGraceDeadline };
     const opened = await applyVinkTransition(
       tx,
-      vink,
+      retimed,
       'VINK_OPENED',
       ctx.actorUserId,
       ctx.correlationId,
-      ctx.clock.now(),
+      now,
     );
     // Slice I4 (D19/D27) — the actual "automatic delivery fires at VINK_OPENED" trigger, for
     // every member added while the vink was still DRAFT (never dispatched earlier — see

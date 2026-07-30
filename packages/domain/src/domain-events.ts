@@ -58,6 +58,14 @@ export type ExtensionEventName =
   // submission_deadline (SUBMISSION_DEADLINE_REACHED) is the other half. Reuses the existing
   // CARD_READY -> FUNDING_REVERSAL -> EXPIRED exit path (same shape as CARD_PROVISIONING_
   // FAILED), since an unused card is the same "wind down and refund" outcome either way.
-  | 'CardWindowExpired';
+  | 'CardWindowExpired'
+  // RM3A (D47): capture-immediately funding engine. ContributionCaptureInitiated is a second,
+  // distinct event into CAPTURE_PENDING (see contribution-state-machine.ts's own doc comment)
+  // — kept apart from the existing ContributionCaptureStarted, which stays scoped to the
+  // legacy/compat SESSION_FUNDED path. VinkRefundsPending/VinkRefundRecoveryRequired are the
+  // two new non-terminal Vink states between PROCESSING_GRACE and EXPIRED.
+  | 'ContributionCaptureInitiated'
+  | 'VinkRefundsPending'
+  | 'VinkRefundRecoveryRequired';
 
 export type DomainEventName = PlanCoreEventName | ExtensionEventName;

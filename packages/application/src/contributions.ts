@@ -1,8 +1,23 @@
 /**
- * Mock contribution engine (PV5). Every financial transition: one unit of work, vink row
- * lock first (Plan §11 lock list), domain-decided transition + outbox event (D12), typed
- * errors. The provider is reached ONLY through the neutral FinancialProvider interface —
- * scenario differences ride on the mock's payment-method tokens, never on provider types.
+ * Contribution + funding engine (PV5, rebuilt RM3A/D47). Every financial transition: one unit
+ * of work, vink row lock first (Plan §11 lock list), domain-decided transition + outbox event
+ * (D12), typed errors. The provider is reached ONLY through the neutral FinancialProvider
+ * interface — scenario differences ride on the mock's payment-method tokens, never on
+ * provider types.
+ *
+ * RM3A (D47): capture happens IMMEDIATELY, per contribution, the moment it authorizes
+ * (`captureImmediately`, called from `authorizeContributionCommand`) — not batched once
+ * everyone's authorized, as PV5 originally built it. `resolveFunding`'s "everyone funded"
+ * branch is now a pure aggregate check over already-`CAPTURED` rows; its failure branch
+ * refunds already-captured money (via `refunds.ts`'s exported `refundOne`) rather than
+ * merely cancelling holds, since capture-immediately means holds mostly don't exist by the
+ * time expiry is decided. `resolveAgainstProviderTruth` is shared between the standalone E5
+ * resolver (`resolveContributionCommand`) and `resolveFunding`'s own failure branch — a
+ * RESOLUTION_PENDING contribution can now originate from a CAPTURE-side ambiguity
+ * (`CAPTURE_RESULT_UNKNOWN`), not just an authorize-side one, so it is never blindly cancelled
+ * — provider truth is checked first. A live contribution still found `AUTHORIZED` (impossible
+ * via the new path, but possible for data predating this deploy) is caught up via the
+ * ORIGINAL, unchanged `SESSION_FUNDED`-driven capture logic — the compatibility shim.
  *
  * D5 single-resolver rule: `resolveFunding` is the only code that fires
  * FUNDING_CONFIRMED / FUNDING_FAILED. Both the fast path (last authorization arrives) and
@@ -11,7 +26,10 @@
  * D15 (ratified): provider calls happen inside the unit of work. The mock is in-process and
  * cannot fail independently of the transaction, so this is safe today; the two-phase
  * pattern a REAL adapter needs depends on that provider's own idempotency/webhook
- * semantics and is designed at the M0 gate's close, not guessed at now.
+ * semantics and is designed at the M0 gate's close, not guessed at now. A non-retryable
+ * provider error during `captureImmediately` propagates and rolls back this transaction —
+ * the same accepted risk posture as any other provider call in this file, not a new gap
+ * RM3A introduces.
  */
 
 import {
@@ -34,6 +52,7 @@ import {
 } from '../../payment-provider/src/index.ts';
 import { contributionCapturePosting, sessionFundingPosting } from '../../ledger/src/index.ts';
 import { ApplicationError } from './errors.ts';
+import { refundOne } from './refunds.ts';
 import type { PublicCommandContext, VinkTx } from './ports.ts';
 import { applyVinkTransition } from './support/transition.ts';
 import { applyContributionTransition } from './support/contribution-transition.ts';
@@ -58,7 +77,12 @@ export interface ContributionCommandContext extends PublicCommandContext {
   provider: FinancialProvider;
 }
 
-export type FundingOutcome = 'FUNDED' | 'EXPIRED' | 'WAITING' | 'NOT_DUE';
+export type FundingOutcome =
+  | 'FUNDED'
+  | 'EXPIRED'
+  | 'REFUND_RECOVERY_REQUIRED' // RM3A (D47): a refund failed, or a contribution's status is still unknown
+  | 'WAITING'
+  | 'NOT_DUE';
 
 function requesterActor(requester: ContributionRequester): string {
   return requester.kind === 'user' ? requester.userId : `guest:${requester.guestIdentityId}`;
@@ -107,6 +131,70 @@ async function providerIdsFor(
   return { providerCustomerId, providerMethodId };
 }
 
+/** RM3A (D47): AUTHORIZED -> CAPTURE_PENDING -> CAPTURED (or RESOLUTION_PENDING on a
+ * genuinely ambiguous/retryable provider outcome) — the core of the capture-immediately
+ * funding engine. Same two ledger postings this codebase has always inserted at capture time
+ * (`resolveFunding` used to insert them once everyone funded; now inserted here, per
+ * contribution, immediately). See this file's own module doc comment for the non-retryable
+ * error posture (D15). */
+async function captureImmediately(
+  tx: VinkTx,
+  ctx: ContributionCommandContext,
+  contribution: Contribution,
+  actor: string,
+  now: Date,
+): Promise<Contribution> {
+  const amount = contribution.authorizedAmount ?? money(0);
+  const current = await applyContributionTransition(
+    tx,
+    contribution,
+    'CAPTURE_INITIATED',
+    actor,
+    ctx.correlationId,
+    now,
+  );
+  try {
+    await ctx.provider.captureContribution({
+      idempotencyKey: operationId.capture(contribution.participantId, contribution.attemptNumber),
+      providerPaymentId: contribution.providerReference ?? '',
+      amount,
+    });
+  } catch (error) {
+    if (error instanceof ProviderError && error.retryable) {
+      // Genuinely ambiguous (e.g. UNKNOWN_OUTCOME): don't assume either way (§12).
+      return applyContributionTransition(
+        tx,
+        current,
+        'CAPTURE_RESULT_UNKNOWN',
+        actor,
+        ctx.correlationId,
+        now,
+      );
+    }
+    throw error;
+  }
+  const captured = await applyContributionTransition(
+    tx,
+    current,
+    'CAPTURE_SUCCEEDED',
+    actor,
+    ctx.correlationId,
+    now,
+    { capturedAmount: amount },
+  );
+  await tx.insertLedgerPosting({
+    referenceType: 'contribution',
+    referenceId: captured.id,
+    entries: contributionCapturePosting(amount).entries,
+  });
+  await tx.insertLedgerPosting({
+    referenceType: 'contribution',
+    referenceId: captured.id,
+    entries: sessionFundingPosting(amount).entries,
+  });
+  return captured;
+}
+
 // ---------------------------------------------------------------------------
 // AuthorizeContributionCommand
 // ---------------------------------------------------------------------------
@@ -138,6 +226,12 @@ export async function authorizeContributionCommand(
         'INVALID_COMMAND',
         `contributions are accepted only while OPEN (state: ${vink.state})`,
       );
+    }
+    // RM4A (D47): consistent deadline enforcement — mirrors `guest.ts`'s own `isJoinable`
+    // check (and `addParticipantCommand`'s matching one) rather than trusting the sweep
+    // (10s cadence) to have already flipped state off OPEN by the time this lands.
+    if (ctx.clock.now().getTime() >= new Date(vink.submissionDeadline).getTime()) {
+      throw new ApplicationError('INVALID_COMMAND', 'the submission deadline has passed');
     }
     const participants = await tx.listParticipants(vink.id);
     const participant = findOwnParticipant(participants, input.requester);
@@ -218,6 +312,9 @@ export async function authorizeContributionCommand(
           now,
           { authorizedAmount: amount, providerReference: result.providerPaymentId },
         );
+        // RM3A (D47): capture immediately, on this contribution's own authorization — do not
+        // wait for the whole session to fund. See this file's own module doc comment.
+        contribution = await captureImmediately(tx, ctx, contribution, actor, now);
         const outcome = await maybeCloseAndResolve(tx, ctx, vink, now);
         // The fast path may have captured this contribution — return its current row.
         const current =
@@ -276,7 +373,9 @@ export async function authorizeContributionCommand(
 // The D5 resolver and its entry points
 // ---------------------------------------------------------------------------
 
-/** Fast path: if everything is authorized while OPEN, close submissions and resolve now. */
+/** Fast path: if everyone's contribution is already CAPTURED (RM3A — capture happens
+ * immediately, on each contribution's own authorization) while OPEN, close submissions and
+ * resolve now. */
 async function maybeCloseAndResolve(
   tx: VinkTx,
   ctx: ContributionCommandContext,
@@ -286,16 +385,21 @@ async function maybeCloseAndResolve(
   if (vink.state !== 'OPEN') return { vinkState: vink.state };
   const participants = fundingParticipants(await tx.listParticipants(vink.id));
   const contributions = await tx.listContributionsForUpdate(vink.id);
-  const authorized = contributions.filter((row) => row.status === 'AUTHORIZED');
-  const everyoneAuthorized =
+  const captured = contributions.filter((row) => row.status === 'CAPTURED');
+  const everyoneCaptured =
     participants.length > 0 &&
     participants.every((participant) =>
-      authorized.some((row) => row.participantId === participant.id),
+      captured.some((row) => row.participantId === participant.id),
     );
-  if (!everyoneAuthorized) return { vinkState: vink.state };
-  const authorizedSum = sumMoney(authorized.map((row) => row.authorizedAmount ?? money(0)));
-  if (compareMoney(authorizedSum, vink.requiredAmount) !== 0) return { vinkState: vink.state };
+  if (!everyoneCaptured) return { vinkState: vink.state };
+  const capturedSum = sumMoney(captured.map((row) => row.capturedAmount ?? money(0)));
+  if (compareMoney(capturedSum, vink.requiredAmount) !== 0) return { vinkState: vink.state };
 
+  // RM3A: the VinkEvent name ALL_CONTRIBUTIONS_AUTHORIZED is now slightly stale (everyone is
+  // CAPTURED by this point, not merely authorized) — left unrenamed deliberately, to avoid
+  // rippling a Vink-state-machine event-name change through client-contracts/analytics for a
+  // purely cosmetic fix; the domain event it actually emits, SubmissionsClosed, was already
+  // accurate and is unaffected.
   let current = await applyVinkTransition(
     tx,
     vink,
@@ -334,66 +438,80 @@ async function resolveFunding(
     );
   }
   const participants = fundingParticipants(await tx.listParticipants(vink.id));
-  const contributions = await tx.listContributionsForUpdate(vink.id);
-  const live = contributions.filter(isLive);
-  const authorized = live.filter((row) => row.status === 'AUTHORIZED');
+  let contributions = await tx.listContributionsForUpdate(vink.id);
+  let live = contributions.filter(isLive);
+
+  // RM3A (D47) compatibility shim: a contribution predating the capture-immediately engine
+  // can still be sitting at AUTHORIZED (an uncaptured hold) — impossible via the new
+  // `authorizeContributionCommand` path, but must not crash on data that predates this
+  // deploy. Caught up with the EXACT capture logic this codebase ran before RM3A, unchanged.
+  const legacyHolds = live.filter((row) => row.status === 'AUTHORIZED');
+  for (const row of legacyHolds) {
+    const amount = row.authorizedAmount ?? money(0);
+    const participant = participants.find((p) => p.id === row.participantId);
+    if (participant !== undefined) {
+      assertWithinApprovedMaximum(amount, participant.maximumApprovedAmount, 'capture');
+    }
+    let current = await applyContributionTransition(
+      tx,
+      row,
+      'SESSION_FUNDED',
+      'resolver',
+      ctx.correlationId,
+      now,
+    );
+    await ctx.provider.captureContribution({
+      idempotencyKey: operationId.capture(row.participantId, row.attemptNumber),
+      providerPaymentId: row.providerReference ?? '',
+      amount,
+    });
+    current = await applyContributionTransition(
+      tx,
+      current,
+      'CAPTURE_SUCCEEDED',
+      'resolver',
+      ctx.correlationId,
+      now,
+      { capturedAmount: amount },
+    );
+    await tx.insertLedgerPosting({
+      referenceType: 'contribution',
+      referenceId: current.id,
+      entries: contributionCapturePosting(amount).entries,
+    });
+    await tx.insertLedgerPosting({
+      referenceType: 'contribution',
+      referenceId: current.id,
+      entries: sessionFundingPosting(amount).entries,
+    });
+  }
+  if (legacyHolds.length > 0) {
+    contributions = await tx.listContributionsForUpdate(vink.id);
+    live = contributions.filter(isLive);
+  }
+
+  const captured = live.filter((row) => row.status === 'CAPTURED');
   const unresolved = live.filter(
     (row) => row.status === 'AUTHORIZATION_PENDING' || row.status === 'RESOLUTION_PENDING',
   );
 
-  const everyoneAuthorized =
+  const everyoneCaptured =
     participants.length > 0 &&
     participants.every((participant) =>
-      authorized.some((row) => row.participantId === participant.id),
+      captured.some((row) => row.participantId === participant.id),
     ) &&
     compareMoney(
-      sumMoney(authorized.map((row) => row.authorizedAmount ?? money(0))),
+      sumMoney(captured.map((row) => row.capturedAmount ?? money(0))),
       vink.requiredAmount,
     ) === 0;
 
-  if (everyoneAuthorized) {
-    let fundedTotal = 0;
-    for (const row of authorized) {
-      const amount = row.authorizedAmount ?? money(0);
-      // §4.7 final guard before any capture.
-      const participant = participants.find((p) => p.id === row.participantId);
-      if (participant !== undefined) {
-        assertWithinApprovedMaximum(amount, participant.maximumApprovedAmount, 'capture');
-      }
-      let current = await applyContributionTransition(
-        tx,
-        row,
-        'SESSION_FUNDED',
-        'resolver',
-        ctx.correlationId,
-        now,
-      );
-      await ctx.provider.captureContribution({
-        idempotencyKey: operationId.capture(row.participantId, row.attemptNumber),
-        providerPaymentId: row.providerReference ?? '',
-        amount,
-      });
-      current = await applyContributionTransition(
-        tx,
-        current,
-        'CAPTURE_SUCCEEDED',
-        'resolver',
-        ctx.correlationId,
-        now,
-        { capturedAmount: amount },
-      );
-      await tx.insertLedgerPosting({
-        referenceType: 'contribution',
-        referenceId: current.id,
-        entries: contributionCapturePosting(amount).entries,
-      });
-      await tx.insertLedgerPosting({
-        referenceType: 'contribution',
-        referenceId: current.id,
-        entries: sessionFundingPosting(amount).entries,
-      });
-      fundedTotal += amount.amountMinor;
-    }
+  if (everyoneCaptured) {
+    // RM3A: capture already happened, per contribution, at authorization time
+    // (`captureImmediately`) — this is now a pure aggregate read, not a capture loop.
+    const fundedTotal = captured.reduce(
+      (sum, row) => sum + (row.capturedAmount?.amountMinor ?? 0),
+      0,
+    );
     const funded: Vink = { ...vink, fundedAmount: money(fundedTotal) };
     const final = await applyVinkTransition(
       tx,
@@ -410,50 +528,11 @@ async function resolveFunding(
     return { outcome: 'WAITING', vink };
   }
 
-  // Funding failed: release every hold; unknowns are cancelled at the provider.
-  for (const row of live) {
-    if (row.status === 'AUTHORIZED') {
-      const current = await applyContributionTransition(
-        tx,
-        row,
-        'SESSION_EXPIRED',
-        'resolver',
-        ctx.correlationId,
-        now,
-      );
-      await cancelAtProvider(ctx.provider, current);
-      await applyContributionTransition(
-        tx,
-        current,
-        'CANCELLATION_SUCCEEDED',
-        'resolver',
-        ctx.correlationId,
-        now,
-      );
-    } else if (row.status === 'AUTHORIZATION_PENDING' || row.status === 'RESOLUTION_PENDING') {
-      let current = row;
-      if (current.status === 'AUTHORIZATION_PENDING') {
-        current = await applyContributionTransition(
-          tx,
-          current,
-          'AUTHORIZATION_TIMED_OUT',
-          'resolver',
-          ctx.correlationId,
-          now,
-        );
-      }
-      await cancelAtProvider(ctx.provider, current);
-      await applyContributionTransition(
-        tx,
-        current,
-        'RESOLVED_CANCELLED',
-        'resolver',
-        ctx.correlationId,
-        now,
-      );
-    }
-  }
-  const final = await applyVinkTransition(
+  // Funding failed. RM3A: capture-immediately means some contributions may already hold real
+  // captured money that must be REFUNDED, not merely cancelled — see this file's own module
+  // doc comment and the Vink state machine's own header comment for why this routes through
+  // REFUNDS_PENDING (a new non-terminal state) rather than straight to EXPIRED.
+  let current = await applyVinkTransition(
     tx,
     vink,
     'FUNDING_FAILED',
@@ -461,7 +540,99 @@ async function resolveFunding(
     ctx.correlationId,
     now,
   );
-  return { outcome: 'EXPIRED', vink: final };
+  let anyRefundFailed = false;
+  let anyStillAmbiguous = false;
+  for (const row of live) {
+    if (row.status === 'CAPTURED') {
+      const result = await refundOne(tx, ctx, row, false, now);
+      if (result.status !== 'REFUNDED') anyRefundFailed = true;
+    } else if (row.status === 'AUTHORIZED') {
+      // Compatibility-only in principle (see the shim above) — a race could still leave one
+      // here between the shim's read and this loop; same cancel logic either way.
+      const cancelling = await applyContributionTransition(
+        tx,
+        row,
+        'SESSION_EXPIRED',
+        'resolver',
+        ctx.correlationId,
+        now,
+      );
+      await cancelAtProvider(ctx.provider, cancelling);
+      await applyContributionTransition(
+        tx,
+        cancelling,
+        'CANCELLATION_SUCCEEDED',
+        'resolver',
+        ctx.correlationId,
+        now,
+      );
+    } else if (row.status === 'AUTHORIZATION_PENDING') {
+      // Capture structurally cannot have happened before authorize resolves — safe to time
+      // out and cancel, unchanged from the pre-RM3A behavior.
+      const timedOut = await applyContributionTransition(
+        tx,
+        row,
+        'AUTHORIZATION_TIMED_OUT',
+        'resolver',
+        ctx.correlationId,
+        now,
+      );
+      await cancelAtProvider(ctx.provider, timedOut);
+      await applyContributionTransition(
+        tx,
+        timedOut,
+        'RESOLVED_CANCELLED',
+        'resolver',
+        ctx.correlationId,
+        now,
+      );
+    } else if (row.status === 'RESOLUTION_PENDING') {
+      // RM3A: this status can now originate from a CAPTURE-side ambiguity
+      // (CAPTURE_RESULT_UNKNOWN), not just an authorize-side one — money may genuinely
+      // already be captured. Check provider truth before deciding cancel vs. refund, instead
+      // of blindly cancelling (which used to be safe only because nothing could have been
+      // captured yet).
+      const resolved = await resolveAgainstProviderTruth(tx, ctx, row, now);
+      if (resolved.status === 'CAPTURED') {
+        const result = await refundOne(tx, ctx, resolved, false, now);
+        if (result.status !== 'REFUNDED') anyRefundFailed = true;
+      } else if (resolved.status === 'AUTHORIZED') {
+        const cancelling = await applyContributionTransition(
+          tx,
+          resolved,
+          'SESSION_EXPIRED',
+          'resolver',
+          ctx.correlationId,
+          now,
+        );
+        await cancelAtProvider(ctx.provider, cancelling);
+        await applyContributionTransition(
+          tx,
+          cancelling,
+          'CANCELLATION_SUCCEEDED',
+          'resolver',
+          ctx.correlationId,
+          now,
+        );
+      } else if (resolved.status === 'RESOLUTION_PENDING') {
+        // Still genuinely unknown (provider still PROCESSING) — leave it; the sweep keeps
+        // trying, and this vink cannot be declared cleanly resolved yet.
+        anyStillAmbiguous = true;
+      }
+      // DECLINED/CANCELLED: already a safe terminal outcome, nothing further to do.
+    }
+  }
+
+  const needsRecovery = anyRefundFailed || anyStillAmbiguous;
+  current = await applyVinkTransition(
+    tx,
+    current,
+    needsRecovery ? 'REFUND_RECOVERY_NEEDED' : 'REFUNDS_COMPLETED',
+    'resolver',
+    ctx.correlationId,
+    now,
+  );
+  return { outcome: needsRecovery ? 'REFUND_RECOVERY_REQUIRED' : 'EXPIRED', vink: current };
 }
 
 async function cancelAtProvider(
@@ -479,6 +650,139 @@ async function cancelAtProvider(
     // Already terminal at the provider (declined/expired/canceled) — the release is moot.
     if (!(error instanceof ProviderError && error.code === 'INVALID_STATE')) throw error;
   }
+}
+
+/**
+ * RM3A (D47): the shared core of provider-truth resolution — used both by the standalone E5
+ * resolver (`resolveContributionCommand`, which additionally decides whether to re-enter
+ * `maybeCloseAndResolve`/`resolveFunding` afterward) and inline by `resolveFunding`'s own
+ * failure branch (which does NOT re-enter the resolver — it's already deciding the terminal
+ * outcome). Also closes a previously-latent gap: a provider status of CAPTURED had no branch
+ * here before RM3A and was silently ignored.
+ */
+async function resolveAgainstProviderTruth(
+  tx: VinkTx,
+  ctx: ContributionCommandContext,
+  contribution: Contribution,
+  now: Date,
+  scenario: ContributionScenario = 'SUCCESS',
+): Promise<Contribution> {
+  let providerReference = contribution.providerReference;
+  if (providerReference === null) {
+    // Lost response (§12): replay the ORIGINAL operation with the same idempotency key — the
+    // provider returns the already-executed result without a duplicate side effect.
+    const token = SCENARIO_TOKEN[scenario];
+    const ids = await providerIdsFor(ctx.provider, contribution.participantId, token);
+    const replayed = await ctx.provider.authorizeContribution({
+      idempotencyKey: operationId.authorize(contribution.participantId, contribution.attemptNumber),
+      providerCustomerId: ids.providerCustomerId,
+      providerMethodId: ids.providerMethodId,
+      amount: contribution.requestedAmount,
+      captureMode: 'MANUAL',
+      metadata: {
+        vinkId: contribution.vinkId,
+        participantId: contribution.participantId,
+        contributionId: contribution.id,
+      },
+    });
+    providerReference = replayed.providerPaymentId;
+  }
+
+  const status = await ctx.provider.retrievePaymentStatus(providerReference);
+  const fromPending = contribution.status === 'AUTHORIZATION_PENDING';
+  let resolved = contribution;
+  if (status.status === 'AUTHORIZED') {
+    resolved = await applyContributionTransition(
+      tx,
+      contribution,
+      fromPending ? 'AUTHORIZATION_APPROVED' : 'RESOLVED_AUTHORIZED',
+      'resolver',
+      ctx.correlationId,
+      now,
+      {
+        authorizedAmount: status.authorizedAmount ?? contribution.requestedAmount,
+        providerReference,
+      },
+    );
+  } else if (status.status === 'CAPTURED') {
+    // RM3A: closes a previously-latent gap (no branch existed for this status at all before).
+    const amount = status.capturedTotal ?? contribution.requestedAmount;
+    resolved = await applyContributionTransition(
+      tx,
+      contribution,
+      'RESOLVED_CAPTURED',
+      'resolver',
+      ctx.correlationId,
+      now,
+      {
+        authorizedAmount: contribution.authorizedAmount ?? amount,
+        capturedAmount: amount,
+        providerReference,
+      },
+    );
+    await tx.insertLedgerPosting({
+      referenceType: 'contribution',
+      referenceId: resolved.id,
+      entries: contributionCapturePosting(amount).entries,
+    });
+    await tx.insertLedgerPosting({
+      referenceType: 'contribution',
+      referenceId: resolved.id,
+      entries: sessionFundingPosting(amount).entries,
+    });
+  } else if (status.status === 'DECLINED') {
+    resolved = await applyContributionTransition(
+      tx,
+      contribution,
+      fromPending ? 'AUTHORIZATION_DECLINED' : 'RESOLVED_DECLINED',
+      'resolver',
+      ctx.correlationId,
+      now,
+      { providerReference },
+    );
+  } else if (status.status === 'CANCELED' || status.status === 'EXPIRED') {
+    let current = contribution;
+    if (fromPending) {
+      current = await applyContributionTransition(
+        tx,
+        current,
+        'AUTHORIZATION_TIMED_OUT',
+        'resolver',
+        ctx.correlationId,
+        now,
+        { providerReference },
+      );
+    }
+    resolved = await applyContributionTransition(
+      tx,
+      current,
+      'RESOLVED_CANCELLED',
+      'resolver',
+      ctx.correlationId,
+      now,
+    );
+  } else if (status.status === 'PROCESSING' && fromPending) {
+    const age = now.getTime() - new Date(contribution.createdAt).getTime();
+    if (age >= AUTHORIZATION_TIMEOUT_MS) {
+      resolved = await applyContributionTransition(
+        tx,
+        contribution,
+        'AUTHORIZATION_TIMED_OUT',
+        'resolver',
+        ctx.correlationId,
+        now,
+        { providerReference },
+      );
+    } else if (contribution.providerReference === null) {
+      resolved = { ...contribution, providerReference };
+      await tx.updateContribution(resolved);
+    }
+  }
+  // Any other case (still PROCESSING and not fromPending — a genuine capture-side ambiguity
+  // still unresolved; or a REFUNDED provider status, out of RM3A's own scope to unwind here —
+  // reconciliation's MISMATCHED classification is the disclosed safety net) leaves the
+  // contribution's status unchanged; callers decide what "still RESOLUTION_PENDING" means.
+  return resolved;
 }
 
 export interface DeadlineInput {
@@ -596,103 +900,31 @@ export async function resolveContributionCommand(
       return contribution; // nothing to resolve — idempotent no-op
     }
 
-    let providerReference = contribution.providerReference;
-    if (providerReference === null) {
-      // Lost response: replay the ORIGINAL operation with the same idempotency key (§12) —
-      // the provider returns the already-executed result without a duplicate side effect.
-      const token = SCENARIO_TOKEN[input.scenario ?? 'SUCCESS'];
-      const ids = await providerIdsFor(ctx.provider, contribution.participantId, token);
-      const replayed = await ctx.provider.authorizeContribution({
-        idempotencyKey: operationId.authorize(
-          contribution.participantId,
-          contribution.attemptNumber,
-        ),
-        providerCustomerId: ids.providerCustomerId,
-        providerMethodId: ids.providerMethodId,
-        amount: contribution.requestedAmount,
-        captureMode: 'MANUAL',
-        metadata: {
-          vinkId: vink.id,
-          participantId: contribution.participantId,
-          contributionId: contribution.id,
-        },
-      });
-      providerReference = replayed.providerPaymentId;
-    }
+    let resolved = await resolveAgainstProviderTruth(
+      tx,
+      ctx,
+      contribution,
+      now,
+      input.scenario ?? 'SUCCESS',
+    );
 
-    const status = await ctx.provider.retrievePaymentStatus(providerReference);
-    const fromPending = contribution.status === 'AUTHORIZATION_PENDING';
-    let resolved = contribution;
-    if (status.status === 'AUTHORIZED') {
-      resolved = await applyContributionTransition(
-        tx,
-        contribution,
-        fromPending ? 'AUTHORIZATION_APPROVED' : 'RESOLVED_AUTHORIZED',
-        'resolver',
-        ctx.correlationId,
-        now,
-        {
-          authorizedAmount: status.authorizedAmount ?? contribution.requestedAmount,
-          providerReference,
-        },
-      );
+    if (resolved.status === 'AUTHORIZED') {
+      // RM3A: capture immediately, exactly as authorizeContributionCommand does — this is a
+      // normal, ongoing resolution path (E5), not the resolveFunding compatibility shim.
+      resolved = await captureImmediately(tx, ctx, resolved, 'resolver', now);
+    }
+    if (resolved.status === 'CAPTURED') {
       if (vink.state === 'OPEN') {
         await maybeCloseAndResolve(tx, ctx, vink, now);
       } else if (vink.state === 'PROCESSING_GRACE') {
         const deadlineReached = now.getTime() >= new Date(vink.processingGraceDeadline).getTime();
         await resolveFunding(tx, ctx, vink, now, deadlineReached);
       }
-      // The resolver may have captured this contribution — return its current row.
+      // The resolver may have advanced this contribution further (e.g. refunded it, if the
+      // vink had already failed) — return its current row.
       resolved =
         (await tx.listContributionsForUpdate(vink.id)).find((row) => row.id === resolved.id) ??
         resolved;
-    } else if (status.status === 'DECLINED') {
-      resolved = await applyContributionTransition(
-        tx,
-        contribution,
-        fromPending ? 'AUTHORIZATION_DECLINED' : 'RESOLVED_DECLINED',
-        'resolver',
-        ctx.correlationId,
-        now,
-        { providerReference },
-      );
-    } else if (status.status === 'CANCELED' || status.status === 'EXPIRED') {
-      let current = contribution;
-      if (fromPending) {
-        current = await applyContributionTransition(
-          tx,
-          current,
-          'AUTHORIZATION_TIMED_OUT',
-          'resolver',
-          ctx.correlationId,
-          now,
-          { providerReference },
-        );
-      }
-      resolved = await applyContributionTransition(
-        tx,
-        current,
-        'RESOLVED_CANCELLED',
-        'resolver',
-        ctx.correlationId,
-        now,
-      );
-    } else if (status.status === 'PROCESSING' && fromPending) {
-      const age = now.getTime() - new Date(contribution.createdAt).getTime();
-      if (age >= AUTHORIZATION_TIMEOUT_MS) {
-        resolved = await applyContributionTransition(
-          tx,
-          contribution,
-          'AUTHORIZATION_TIMED_OUT',
-          'resolver',
-          ctx.correlationId,
-          now,
-          { providerReference },
-        );
-      } else if (contribution.providerReference === null) {
-        resolved = { ...contribution, providerReference };
-        await tx.updateContribution(resolved);
-      }
     }
     ctx.metrics?.recordContributionOutcome(resolved.status);
     logCommand(ctx.logger, 'resolveContribution', {

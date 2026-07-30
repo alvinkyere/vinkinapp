@@ -77,6 +77,14 @@ const MESSAGE_TYPE: Record<DomainEventName, ClientMessageType> = {
   // RM1 (D47) — the card-phase timeout exit, same shape as TemporaryCardFailed: no listed
   // Plan §14 message type, additive fallback.
   CardWindowExpired: 'vink_state_changed',
+  // RM3A (D47) — capture-immediately funding engine: no listed Plan §14 message type for any
+  // of these, additive fallback (same treatment as the other internal recovery/refund events
+  // above). ContributionCaptureInitiated reuses funding_progress_updated, matching
+  // ContributionCaptureStarted/ContributionCaptured's own mapping — a client reacts the same
+  // way regardless of which of the two capture-initiating edges fired.
+  ContributionCaptureInitiated: 'funding_progress_updated',
+  VinkRefundsPending: 'vink_state_changed',
+  VinkRefundRecoveryRequired: 'vink_state_changed',
 };
 
 export function clientMessageType(eventType: DomainEventName): ClientMessageType {

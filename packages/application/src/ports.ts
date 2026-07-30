@@ -263,6 +263,12 @@ export interface VinkReader {
   getVinkByPublicCode(publicCode: string): Promise<Vink | null>;
   listParticipants(vinkId: VinkId): Promise<Participant[]>;
   getCardByVink(vinkId: VinkId): Promise<TemporaryCard | null>;
+  /** RM3B (D47) — the card-pool read-model counterpart to `getCardByVink`, for
+   * `getVinkSnapshot`'s own dual-path `CardView` projection (the organizer's mobile Lobby).
+   * Plain (unlocked) reads — no command reads through these; commands use `VinkTx`'s own
+   * locked equivalents. */
+  getCardAssignmentForVinkRead(vinkId: VinkId): Promise<CardAssignment | null>;
+  getCardRead(id: CardId): Promise<Card | null>;
   listRecoveryObligations(vinkId: VinkId): Promise<RecoveryObligation[]>;
   /** Plain (unlocked) read — for status projections like the organizer lobby's
    * per-participant "paid / processing / waiting" view; commands use

@@ -9,6 +9,7 @@ import { buildApp } from './app.ts';
 import { createIsolatedTestDb, type IsolatedTestDb } from './testing/integration-db.ts';
 import { PostgresVinkStore } from './modules/vinks/store.ts';
 import type { VinkId } from '../../../packages/domain/src/index.ts';
+import { DEFAULT_OPEN_DURATION_SECONDS } from '../../../packages/application/src/commands.ts';
 
 const RUN = process.env.VINKIN_INTEGRATION === '1';
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
@@ -257,10 +258,12 @@ describe('vink lifecycle end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     });
     assert.equal(created.statusCode, 201);
     const deadlineMs = new Date(created.json().vink.submissionDeadline).getTime();
-    // VINK_OPEN_DURATION_SECONDS defaults to 86400 (24h) — exactly the prior hardcoded
-    // client-side behavior, now server-authoritative. A wide-but-real tolerance band, not an
-    // exact-millisecond match, since this crosses a real HTTP round trip.
-    const expectedMs = before + 86_400_000;
+    // RM4A (D47): VINK_OPEN_DURATION_SECONDS defaults to DEFAULT_OPEN_DURATION_SECONDS (7
+    // minutes as of D47, was 24h pre-RM4A) — read from the real configured default rather
+    // than a re-hardcoded literal, so this specific drift (env.ts vs commands.ts) can't recur
+    // a third time. A wide-but-real tolerance band, not an exact-millisecond match, since this
+    // crosses a real HTTP round trip.
+    const expectedMs = before + DEFAULT_OPEN_DURATION_SECONDS * 1000;
     assert.ok(
       Math.abs(deadlineMs - expectedMs) < 10_000,
       `expected deadline near ${new Date(expectedMs).toISOString()}, got ${created.json().vink.submissionDeadline}`,

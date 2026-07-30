@@ -15,6 +15,7 @@ import {
   configureVinkCommand,
   coverRemainingCommand,
   createVinkCommand,
+  DEFAULT_OPEN_DURATION_SECONDS,
   openVinkCommand,
   removeParticipantCommand,
   setSplitCommand,
@@ -120,7 +121,7 @@ describe('CreateVinkCommand', () => {
     });
   });
 
-  it('ENG1 timer semantics: an omitted submissionDeadline defaults to the fallback open duration (24h)', async () => {
+  it("RM4A (D47): an omitted submissionDeadline defaults to the fallback open duration (7 minutes, D47's own spec value — was 24h pre-RM4A)", async () => {
     const store = new InMemoryVinkStore();
     const { vink } = await createVinkCommand(ctx(store), {
       purchaseCategory: 'GROCERY',
@@ -131,10 +132,13 @@ describe('CreateVinkCommand', () => {
     });
     const now = new Date('2026-07-17T10:00:00Z').getTime();
     const deadline = new Date(vink.submissionDeadline).getTime();
+    // Read the real configured default rather than re-hardcoding the literal a second time —
+    // this is exactly the drift env.ts/commands.ts's own duplicated-literal risk (RM4A's own
+    // milestone report) could otherwise silently reintroduce a third time.
     assert.equal(
       deadline - now,
-      86_400_000,
-      'defaults to exactly 24h, unchanged from prior hardcoded behavior',
+      DEFAULT_OPEN_DURATION_SECONDS * 1000,
+      "defaults to exactly DEFAULT_OPEN_DURATION_SECONDS, unchanged from the command's own fallback",
     );
     const grace = new Date(vink.processingGraceDeadline).getTime();
     assert.equal(grace - deadline, 60_000, 'processing grace defaults to 60s (Spec §14)');

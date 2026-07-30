@@ -77,10 +77,15 @@ export function computeGuestVinkOutcome(vinkState: Vink['state']): GuestVinkOutc
     case 'SETTLING':
       return 'open';
     case 'FUNDING_REVERSAL':
+    case 'REFUNDS_PENDING':
+    case 'REFUND_RECOVERY_REQUIRED':
     case 'EXPIRED':
       // FUNDING_REVERSAL's only exit transition is to EXPIRED (deterministic,
       // vink-state-machine.ts) — safe to report the outcome it is unconditionally headed
-      // toward, not a fabricated intermediate category.
+      // toward, not a fabricated intermediate category. RM3A (D47): REFUNDS_PENDING and
+      // REFUND_RECOVERY_REQUIRED are the same shape — both states' only exits also lead to
+      // EXPIRED — so a guest sees the same 'expired' outcome while their refund is in flight,
+      // not a fabricated new intermediate category this slice's own boundary doesn't cover.
       return 'expired';
     case 'CANCELLED':
       return 'cancelled';

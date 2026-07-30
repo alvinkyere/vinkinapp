@@ -84,6 +84,7 @@ export async function getVinkDetail(sql: Sql, vinkId: string): Promise<VinkDetai
     participants,
     contributions,
     cardRows,
+    poolCardRows,
     purchaseAuthorizations,
     settlements,
     recoveryObligations,
@@ -96,6 +97,14 @@ export async function getVinkDetail(sql: Sql, vinkId: string): Promise<VinkDetai
     sql`SELECT * FROM participants WHERE vink_id = ${vinkId} ORDER BY joined_at`,
     sql`SELECT * FROM contributions WHERE vink_id = ${vinkId} ORDER BY created_at`,
     sql`SELECT * FROM temporary_cards WHERE vink_id = ${vinkId}`,
+    // RM3B (D47): the card-pool counterpart — a raw joined row (this module's own convention,
+    // per its own header comment: "read-only views... no row here is ever written except
+    // operator_audit_log"), tried only when no legacy `temporary_cards` row exists.
+    sql`SELECT ca.status AS assignment_status, ca.provisioning_status, ca.spending_limit_minor,
+               ca.merchant_lock_key, ca.reserved_at, ca.returned_at,
+               c.provider_card_id, c.display_last_four
+        FROM card_assignments ca JOIN cards c ON c.id = ca.card_id
+        WHERE ca.vink_id = ${vinkId}`,
     sql`SELECT * FROM purchase_authorizations WHERE vink_id = ${vinkId} ORDER BY created_at`,
     sql`SELECT * FROM settlements WHERE vink_id = ${vinkId} ORDER BY created_at`,
     sql`SELECT * FROM recovery_obligations WHERE vink_id = ${vinkId} ORDER BY created_at`,
@@ -135,7 +144,7 @@ export async function getVinkDetail(sql: Sql, vinkId: string): Promise<VinkDetai
           },
     participants,
     contributions,
-    card: (cardRows[0] as Row | undefined) ?? null,
+    card: (cardRows[0] as Row | undefined) ?? (poolCardRows[0] as Row | undefined) ?? null,
     purchaseAuthorizations,
     settlements,
     recoveryObligations,

@@ -192,7 +192,13 @@ export interface CardWalletToken {
 export interface PurchaseAuthorization {
   id: PurchaseAuthorizationId;
   vinkId: VinkId;
-  temporaryCardId: TemporaryCardId;
+  /** Mutually exclusive with `cardAssignmentId` (exactly one is set) — the legacy one-shot
+   * `temporary_cards` path vs. RM3B's card-pool path. Same `(a IS NULL) <> (b IS NULL)` idiom
+   * `participants.user_id`/`guest_identity_id` already uses (migration 0002). */
+  temporaryCardId: TemporaryCardId | null;
+  /** RM3B (D47) — set instead of `temporaryCardId` once a Vink is provisioned from the
+   * reusable card pool. */
+  cardAssignmentId: CardAssignmentId | null;
   providerAuthorizationId: string | null;
   merchantName: string;
   merchantIdentifier: string;

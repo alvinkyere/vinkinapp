@@ -27,8 +27,9 @@ export function correlationTargetFor(eventType: ProviderEventType): CorrelationT
       return 'purchase_authorization';
     case 'card.capture.created':
       // VinkIn's `settlements` table has no direct provider-object column — correlation is a
-      // two-hop lookup (providerCardId -> temporary_cards -> vink_id -> settlements), handled
-      // in apps/api's ReconciliationStore, not here (this map only names the TARGET kind).
+      // two-hop lookup (providerCardId -> temporary_cards OR cards/card_assignments (RM3B,
+      // D47) -> vink_id -> settlements), handled in apps/api's ReconciliationStore, not here
+      // (this map only names the TARGET kind).
       return 'settlement';
     case 'dispute.created':
       // VinkIn's domain models no disputes anywhere today (confirmed by search before writing

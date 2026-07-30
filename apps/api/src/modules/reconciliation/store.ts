@@ -103,7 +103,14 @@ async function correlatePurchaseAuthorization(
 /** Two-hop: `settlements` carries no direct provider-object column (confirmed in the migration
  * — it correlates to a purchase_authorization, not a provider id), so a card-capture event is
  * traced via its payload's `providerCardId` -> `temporary_cards` -> the vink's own most recent
- * settlement. Both hops missing is a legitimate ORPHANED result, not an error. */
+ * settlement. Both hops missing is a legitimate ORPHANED result, not an error.
+ *
+ * RM3B (D47): the live FUNDED-Vink flow provisions from the card pool now, not
+ * `temporary_cards` — left as-is here (correlateSettlement's own first hop is otherwise
+ * unchanged) with a second, parallel hop added: `cards` (the pool's long-lived card record,
+ * keyed by the same `provider_card_id`) -> its currently-ACTIVE `card_assignments` row -> the
+ * vink id. A legacy-provisioned vink's card is only ever in `temporary_cards`; a card-pool one
+ * is only ever in `cards` — tried in order, never both matching for the same card at once. */
 async function correlateSettlement(
   sql: Queryable,
   event: ProviderEvent,
@@ -115,7 +122,15 @@ async function correlateSettlement(
   const cardRows = (await sql`
     SELECT vink_id FROM temporary_cards WHERE provider_card_id = ${providerCardId}
   `) as unknown as TemporaryCardRow[];
-  const card = cardRows[0];
+  let card = cardRows[0];
+  if (card === undefined) {
+    const poolRows = (await sql`
+      SELECT ca.vink_id FROM cards c
+      JOIN card_assignments ca ON ca.card_id = c.id AND ca.status = 'ACTIVE'
+      WHERE c.provider_card_id = ${providerCardId}
+    `) as unknown as TemporaryCardRow[];
+    card = poolRows[0];
+  }
   if (card === undefined) return { targetKind, found: false };
 
   const settlementRows = (await sql`

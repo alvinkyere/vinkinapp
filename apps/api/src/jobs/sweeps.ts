@@ -11,9 +11,13 @@ import { randomUUID } from 'node:crypto';
 import { Queue, Worker } from 'bullmq';
 import {
   closeSubmissionsCommand,
-  provisionCardCommand,
+  expireCardWindowCommand,
+  provisionCardFromPoolCommand,
+  refundFailedSessionCommand,
   resolveContributionCommand,
   resolveGraceCommand,
+  resolveRefundRecoveryCommand,
+  retryRefundCommand,
   type CommandLogger,
   type ContributionCommandContext,
 } from '../../../../packages/application/src/index.ts';
@@ -34,11 +38,20 @@ const SWEEP_QUEUE = 'vink-sweeps';
 
 const NOOP_LOGGER: CommandLogger = { info: () => {}, error: () => {} };
 
+/** RM3A (D47): a REFUND_FAILED contribution isn't retried on every single tick — a simple
+ * fixed cooldown (no exponential backoff — a deliberate simplification, revisit if a real
+ * provider's rate limits demand more). */
+const REFUND_RETRY_COOLDOWN_MS = 60_000;
+
 export interface SweepResult {
   closed: number;
   graceResolved: number;
   contributionsResolved: number;
   cardsProvisioned: number;
+  refundsRetried: number;
+  refundRecoveriesResolved: number;
+  cardWindowsExpired: number;
+  failedSessionRefundsTriggered: number;
 }
 
 export async function runSweeps(
@@ -77,6 +90,10 @@ export async function runSweeps(
       graceResolved: 0,
       contributionsResolved: 0,
       cardsProvisioned: 0,
+      refundsRetried: 0,
+      refundRecoveriesResolved: 0,
+      cardWindowsExpired: 0,
+      failedSessionRefundsTriggered: 0,
     };
 
     const due = await sql`SELECT id FROM vinks
@@ -94,14 +111,16 @@ export async function runSweeps(
       result.graceResolved += 1;
     }
 
-    // FUNDED vinks with no card yet enter the card pipeline (§16). Provisioning failure moves
-    // the vink to reversal itself; the sweep just kicks it off.
+    // FUNDED vinks with no card-pool assignment yet enter the card pipeline (§16), via RM3B's
+    // card-pool provisioning — the sweep's own trigger point going forward (legacy
+    // `provisionCardCommand`/`temporary_cards` stays untouched, no longer sweep-triggered).
+    // Provisioning failure moves the vink to reversal itself; the sweep just kicks it off.
     const toProvision = await sql`SELECT v.id FROM vinks v
     WHERE v.state = 'FUNDED'
-      AND NOT EXISTS (SELECT 1 FROM temporary_cards c WHERE c.vink_id = v.id)`;
+      AND NOT EXISTS (SELECT 1 FROM card_assignments ca WHERE ca.vink_id = v.id)`;
     for (const row of toProvision) {
       try {
-        await provisionCardCommand(ctx, { vinkId: (row as { id: string }).id as VinkId });
+        await provisionCardFromPoolCommand(ctx, { vinkId: (row as { id: string }).id as VinkId });
         result.cardsProvisioned += 1;
       } catch {
         // Provisioning failure is recorded by the command (→ FUNDING_REVERSAL); keep sweeping.
@@ -113,12 +132,80 @@ export async function runSweeps(
        OR (status = 'AUTHORIZATION_PENDING' AND created_at <= ${new Date(now.getTime() - 30_000).toISOString()})`;
     for (const row of stuck) {
       const typed = row as { id: string; vink_id: string };
-      await resolveContributionCommand(ctx, {
-        contributionId: typed.id as ContributionId,
-        vinkId: typed.vink_id as VinkId,
-        now,
+      try {
+        await resolveContributionCommand(ctx, {
+          contributionId: typed.id as ContributionId,
+          vinkId: typed.vink_id as VinkId,
+          now,
+        });
+        result.contributionsResolved += 1;
+      } catch {
+        // RM3A: one stuck contribution's own resolution attempt (which may now involve a
+        // real capture-side provider call, not just an authorize-side one) must not abort
+        // the rest of this sweep tick — same defensive shape as provisionCardCommand above.
+      }
+    }
+
+    // RM3A (D47): auto-retry every REFUND_FAILED contribution (E8's own retry-refund job,
+    // never sweep-triggered before this) with a simple fixed cooldown.
+    const refundsDue = await sql`SELECT id, vink_id FROM contributions
+    WHERE status = 'REFUND_FAILED'
+      AND updated_at <= ${new Date(now.getTime() - REFUND_RETRY_COOLDOWN_MS).toISOString()}`;
+    for (const row of refundsDue) {
+      const typed = row as { id: string; vink_id: string };
+      try {
+        await retryRefundCommand(ctx, {
+          contributionId: typed.id as ContributionId,
+          vinkId: typed.vink_id as VinkId,
+        });
+        result.refundsRetried += 1;
+      } catch {
+        // Keep sweeping — the next tick (or an operator, via the ops console) tries again.
+      }
+    }
+
+    // RM3A (D47): a REFUND_RECOVERY_REQUIRED vink resolves to EXPIRED once every one of its
+    // contributions is out of REFUND_FAILED/RESOLUTION_PENDING.
+    const recoveryDue = await sql`SELECT id FROM vinks WHERE state = 'REFUND_RECOVERY_REQUIRED'`;
+    for (const row of recoveryDue) {
+      const outcome = await resolveRefundRecoveryCommand(ctx, {
+        vinkId: (row as { id: string }).id as VinkId,
       });
-      result.contributionsResolved += 1;
+      if (outcome === 'RESOLVED') result.refundRecoveriesResolved += 1;
+    }
+
+    // RM4A (D47): the 10-minute card usage window's own sweep trigger — RM1's
+    // `CARD_WINDOW_EXPIRED` transition, real and tested since RM1, fired for the first time.
+    const cardWindowsDue = await sql`SELECT v.id FROM vinks v
+    JOIN card_assignments ca ON ca.vink_id = v.id AND ca.status = 'ACTIVE'
+    WHERE v.state = 'CARD_READY' AND ca.usage_window_expires_at <= ${now.toISOString()}`;
+    for (const row of cardWindowsDue) {
+      try {
+        await expireCardWindowCommand(ctx, { vinkId: (row as { id: string }).id as VinkId });
+        result.cardWindowsExpired += 1;
+      } catch {
+        // Failure is recorded by the command itself where possible; keep sweeping.
+      }
+    }
+
+    // RM4A (D47): the refund auto-chain, fixed generically rather than scoped to the new
+    // card-window path alone — an EXPIRED vink reached via FUNDING_REVERSAL_COMPLETED (either
+    // this new card-window-expiry path, or the pre-existing card-provisioning-failure path,
+    // RM3B, which has had this exact gap since before RM4A) still has CAPTURED contributions
+    // nobody ever refunded. A vink reached via RM3A's own REFUNDS_PENDING path never has a
+    // remaining CAPTURED row by construction, so this clause only ever fires for the
+    // FUNDING_REVERSAL exit — `refundFailedSessionCommand` is already idempotent (a no-op on
+    // a vink with nothing CAPTURED left to refund).
+    const unrefundedExpired = await sql`SELECT DISTINCT v.id FROM vinks v
+    JOIN contributions c ON c.vink_id = v.id AND c.status = 'CAPTURED'
+    WHERE v.state = 'EXPIRED'`;
+    for (const row of unrefundedExpired) {
+      try {
+        await refundFailedSessionCommand(ctx, { vinkId: (row as { id: string }).id as VinkId });
+        result.failedSessionRefundsTriggered += 1;
+      } catch {
+        // Keep sweeping — the next tick tries again.
+      }
     }
 
     logger.info('sweep_end', { correlationId, ...result });

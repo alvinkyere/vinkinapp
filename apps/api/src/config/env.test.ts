@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEV_JWT_SECRET, loadEnv } from './env.ts';
+import { DEFAULT_OPEN_DURATION_SECONDS } from '../../../../packages/application/src/commands.ts';
 
 describe('environment configuration', () => {
   it('applies development defaults to an empty environment', () => {
@@ -8,6 +9,10 @@ describe('environment configuration', () => {
     assert.equal(env.VINKIN_ENV, 'development');
     assert.equal(env.PORT, 3000);
     assert.equal(env.JWT_SECRET, DEV_JWT_SECRET);
+  });
+
+  it("RM4A (D47): VINK_OPEN_DURATION_SECONDS default matches packages/application/src/commands.ts own DEFAULT_OPEN_DURATION_SECONDS — the two copies (application can't depend on apps/api) must never silently diverge", () => {
+    assert.equal(loadEnv({}).VINK_OPEN_DURATION_SECONDS, DEFAULT_OPEN_DURATION_SECONDS);
   });
 
   it('coerces PORT and rejects invalid values', () => {

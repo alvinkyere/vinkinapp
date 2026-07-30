@@ -258,9 +258,19 @@ describe('D24/D25 guest contributionStatus and vinkOutcome (Slice I1)', () => {
       requester: f.requesterX,
       scenario: 'DELAYED', // stays AUTHORIZATION_PENDING through the deadline
     });
-    await closeSubmissionsCommand(f.ctx, { vinkId: f.vinkId, now: AFTER_DEADLINE });
-    const outcome = await resolveGraceCommand(f.ctx, { vinkId: f.vinkId, now: AFTER_GRACE });
-    assert.equal(outcome, 'EXPIRED');
+    // RM4A (D47): with the shorter default deadline, `closeSubmissionsCommand` itself may
+    // already resolve the outcome in one shot (see the identical note in
+    // contributions.test.ts) — `resolveGraceCommand` afterward is correctly a safe no-op in
+    // that case.
+    const closeOutcome = await closeSubmissionsCommand(f.ctx, {
+      vinkId: f.vinkId,
+      now: AFTER_DEADLINE,
+    });
+    const graceOutcome = await resolveGraceCommand(f.ctx, { vinkId: f.vinkId, now: AFTER_GRACE });
+    assert.ok(
+      closeOutcome === 'EXPIRED' || graceOutcome === 'EXPIRED',
+      `expected one of the two sweep calls to resolve EXPIRED, got close=${closeOutcome} grace=${graceOutcome}`,
+    );
 
     const viewX = unwrap(await getGuestVinkView(f.store, f.tokenX, NOW));
     const viewY = unwrap(await getGuestVinkView(f.store, f.tokenY, NOW));

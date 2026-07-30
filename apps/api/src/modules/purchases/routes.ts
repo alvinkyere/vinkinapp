@@ -44,6 +44,9 @@ const merchantSchema = z.object({
     .regex(/^\d{4}$/)
     .default('5411'),
   amountMinor: z.number().int().positive(),
+  // RM3B (D47) — only meaningful on the card-pool path (ignored on a legacy vink); lets tests
+  // drive both the correct-token and stale/wrong-token cases against the real decision engine.
+  presentedWalletToken: z.string().optional(),
 });
 
 function mapError(error: unknown): { status: number; body: Record<string, unknown> } | null {
@@ -122,12 +125,23 @@ export function registerPurchaseRoutes(
     const { vinkId } = vinkIdParams.parse(request.params);
     const body = merchantSchema.parse(request.body ?? {});
     return handle(reply, 201, async () => {
-      const card = await store.getCardByVink(vinkId as VinkId);
-      if (card === null) throw new ApplicationError('PARTICIPANT_NOT_FOUND', 'no card to charge');
+      // RM3B (D47): dual-path lookup — a card-pool assignment takes priority; a legacy
+      // in-flight vink falls back to the untouched, unlocked `temporary_cards` reader.
+      const poolCardProviderId = await store.run(async (tx) => {
+        const assignment = await tx.getCardAssignmentForVink(vinkId as VinkId);
+        if (assignment === null) return null;
+        const card = await tx.getCard(assignment.cardId);
+        return card?.providerCardId ?? null;
+      });
+      const providerCardId =
+        poolCardProviderId ?? (await store.getCardByVink(vinkId as VinkId))?.providerCardId ?? null;
+      if (providerCardId === null) {
+        throw new ApplicationError('PARTICIPANT_NOT_FOUND', 'no card to charge');
+      }
       let providerAuthorizationId = `ext_auth_${Date.now()}`;
       if (provider instanceof MockFinancialProvider) {
         const outcome = provider.simulateMerchantAuthorization({
-          providerCardId: card.providerCardId,
+          providerCardId,
           amount: { amountMinor: body.amountMinor, currency: 'USD' },
           merchantId: body.merchantIdentifier,
           merchantName: body.merchantName,
@@ -145,6 +159,7 @@ export function registerPurchaseRoutes(
         merchantIdentifier: body.merchantIdentifier,
         mcc: body.mcc,
         amountMinor: body.amountMinor,
+        presentedWalletToken: body.presentedWalletToken,
       });
       return {
         outcome: result.outcome,

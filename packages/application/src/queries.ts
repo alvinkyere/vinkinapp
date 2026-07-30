@@ -157,7 +157,11 @@ export async function getVinkSnapshot(
   const vink = await loadOwnedVinkForRead(reader, vinkId, actorUserId);
   const participants = await reader.listParticipants(vinkId);
   const active = participants.filter((participant) => participant.status !== 'REMOVED');
-  const card = await reader.getCardByVink(vinkId);
+  // RM3B (D47): dual-path — a card-pool assignment (if any) takes priority; a legacy
+  // in-flight vink falls back to the untouched `getCardByVink` lookup.
+  const assignment = await reader.getCardAssignmentForVinkRead(vinkId);
+  const poolCard = assignment === null ? null : await reader.getCardRead(assignment.cardId);
+  const card = assignment === null || poolCard === null ? await reader.getCardByVink(vinkId) : null;
   const obligations = await reader.listRecoveryObligations(vinkId);
   const obligation = obligations.at(-1) ?? null;
   const contributions = await reader.listContributionsByVink(vinkId);
@@ -179,14 +183,28 @@ export async function getVinkSnapshot(
       latestContributionByParticipant,
     ),
     card:
-      card === null
-        ? null
-        : {
-            status: card.status,
-            displayLastFour: card.displayLastFour,
-            spendingLimitMinor: card.spendingLimit.amountMinor,
-            merchantLocked: card.merchantLockKey !== null,
-          },
+      poolCard !== null && assignment !== null
+        ? {
+            // RM3B (D47): the card-pool projection — CardView's own `status` field is loosely
+            // typed (string), so ACTIVE/READY_TO_PAY assignment maps to the same "ACTIVE" a
+            // legacy client already knows how to render; anything else surfaces its real
+            // provisioning status rather than inventing a false ACTIVE.
+            status:
+              assignment.status === 'ACTIVE' && assignment.provisioningStatus === 'READY_TO_PAY'
+                ? 'ACTIVE'
+                : assignment.provisioningStatus,
+            displayLastFour: poolCard.displayLastFour,
+            spendingLimitMinor: assignment.spendingLimit.amountMinor,
+            merchantLocked: assignment.merchantLockKey !== null,
+          }
+        : card === null
+          ? null
+          : {
+              status: card.status,
+              displayLastFour: card.displayLastFour,
+              spendingLimitMinor: card.spendingLimit.amountMinor,
+              merchantLocked: card.merchantLockKey !== null,
+            },
     recovery:
       obligation === null
         ? null

@@ -47,6 +47,8 @@ const merchantSchema = z.object({
     .regex(/^\d{4}$/)
     .default('5411'),
   amountMinor: z.number().int().positive(),
+  // RM3B (D47) — same optional, card-pool-only field as the simulator route's own schema.
+  presentedWalletToken: z.string().optional(),
 });
 
 const captureSchema = z.object({
@@ -196,12 +198,22 @@ export function registerOpsRoutes(
     const { vinkId } = vinkIdParams.parse(request.params);
     const body = merchantSchema.parse(request.body ?? {});
     return handle(reply, 201, async () => {
-      const card = await store.getCardByVink(vinkId as VinkId);
-      if (card === null) throw new ApplicationError('PARTICIPANT_NOT_FOUND', 'no card to charge');
+      // RM3B (D47): dual-path lookup — same pattern as the public simulator route.
+      const poolCardProviderId = await store.run(async (tx) => {
+        const assignment = await tx.getCardAssignmentForVink(vinkId as VinkId);
+        if (assignment === null) return null;
+        const found = await tx.getCard(assignment.cardId);
+        return found?.providerCardId ?? null;
+      });
+      const providerCardId =
+        poolCardProviderId ?? (await store.getCardByVink(vinkId as VinkId))?.providerCardId ?? null;
+      if (providerCardId === null) {
+        throw new ApplicationError('PARTICIPANT_NOT_FOUND', 'no card to charge');
+      }
       let providerAuthorizationId = `ext_auth_${Date.now()}`;
       if (provider instanceof MockFinancialProvider) {
         const outcome = provider.simulateMerchantAuthorization({
-          providerCardId: card.providerCardId,
+          providerCardId,
           amount: { amountMinor: body.amountMinor, currency: 'USD' },
           merchantId: body.merchantIdentifier,
           merchantName: body.merchantName,
@@ -219,6 +231,7 @@ export function registerOpsRoutes(
         merchantIdentifier: body.merchantIdentifier,
         mcc: body.mcc,
         amountMinor: body.amountMinor,
+        presentedWalletToken: body.presentedWalletToken,
       });
       await insertAuditEntry(sql, {
         operatorName: operator.operatorName,

@@ -1,10 +1,23 @@
 /**
- * Mock card + purchase engine (PV6). Card issuance/closure reach the provider ONLY through
- * the neutral FinancialProvider interface. The merchant-authorization DECISION is VinkIn's
- * own §17 engine — card state, first-merchant lock, spend limit — decided from domain state,
- * never delegated to the provider. The merchant *simulation* (a swipe arriving) lives at the
- * simulator transport, which feeds a providerAuthorizationId in here for dedupe (E4) and
- * capture linkage.
+ * Mock card + purchase engine (PV6, cut over to the RM1/RM2 card pool by RM3B/D47). Card
+ * issuance/closure reach the provider ONLY through the neutral FinancialProvider interface.
+ * The merchant-authorization DECISION is VinkIn's own §17 engine — card state, first-merchant
+ * lock, spend limit — decided from domain state, never delegated to the provider. The merchant
+ * *simulation* (a swipe arriving) lives at the simulator transport, which feeds a
+ * providerAuthorizationId in here for dedupe (E4) and capture linkage.
+ *
+ * RM3B (D47): the live FUNDED-Vink flow now provisions from RM1/RM2's reusable card pool via
+ * `provisionCardFromPoolCommand`, not the legacy one-shot `provisionCardCommand` below (kept
+ * fully intact — untouched, still exported, still tested — for backward compatibility with any
+ * legacy in-flight vink; the sweep just stops calling it going forward). `authorizeMerchant
+ * PurchaseCommand`/`settlePurchaseCommand` are dual-path: they detect which shape a given vink
+ * is on (`tx.getCardAssignmentForVink` vs. the legacy `tx.getCardByVinkForUpdate`) and branch
+ * accordingly — the legacy branch is byte-for-byte unchanged. The card-pool branch adds the
+ * actual security payoff D47's wallet-token clarification exists for: authorization is decided
+ * against the PRESENTED WALLET TOKEN, not the card's status alone (see
+ * `authorizeMerchantPurchaseCommand`'s own comment below) — a stale device holding a
+ * since-revoked token from a prior assignment must never authorize against a card now assigned
+ * elsewhere.
  *
  * Every transition is one row-locked unit of work with its outbox event (D12); the vink row
  * is locked first (Plan §11). The FUNDED→COMPLETED path posts to the ledger; the DB's
@@ -20,6 +33,7 @@ import {
   newSettlementId,
   newTemporaryCardId,
   subtractMoney,
+  type CardAssignment,
   type PurchaseAuthorization,
   type Settlement,
   type TemporaryCard,
@@ -33,6 +47,15 @@ import {
   settlementExpensePosting,
 } from '../../ledger/src/index.ts';
 import { ApplicationError } from './errors.ts';
+import {
+  disableCardCommand,
+  enableCardCommand,
+  provisionWalletTokenCommand,
+  reserveCardFromPoolCommand,
+  revokeWalletTokenCommand,
+  returnCardToPoolCommand,
+  type CardProvisioningCommandContext,
+} from './card-pool.ts';
 import type { PublicCommandContext } from './ports.ts';
 import { applyVinkTransition } from './support/transition.ts';
 import { logCommand } from './support/command-logging.ts';
@@ -40,6 +63,10 @@ import { logCommand } from './support/command-logging.ts';
 /** Cash-like MCCs are always blocked on the temporary card (§3.2/§36). */
 const BLOCKED_MCCS = ['6010', '6011', '6012', '7995'] as const;
 const CARD_TTL_DAYS = 3;
+/** D47's own spec value ("a separate 10-minute card usage window"). No sweep enforces this
+ * yet — the transition it feeds (`CARD_WINDOW_EXPIRED`) is real and tested (RM1), but the
+ * sweep that fires it is RM4's job, disclosed there and here, not guessed at early. */
+const CARD_USAGE_WINDOW_SECONDS = 600;
 
 export interface PurchaseCommandContext extends PublicCommandContext {
   provider: FinancialProvider;
@@ -52,6 +79,10 @@ export interface MerchantAuthorizationRequest {
   merchantIdentifier: string;
   mcc: string;
   amountMinor: number;
+  /** RM3B (D47) — required on the card-pool path (ignored on the legacy path, which has no
+   * concept of a wallet token). This is VinkIn's own §17 engine decision input, never
+   * delegated to or validated by the provider (see this file's own module doc comment). */
+  presentedWalletToken?: string;
 }
 
 export type PurchaseOutcome = 'APPROVED' | 'DECLINED' | 'DUPLICATE';
@@ -171,6 +202,196 @@ export async function provisionCardCommand(
 }
 
 // ---------------------------------------------------------------------------
+// ProvisionCardFromPoolCommand — RM3B (D47): FUNDED → CARD_READY via RM1/RM2's card pool.
+// The live sweep's own trigger going forward; `provisionCardCommand` above stays untouched.
+// ---------------------------------------------------------------------------
+
+/**
+ * RM3B (D47): reserves, enables, and wallet-provisions a pool card for a FUNDED vink —
+ * reusing RM1/RM2's own real, already-tested commands as a *sequence* of independent
+ * transactions (not one atomic unit; see this file's own module doc comment and the RM3B
+ * milestone report for the disclosed crash-resumability limitation). Owner-confirmed for this
+ * slice: wallet-token provisioning is auto-completed here via the mock's synchronous
+ * capability, standing in for RM5's real, client-triggered Apple/Google Wallet step.
+ */
+export async function provisionCardFromPoolCommand(
+  ctx: PurchaseCommandContext & CardProvisioningCommandContext,
+  input: { vinkId: VinkId },
+) {
+  const fundedAmountMinor = await ctx.uow.run(async (tx) => {
+    const vink = await tx.getVinkForUpdate(input.vinkId);
+    if (vink === null)
+      throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
+    if (vink.state !== 'FUNDED') {
+      throw new ApplicationError(
+        'INVALID_COMMAND',
+        `card provisioning requires FUNDED (state: ${vink.state})`,
+      );
+    }
+    await applyVinkTransition(
+      tx,
+      vink,
+      'CARD_PROVISIONING_STARTED',
+      'system',
+      ctx.correlationId,
+      ctx.clock.now(),
+    );
+    return vink.fundedAmount.amountMinor;
+  });
+
+  let reservedAssignmentId: CardAssignment['id'] | null = null;
+  try {
+    const assignment = await reserveCardFromPoolCommand(ctx, {
+      vinkId: input.vinkId,
+      spendingLimitMinor: fundedAmountMinor,
+      usageWindowSeconds: CARD_USAGE_WINDOW_SECONDS,
+    });
+    reservedAssignmentId = assignment.id;
+    const enabled = await enableCardCommand(ctx, { cardAssignmentId: assignment.id });
+    // MCC blocking (§3.2/§36): enableCardCommand has no equivalent provider call — done
+    // explicitly here, before the wallet token exists, so there is no window where a token
+    // could authorize against an MCC-unblocked card.
+    const card = await ctx.uow.run(async (tx) => {
+      const found = await tx.getCard(enabled.cardId);
+      if (found === null) {
+        throw new ApplicationError('INVALID_COMMAND', `card ${enabled.cardId} not found`);
+      }
+      return found;
+    });
+    await ctx.provider.updateCardControls({
+      providerCardId: card.providerCardId,
+      blockedMccs: BLOCKED_MCCS,
+    });
+    const ready = await provisionWalletTokenCommand(ctx, {
+      cardAssignmentId: assignment.id,
+      // Arbitrary for the mock — RM5's real client flow decides this for real, per device.
+      walletType: 'APPLE_PAY',
+    });
+
+    await ctx.uow.run(async (tx) => {
+      const vink = await tx.getVinkForUpdate(input.vinkId);
+      if (vink === null)
+        throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
+      await applyVinkTransition(
+        tx,
+        vink,
+        'CARD_ISSUED',
+        'system',
+        ctx.correlationId,
+        ctx.clock.now(),
+      );
+    });
+    logCommand(ctx.logger, 'provisionCardFromPool', {
+      correlationId: ctx.correlationId,
+      actor: 'system',
+      vinkId: input.vinkId,
+    });
+    return ready;
+  } catch (error) {
+    // Best-effort compensating cleanup so a provisioning failure doesn't permanently strand a
+    // pool card at RESERVED — disclosed as best-effort, not guaranteed: if this itself fails,
+    // the card stays stuck, needing the same operator-clearing gap RM2 already disclosed for
+    // QUARANTINED cards, not built in this slice either.
+    if (reservedAssignmentId !== null) {
+      try {
+        await disableCardCommand(ctx, { cardAssignmentId: reservedAssignmentId });
+        await revokeWalletTokenCommand(ctx, { cardAssignmentId: reservedAssignmentId });
+        await returnCardToPoolCommand(ctx, { cardAssignmentId: reservedAssignmentId });
+      } catch {
+        // Swallowed deliberately — the Vink-level reversal below is the load-bearing outcome;
+        // a failed compensating cleanup must not prevent it.
+      }
+    }
+    await ctx.uow.run(async (tx) => {
+      const vink = await tx.getVinkForUpdate(input.vinkId);
+      if (vink === null) return;
+      const reversal = await applyVinkTransition(
+        tx,
+        vink,
+        'CARD_PROVISIONING_FAILED',
+        'system',
+        ctx.correlationId,
+        ctx.clock.now(),
+      );
+      await applyVinkTransition(
+        tx,
+        reversal,
+        'FUNDING_REVERSAL_COMPLETED',
+        'system',
+        ctx.correlationId,
+        ctx.clock.now(),
+      );
+    });
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ExpireCardWindowCommand — RM4A (D47): CARD_READY → FUNDING_REVERSAL → EXPIRED when the
+// 10-minute card usage window elapses with no purchase made.
+// ---------------------------------------------------------------------------
+
+/**
+ * RM4A (D47): the sweep trigger for RM1's own `CARD_WINDOW_EXPIRED` transition (real and
+ * tested since RM1, but never fired by anything until this slice). Chains the identical
+ * `CARD_WINDOW_EXPIRED → FUNDING_REVERSAL_COMPLETED` two-step
+ * `provisionCardFromPoolCommand`'s own failure branch already uses, then tears the card down
+ * back to the pool — it was never spent, so it must become reusable, not permanently stranded
+ * assigned (the identical best-effort `disableCardCommand` → `revokeWalletTokenCommand` →
+ * `returnCardToPoolCommand` sequence `settlePurchaseCommand` already uses on its own
+ * completion path).
+ */
+export async function expireCardWindowCommand(
+  ctx: PurchaseCommandContext & CardProvisioningCommandContext,
+  input: { vinkId: VinkId },
+): Promise<void> {
+  const assignmentId = await ctx.uow.run(async (tx) => {
+    const vink = await tx.getVinkForUpdate(input.vinkId);
+    if (vink === null)
+      throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
+    if (vink.state !== 'CARD_READY') return null; // already moved on — idempotent no-op
+    const assignment = await tx.getCardAssignmentForVink(vink.id);
+    if (assignment === null || assignment.status !== 'ACTIVE') return null;
+    const now = ctx.clock.now();
+    const reversal = await applyVinkTransition(
+      tx,
+      vink,
+      'CARD_WINDOW_EXPIRED',
+      'system',
+      ctx.correlationId,
+      now,
+    );
+    await applyVinkTransition(
+      tx,
+      reversal,
+      'FUNDING_REVERSAL_COMPLETED',
+      'system',
+      ctx.correlationId,
+      now,
+    );
+    return assignment.id;
+  });
+  if (assignmentId === null) return;
+
+  try {
+    await disableCardCommand(ctx, { cardAssignmentId: assignmentId });
+    await revokeWalletTokenCommand(ctx, { cardAssignmentId: assignmentId });
+    await returnCardToPoolCommand(ctx, { cardAssignmentId: assignmentId });
+  } catch (error) {
+    ctx.logger?.error('expire_card_window_teardown_failed', {
+      vinkId: input.vinkId,
+      cardAssignmentId: assignmentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  logCommand(ctx.logger, 'expireCardWindow', {
+    correlationId: ctx.correlationId,
+    actor: 'system',
+    vinkId: input.vinkId,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // AuthorizeMerchantPurchaseCommand — VinkIn's §17 decision (exactly-one guard)
 // ---------------------------------------------------------------------------
 
@@ -188,7 +409,6 @@ export async function authorizeMerchantPurchaseCommand(
     const vink = await tx.getVinkForUpdate(input.vinkId);
     if (vink === null)
       throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
-    const card = await tx.getCardByVinkForUpdate(vink.id);
     const existing = await tx.listPurchaseAuthorizationsForUpdate(vink.id);
     const now = ctx.clock.now();
 
@@ -201,11 +421,118 @@ export async function authorizeMerchantPurchaseCommand(
     }
 
     const amount = money(input.amountMinor);
+
+    // RM3B (D47): dual-path detection — a card-pool assignment takes priority; a legacy
+    // in-flight vink (no assignment ever created for it) falls back to the untouched
+    // temporary_cards path below.
+    const assignmentRef = await tx.getCardAssignmentForVink(vink.id);
+    if (assignmentRef !== null) {
+      const assignment = await tx.getCardAssignmentForUpdate(assignmentRef.id);
+      const decline = async (reason: string): Promise<MerchantAuthorizationResult> => {
+        const declined: PurchaseAuthorization = {
+          id: newPurchaseAuthorizationId(),
+          vinkId: vink.id,
+          temporaryCardId: null,
+          cardAssignmentId: assignment?.id ?? assignmentRef.id,
+          providerAuthorizationId: input.providerAuthorizationId,
+          merchantName: input.merchantName,
+          merchantIdentifier: input.merchantIdentifier,
+          mcc: input.mcc,
+          requestedAmount: amount,
+          approvedAmount: null,
+          status: 'DECLINED',
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+        };
+        await tx.insertPurchaseAuthorization(declined);
+        await tx.insertOutbox({
+          eventType: 'MerchantAuthorizationDeclined',
+          aggregateType: 'vink',
+          aggregateId: vink.id,
+          payload: { vinkId: vink.id, reason, amountMinor: amount.amountMinor },
+        });
+        return { outcome: 'DECLINED', authorization: declined, vinkState: vink.state };
+      };
+
+      // §17 decision, card-pool path, in order: assignment ready → PRESENTED WALLET TOKEN
+      // matches → merchant lock → spend limit. The token check is the actual security payoff
+      // D47's wallet-token clarification exists for: a stale device holding a since-revoked
+      // token from a PRIOR assignment must never authorize against this card now assigned
+      // here, even though the underlying card itself is still enabled at the provider.
+      if (
+        assignment === null ||
+        assignment.status !== 'ACTIVE' ||
+        assignment.provisioningStatus !== 'READY_TO_PAY'
+      ) {
+        return decline('CARD_NOT_READY');
+      }
+      if (vink.state !== 'CARD_READY') return decline('CARD_NOT_READY');
+      const token = await tx.getCardWalletTokenForAssignment(assignment.id);
+      if (
+        token === null ||
+        token.status !== 'PROVISIONED' ||
+        input.presentedWalletToken === undefined ||
+        token.providerTokenId !== input.presentedWalletToken
+      ) {
+        return decline('WALLET_TOKEN_MISMATCH');
+      }
+      if (
+        assignment.merchantLockKey !== null &&
+        assignment.merchantLockKey !== input.merchantIdentifier
+      ) {
+        return decline('MERCHANT_LOCKED');
+      }
+      if (compareMoney(amount, assignment.spendingLimit) > 0) return decline('OVER_LIMIT');
+
+      const approved: PurchaseAuthorization = {
+        id: newPurchaseAuthorizationId(),
+        vinkId: vink.id,
+        temporaryCardId: null,
+        cardAssignmentId: assignment.id,
+        providerAuthorizationId: input.providerAuthorizationId,
+        merchantName: input.merchantName,
+        merchantIdentifier: input.merchantIdentifier,
+        mcc: input.mcc,
+        requestedAmount: amount,
+        approvedAmount: amount,
+        status: 'APPROVED',
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+      await tx.insertPurchaseAuthorization(approved);
+      // First-merchant lock: bind the assignment to this merchant in the same transaction.
+      await tx.updateCardAssignment({ ...assignment, merchantLockKey: input.merchantIdentifier });
+      const locked: Vink = { ...vink, merchantLockStatus: 'LOCKED' };
+      const authorized = await applyVinkTransition(
+        tx,
+        locked,
+        'MERCHANT_AUTHORIZATION_APPROVED',
+        'system',
+        ctx.correlationId,
+        now,
+      );
+      await tx.insertOutbox({
+        eventType: 'MerchantLocked',
+        aggregateType: 'vink',
+        aggregateId: vink.id,
+        payload: { vinkId: vink.id, merchantIdentifier: input.merchantIdentifier },
+      });
+      await tx.insertLedgerPosting({
+        referenceType: 'vink',
+        referenceId: vink.id,
+        entries: authorizationReservePosting(amount).entries,
+      });
+      return { outcome: 'APPROVED', authorization: approved, vinkState: authorized.state };
+    }
+
+    // Legacy path — byte-for-byte unchanged from pre-RM3B behavior.
+    const card = await tx.getCardByVinkForUpdate(vink.id);
     const decline = async (reason: string): Promise<MerchantAuthorizationResult> => {
       const declined: PurchaseAuthorization = {
         id: newPurchaseAuthorizationId(),
         vinkId: vink.id,
         temporaryCardId: card?.id ?? newTemporaryCardId(),
+        cardAssignmentId: null,
         providerAuthorizationId: input.providerAuthorizationId,
         merchantName: input.merchantName,
         merchantIdentifier: input.merchantIdentifier,
@@ -238,6 +565,7 @@ export async function authorizeMerchantPurchaseCommand(
       id: newPurchaseAuthorizationId(),
       vinkId: vink.id,
       temporaryCardId: card.id,
+      cardAssignmentId: null,
       providerAuthorizationId: input.providerAuthorizationId,
       merchantName: input.merchantName,
       merchantIdentifier: input.merchantIdentifier,
@@ -340,7 +668,7 @@ export interface SettlementResult {
 }
 
 export async function settlePurchaseCommand(
-  ctx: PurchaseCommandContext,
+  ctx: PurchaseCommandContext & CardProvisioningCommandContext,
   input: { vinkId: VinkId; authorizationId: string; settledAmountMinor: number },
 ): Promise<SettlementResult> {
   const result = await ctx.uow.run(async (tx) => {
@@ -358,7 +686,10 @@ export async function settlePurchaseCommand(
     if (authorization === undefined || authorization.status !== 'APPROVED') {
       throw new ApplicationError('PARTICIPANT_NOT_FOUND', 'no approved authorization to settle');
     }
-    const card = await tx.getCardByVinkForUpdate(vink.id);
+    // RM3B (D47): dual-path — a card-pool assignment (if any) takes priority; the legacy
+    // temporary_cards lookup stays untouched for a legacy in-flight vink.
+    const assignment = await tx.getCardAssignmentForVink(vink.id);
+    const card = assignment === null ? await tx.getCardByVinkForUpdate(vink.id) : null;
     const approved = authorization.approvedAmount ?? money(0);
     const settled = money(input.settledAmountMinor);
     const now = ctx.clock.now();
@@ -425,11 +756,15 @@ export async function settlePurchaseCommand(
         ctx.correlationId,
         now,
       );
-      return { settlement, vinkState: flagged.state };
+      return { settlement, vinkState: flagged.state, teardownAssignmentId: null };
     }
 
-    // MATCHED / UNDERAGE complete the purchase; close the mock card.
-    if (card !== null) {
+    // MATCHED / UNDERAGE complete the purchase. Legacy path: close the mock card inline, same
+    // as always. Card-pool path: the actual teardown (disable/revoke/return) is a sequence of
+    // RM1/RM2's own independent transactions — it cannot run nested inside this one (same
+    // reasoning as `provisionCardFromPoolCommand`'s own module comment) — so it happens AFTER
+    // this transaction commits; only the assignment id to tear down is carried out of here.
+    if (assignment === null && card !== null) {
       await ctx.provider.closeCard(card.providerCardId);
       await tx.updateCard({ ...card, status: 'CLOSED', closedAt: now.toISOString() });
     }
@@ -441,8 +776,33 @@ export async function settlePurchaseCommand(
       ctx.correlationId,
       now,
     );
-    return { settlement, vinkState: completed.state };
+    return {
+      settlement,
+      vinkState: completed.state,
+      teardownAssignmentId: assignment?.id ?? null,
+    };
   });
+
+  // RM3B (D47): the card-pool teardown — returning the card to the pool is the entire point
+  // of a reusable 15-card pool. Best-effort: a failure here does not unwind the already-
+  // committed settlement (the purchase genuinely completed); the assignment is left assigned,
+  // needing the same disclosed operator-clearing gap as RM2's own QUARANTINED cards and
+  // `provisionCardFromPoolCommand`'s own compensating cleanup — no sweep-driven retry built in
+  // this slice.
+  if (result.teardownAssignmentId !== null) {
+    try {
+      await disableCardCommand(ctx, { cardAssignmentId: result.teardownAssignmentId });
+      await revokeWalletTokenCommand(ctx, { cardAssignmentId: result.teardownAssignmentId });
+      await returnCardToPoolCommand(ctx, { cardAssignmentId: result.teardownAssignmentId });
+    } catch (error) {
+      ctx.logger?.error('settle_purchase_teardown_failed', {
+        vinkId: input.vinkId,
+        cardAssignmentId: result.teardownAssignmentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   logCommand(ctx.logger, 'settlePurchase', {
     correlationId: ctx.correlationId,
     actor: 'system',
@@ -450,5 +810,5 @@ export async function settlePurchaseCommand(
     authorizationId: input.authorizationId,
     settlementStatus: result.settlement.status,
   });
-  return result;
+  return { settlement: result.settlement, vinkState: result.vinkState };
 }

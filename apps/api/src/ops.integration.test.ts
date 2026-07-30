@@ -8,6 +8,7 @@
 
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { buildApp } from './app.ts';
 import { createIsolatedTestDb, type IsolatedTestDb } from './testing/integration-db.ts';
 import { runSweeps } from './jobs/sweeps.ts';
@@ -79,9 +80,33 @@ describe('operations console end-to-end (PostgreSQL)', { skip: !RUN }, () => {
       payload: {},
     });
     assert.equal((await db.sql`SELECT state FROM vinks WHERE id = ${vinkId}`)[0]!.state, 'FUNDED');
+    // RM3B (D47): the sweep now provisions from the card pool — seed a real, disabled pool
+    // card first (same technique as `card-pool.integration.test.ts`'s own `seedRealCard`).
+    const { providerCardholderId } = await provider.createCardholder({
+      idempotencyKey: `cardholder:it:${randomUUID()}`,
+      externalAccountId: 'vinkin-financial-account',
+      legalName: 'VinkIn Inc',
+    });
+    const issued = await provider.issueTemporaryCard({
+      idempotencyKey: `issue:it:${randomUUID()}`,
+      providerCardholderId,
+      spendLimit: { amountMinor: 100_000, currency: 'USD' },
+      metadata: {},
+    });
+    await provider.disableCard(issued.providerCardId);
+    await db.sql`INSERT INTO cards (id, provider_card_id, display_last_four, status)
+      VALUES (${randomUUID()}, ${issued.providerCardId}, '4242', 'AVAILABLE')`;
     const swept = await runSweeps(db.sql, provider);
     assert.ok(swept.cardsProvisioned >= 1);
     return { vinkId, publicCode };
+  }
+
+  async function walletTokenFor(vinkId: string): Promise<string> {
+    const rows = await db.sql`
+      SELECT t.provider_token_id FROM card_assignments ca
+      JOIN card_wallet_tokens t ON t.card_assignment_id = ca.id
+      WHERE ca.vink_id = ${vinkId}`;
+    return (rows[0] as { provider_token_id: string }).provider_token_id;
   }
 
   before(async () => {
@@ -160,6 +185,7 @@ describe('operations console end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     assert.ok((byOrganizer.json().vinks as unknown[]).length >= 1);
 
     // --- Merchant authorization + capture (the two operator actions) ---------
+    const walletToken = await walletTokenFor(vinkId);
     const auth = await app.inject({
       method: 'POST',
       url: `/internal/ops/vinks/${vinkId}/merchant-authorizations`,
@@ -169,6 +195,7 @@ describe('operations console end-to-end (PostgreSQL)', { skip: !RUN }, () => {
         merchantIdentifier: 'PV11-GROCER',
         mcc: '5411',
         amountMinor: 6_000,
+        presentedWalletToken: walletToken,
       },
     });
     assert.equal(auth.statusCode, 201);
@@ -199,7 +226,11 @@ describe('operations console end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     assert.equal(body.participants.length, 2);
     assert.equal(body.contributions.length, 1);
     assert.equal(body.contributions[0].status, 'CAPTURED');
-    assert.equal(body.card.status, 'CLOSED');
+    // RM3B: this vink was provisioned from the card pool — the ops view's own dual-path
+    // `card` row shows the pool's real shape (returned + sanitized after settlement teardown),
+    // not the legacy `temporary_cards.status` field.
+    assert.equal(body.card.assignment_status, 'RETURNED');
+    assert.equal(body.card.provisioning_status, 'SANITIZED');
     assert.equal(body.purchaseAuthorizations.length, 1);
     assert.equal(body.purchaseAuthorizations[0].status, 'CAPTURED');
     assert.equal(body.settlements.length, 1);

@@ -1536,10 +1536,142 @@ doesn't check the presented wallet token (RM3's job); Stripe wallet provisioning
 genuinely blocked, not simulated; no pool-seeding mechanism yet (same Financial Account wall);
 `returnCardToPoolCommand`'s own gate is unchanged from RM1 by design.
 
-Next: RM3 — the capture-timing funding-engine change (capture immediately per contribution
-rather than holding until the Vink completes) and cutting the live FUNDED-Vink flow over to
-this schema, including wiring `authorizeMerchantPurchaseCommand`'s decision to the presented
-wallet token.
+**RM3A done** (`milestone-reports/RM3A-CAPTURE-IMMEDIATELY.md`, owner-directed split of RM3
+into RM3A/RM3B, checkpointed independently): the capture-immediately funding engine — the
+single highest-risk slice in the RM plan, since it changes when real money moves. Full audit
+first (not assumptions): the contribution state machine already modeled `CAPTURE_RESULT_
+UNKNOWN`/`RESOLVED_CAPTURED` but neither was ever fired in application code; `resolve
+ContributionCommand` had no branch at all for a provider `CAPTURED` status — both closed by
+this slice. **The central design conflict, resolved and disclosed**: the owner's own proposed
+`EXPIRED → REFUNDS_PENDING → REFUNDED` sequence would make `EXPIRED` — a tested terminal state
+with no exits — non-terminal; resolved by mirroring the existing `RECOVERY_REQUIRED`/
+`RECOVERY_PENDING` precedent, with two new **non-terminal** states (`REFUNDS_PENDING`,
+`REFUND_RECOVERY_REQUIRED`) sitting before the still-true-terminal `EXPIRED`. New
+`captureImmediately` helper (`packages/application/src/contributions.ts`) captures each
+contribution the moment it authorizes — same two ledger postings this codebase always inserted
+at capture time, just moved earlier per contribution, not batched. `resolveFunding`'s failure
+branch now refunds every `CAPTURED` contribution (reusing `refunds.ts`'s newly-exported
+`refundOne`) instead of only cancelling holds; a `RESOLUTION_PENDING` contribution is no longer
+blindly cancelled there — a new shared `resolveAgainstProviderTruth` helper checks real
+provider status first, since that status can now originate from a capture-side ambiguity where
+money may genuinely already be captured. A compatibility shim catches up any live contribution
+still found `AUTHORIZED` (impossible via the new path, but possible for pre-deploy data) using
+the exact original capture logic. New sweep clauses auto-retry `REFUND_FAILED` contributions
+and auto-resolve `REFUND_RECOVERY_REQUIRED` vinks. **A real, disclosed finding**: a local
+transaction that rolls back after a genuine provider capture but before the contribution row
+ever persists cannot be safely retried by a plain client call — the fresh contribution id
+changes the provider call's own metadata, so the provider's own idempotency guard correctly
+**refuses** the replay (§12's own "different params is a conflict" rule) rather than silently
+adopting the earlier capture under an unrelated identity; recovering that specific scenario is
+reconciliation's job (proven directly — the same rolled-back capture correctly classifies
+ORPHANED), not a client retry. Two of the ten owner-required failure-case tests were already
+proven unchanged by existing tests (concurrent-completion race — ENG9 #14; provider capability
+gaps — RM2's own tests); two are explicitly out of RM3A's scope (card-pool wiring, deferred to
+RM3B); the remaining seven get a new `apps/api/src/rm3a-failure-cases.integration.test.ts`.
+**`packages/domain` 48/48** unchanged (5 new states/events, exhaustiveness tests updated not
+weakened), **`packages/application` 147/147** unchanged count (4 tests rewritten, not deleted,
+to assert the new sequence), **`apps/api` 280/280** (up from 273), Stripe sandbox conformance
+re-verified unchanged (14/14, 16 disclosed skips — the interface itself wasn't touched, only
+how it's called), `pnpm typecheck/lint/format:check/guard` clean, 12/12 packages. What did NOT
+change, by design: `FinancialProvider`, the D7 conformance suite, both adapters, ledger posting
+shapes, `packages/reconciliation`, RM1/RM2's card pool, and `provisionCardCommand`/
+`purchases.ts` (a FUNDED vink still enters that exact legacy path, unchanged — RM3B's job).
+
+**RM3B done** (`milestone-reports/RM3B-CARD-POOL-CUTOVER.md`): cut the live FUNDED-Vink flow
+over to RM1/RM2's card pool and wired the actual security payoff — merchant authorization now
+decides against the **presented wallet token**, not just the card's own status. Audit-first
+(matching RM3A's own discipline) found this was bigger than "wire the sweep to a new table":
+schema surgery (`purchase_authorizations.temporary_card_id` made nullable, new
+`card_assignment_id`, mutually exclusive — mirrors the `participants.user_id`/
+`guest_identity_id` idiom), a reconciliation-correlation break, an MCC-blocking regression risk
+(`enableCardCommand` had no equivalent to legacy `updateCardControls`), and settlement-side
+card-pool teardown RM1's own report had already flagged as unbuilt. Owner-confirmed design
+choice: the sweep auto-completes reserve → enable → provisionWalletToken (mock-only
+synchronous), a disclosed placeholder for RM5's real client-triggered step. New
+`provisionCardFromPoolCommand` sequences RM1/RM2's own already-tested commands around the same
+Vink transitions the legacy command used (unchanged event names); a best-effort compensating
+cleanup (disable/revoke/return) runs on failure so a crash doesn't permanently strand a pool
+card, disclosed as not fully crash-resumable (candidate for RM4/production hardening, same
+accepted-risk posture as D15). `authorizeMerchantPurchaseCommand`/`settlePurchaseCommand` are
+dual-path — a card-pool assignment takes priority, a legacy in-flight vink falls back to the
+byte-for-byte-unchanged old path. **A real, additional finding beyond the original 4**:
+`getVinkSnapshot` (the organizer's own mobile Lobby) and the PV11 ops console's equivalent
+action route/diagnostic view were legacy-card-only — without a fix, every card-pool vink would
+show no card at all to the organizer. Found by running the real test suite (the EXIT GATE
+test's own snapshot assertion caught it), not by inspection; fixed with new unlocked
+`VinkReader` methods and dual-path projections. **`packages/domain` 48/48**,
+**`packages/application` 147/147** — both unchanged counts, **`apps/api` 283/283** (up from
+280 — 3 new tests: THE SECURITY TEST proving a stale/revoked wallet token is declined even
+though the underlying card is still `ACTIVE`; a reassignment-through-the-live-flow test proving
+a second Vink's genuine reuse of the same physical card can never be authorized by the first
+Vink's old token; and a provider-level MCC-blocking regression test). Stripe sandbox
+conformance unchanged (22/22, 16 disclosed skips — the interface itself untouched).
+`pnpm typecheck/lint/format:check/guard` clean, 12/12 packages. This closes RM3A's own two
+deferred failure cases (#7 pool-exhausted, #8 card-reservation-then-provider-failure), now
+reachable through the live sweep. Disclosed, deliberately out-of-scope gap found along the way:
+the public simulator route's merchant-authorization endpoint has a pre-existing, RM3B-unrelated
+quirk where a provider-side MCC decline doesn't actually stop it from calling VinkIn's own
+engine — not fixed here (the new MCC regression test verifies the provider-side control
+directly instead, which is what RM3B's own fix actually governs).
+
+**RM4A done** (`milestone-reports/RM4A-DUAL-TIMER-LIFECYCLE.md`): backend dual-timer
+lifecycle. An audit found five distinct items: two independent copies of the open-duration
+default that could silently diverge (`env.ts`/`commands.ts`); the submission deadline set once
+at DRAFT creation and never touched again, burning wizard time into the window; genuinely
+inconsistent deadline enforcement (`guest.ts`'s own join check was already strict; member-add
+and contribute trusted the sweep alone); the 10-minute card-window sweep 100% unbuilt (RM1
+modeled `CARD_WINDOW_EXPIRED`, nothing ever fired it); and a refund auto-chain gap bigger than
+the new path alone — the pre-existing RM3B card-provisioning-failure exit had never auto-chained
+a refund either. `VINK_OPEN_DURATION_SECONDS` now defaults to `420` (7 minutes, was 24h) in
+both `env.ts` and `commands.ts`'s now-exported `DEFAULT_OPEN_DURATION_SECONDS`, guarded by a new
+cross-import equality test so the two copies can't silently diverge again;
+`VINK_PROCESSING_GRACE_SECONDS` (60s) deliberately unchanged. A shared `computeVinkDeadlines`
+helper now backs `createVinkCommand`/`configureVinkCommand`/`openVinkCommand`;
+`openVinkCommand` recomputes both deadlines unconditionally at open time — D47's beta model has
+no organizer-configurable duration, so whatever DRAFT creation set no longer survives to the
+opened row. `addParticipantCommand`/`authorizeContributionCommand` gained the same
+`now >= submissionDeadline` check `guest.ts`'s join path already had, so all three entry points
+fail closed on the deadline itself, not just on state, ahead of the next sweep tick. New
+`expireCardWindowCommand` (`purchases.ts`) fires RM1's own `CARD_WINDOW_EXPIRED` transition for
+the first time and tears an unused card back down to the pool, reusing
+`settlePurchaseCommand`'s own disable→revoke→return teardown sequence; two new `sweeps.ts`
+clauses trigger it and — generically, not scoped to the new path — auto-chain
+`refundFailedSessionCommand` for any `EXPIRED` vink with a remaining `CAPTURED` contribution,
+closing both the new card-window gap and the pre-existing RM3B one at once. **Disclosed
+correction to the plan's own claim**: the plan asserted no more specific error code than
+`INVALID_COMMAND` existed for the new contribute-side deadline check — `VINK_NOT_JOINABLE`
+does exist (mapped to 410 in the guest-join route), but `INVALID_COMMAND` was kept anyway since
+wiring that mapping into two more route modules was judged out of scope; flagged rather than
+silently let the inaccurate premise stand. **A second real interaction found only by running
+the real tests**: the refund auto-chain fires *inside the same sweep tick* as a
+card-provisioning failure, so `recovery.integration.test.ts`'s pre-existing E8 test (written
+for a world where only a manual refund call ever refunded anything) started asserting `0 !== 1`
+— root-caused to the mock provider's shared failure counter being consumed by
+`enableCardCommand`'s failure *and* the compensating cleanup's own `disableCardCommand` call
+before ever reaching the auto-chained refund; fixed by queuing three failures with the count
+verified empirically, not guessed. Every existing test whose fixtures relied on a short,
+explicit creation-time deadline surviving to the opened row (to make sweep-timing tests fast)
+broke the same way and was fixed the same way — capturing either sweep outcome, or directly
+patching the opened row's deadline via test SQL to simulate time compression, the same
+technique this codebase already uses elsewhere for states the command layer wouldn't naturally
+produce. One test (`rm3a-failure-cases.integration.test.ts`'s `#4`) had been written
+defensively enough to pass vacuously through the regression, silently losing its own intended
+race coverage — the fix restores the real race, not just green output. New
+`rm4a-dual-timer-lifecycle.integration.test.ts` (4 tests, real PostgreSQL): deadline
+recomputed at open (not creation); join/contribute rejected on the deadline itself with **no
+sweep ever run**; the card-window sweep reaching `EXPIRED` with the card genuinely back to
+`AVAILABLE` and its contribution already `REFUNDED`; the same auto-chain proof for the
+card-provisioning-failure path. **`packages/domain` 48/48, `packages/application` 147/147**
+unchanged (RM4A stayed entirely inside `commands.ts`/`contributions.ts`/`purchases.ts`/
+`sweeps.ts`), **`apps/api` integration 288/288** (up from 284), non-integration 88/88,
+`packages/payment-provider-contract-tests` 31/31 and `packages/reconciliation` 16/16 both
+unaffected (confirming the provider interface and reconciliation correlation logic are
+genuinely untouched), `pnpm typecheck/lint/format:check/guard` clean, 12/12 packages.
+
+Next: RM4B — real ticking countdowns in `apps/mobile`/`apps/guest-web`, including seconds-level
+display below one minute (owner-approved during planning) — a disclosed engineering
+placeholder pending real product/copy review, starting only on further direction, per the same
+checkpoint-before-continuing precedent as every RM slice split so far.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

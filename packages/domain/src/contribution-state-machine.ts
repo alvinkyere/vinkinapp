@@ -13,6 +13,14 @@
  *
  * DECLINED is terminal for THIS contribution: a retry is a NEW contribution with the next
  * attempt number in its idempotency key (Plan §11 `authorize:{attemptNumber}`, Spec §12).
+ *
+ * RM3A (D47): CAPTURE_INITIATED is a second edge into CAPTURE_PENDING, deliberately kept
+ * separate from SESSION_FUNDED. SESSION_FUNDED keeps its original, literal meaning ("the whole
+ * session just funded, capture this now") and is used only by `resolveFunding`'s compatibility
+ * shim for a contribution that predates the capture-immediately engine. CAPTURE_INITIATED means
+ * "this contribution captures on its own, immediately, because it personally authorized" — the
+ * new common path. Keeping the two distinct keeps the audit trail (and any future analytics)
+ * able to tell them apart.
  */
 
 import { IllegalTransitionError } from './errors.ts';
@@ -39,7 +47,8 @@ export type ContributionEvent =
   | 'AUTHORIZATION_DECLINED'
   | 'PROVIDER_RESULT_UNKNOWN'
   | 'AUTHORIZATION_TIMED_OUT'
-  | 'SESSION_FUNDED' // capture begins because the vink funded
+  | 'SESSION_FUNDED' // capture begins because the vink funded (legacy/compat path — RM3A)
+  | 'CAPTURE_INITIATED' // RM3A (D47): capture begins immediately, on this contribution's own authorization
   | 'PARTICIPANT_EXITED'
   | 'SESSION_EXPIRED'
   | 'CAPTURE_SUCCEEDED'
@@ -92,6 +101,7 @@ const TRANSITIONS: Readonly<
   },
   AUTHORIZED: {
     SESSION_FUNDED: { to: 'CAPTURE_PENDING', emits: 'ContributionCaptureStarted' },
+    CAPTURE_INITIATED: { to: 'CAPTURE_PENDING', emits: 'ContributionCaptureInitiated' },
     PARTICIPANT_EXITED: {
       to: 'CANCELLATION_PENDING',
       emits: 'ContributionCancellationStarted',

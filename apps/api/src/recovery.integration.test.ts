@@ -6,6 +6,7 @@
 
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { buildApp } from './app.ts';
 import { createIsolatedTestDb, type IsolatedTestDb } from './testing/integration-db.ts';
 import { runSweeps } from './jobs/sweeps.ts';
@@ -84,10 +85,40 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     return vinkId;
   }
 
+  /** RM3B (D47): the sweep now provisions from the card pool — seed a real, disabled pool
+   * card (same technique as `card-pool.integration.test.ts`'s own `seedRealCard`) before
+   * relying on the sweep to provision one. */
+  async function seedPoolCard(): Promise<void> {
+    const { providerCardholderId } = await provider.createCardholder({
+      idempotencyKey: `cardholder:it:${randomUUID()}`,
+      externalAccountId: 'vinkin-financial-account',
+      legalName: 'VinkIn Inc',
+    });
+    const issued = await provider.issueTemporaryCard({
+      idempotencyKey: `issue:it:${randomUUID()}`,
+      providerCardholderId,
+      spendLimit: { amountMinor: 100_000, currency: 'USD' },
+      metadata: {},
+    });
+    await provider.disableCard(issued.providerCardId);
+    await db.sql`INSERT INTO cards (id, provider_card_id, display_last_four, status)
+      VALUES (${randomUUID()}, ${issued.providerCardId}, '4242', 'AVAILABLE')`;
+  }
+
+  async function walletTokenFor(vinkId: string): Promise<string> {
+    const rows = await db.sql`
+      SELECT t.provider_token_id FROM card_assignments ca
+      JOIN card_wallet_tokens t ON t.card_assignment_id = ca.id
+      WHERE ca.vink_id = ${vinkId}`;
+    return (rows[0] as { provider_token_id: string }).provider_token_id;
+  }
+
   /** Fund → provision → settle over the approved amount → RECOVERY_REQUIRED. */
   async function overageVink(): Promise<string> {
     const vinkId = await fundedVink();
+    await seedPoolCard();
     await runSweeps(db.sql, provider); // provisions the card
+    const walletToken = await walletTokenFor(vinkId);
     const auth = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
@@ -96,6 +127,7 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
         merchantIdentifier: 'GROCER-1',
         mcc: '5411',
         amountMinor: 12_000,
+        presentedWalletToken: walletToken,
       },
     });
     const authorizationId = auth.json().authorizationId as string;
@@ -218,25 +250,34 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
 
   it('E8: failed-session refund with a provider failure → REFUND_FAILED → retry → REFUNDED', async () => {
     const vinkId = await fundedVink();
-    // Card issuance fails → the vink reverses to EXPIRED with CAPTURED contributions.
+    await seedPoolCard();
+    // RM4A (D47): the refund auto-chain now fires the moment card provisioning fails —
+    // inside the SAME sweep tick, not a later manually-triggered one — so every transient
+    // failure this scenario needs must be queued up front, against the mock's own shared
+    // failure counter (consumed in call order, not per-command): one for card issuance
+    // (enableCard), one for provisionCardFromPoolCommand's own best-effort compensating
+    // disableCard cleanup call (swallowed, but it still consumes a queued failure), and one
+    // for the first of the two auto-chained refund attempts that immediately follow.
+    provider.simulateTransientFailure();
+    provider.simulateTransientFailure();
     provider.simulateTransientFailure();
     await runSweeps(db.sql, provider);
     assert.equal((await db.sql`SELECT state FROM vinks WHERE id = ${vinkId}`)[0]!.state, 'EXPIRED');
 
-    // The first refund attempt fails transiently.
-    provider.simulateTransientFailure();
-    const refund = await app.inject({
-      method: 'POST',
-      url: `/internal/simulator/vinks/${vinkId}/refund-failed-session`,
-      payload: {},
-    });
-    assert.equal(refund.statusCode, 200);
-    assert.equal(refund.json().failed, 1);
-    assert.equal(refund.json().refunded, 1);
-
     const failed =
       await db.sql`SELECT id FROM contributions WHERE vink_id = ${vinkId} AND status = 'REFUND_FAILED'`;
-    assert.equal(failed.length, 1);
+    assert.equal(
+      failed.length,
+      1,
+      'exactly one of the two captured contributions failed to refund',
+    );
+    const alreadyRefunded =
+      await db.sql`SELECT id FROM contributions WHERE vink_id = ${vinkId} AND status = 'REFUNDED'`;
+    assert.equal(
+      alreadyRefunded.length,
+      1,
+      'the other refunded automatically, in the same sweep tick, via the RM4A auto-chain',
+    );
 
     const retry = await app.inject({
       method: 'POST',

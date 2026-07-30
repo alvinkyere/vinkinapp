@@ -80,6 +80,20 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
       payload: {},
     });
     assert.equal(opened.statusCode, 200);
+
+    // RM4A (D47): openVinkCommand now recomputes submissionDeadline/processingGraceDeadline
+    // unconditionally at open time (the fixed 7-minute default), so a short `deadlineMs`
+    // requested at creation no longer survives to the opened row. Patch it directly
+    // afterward, mirroring what openVinkCommand itself would have written had a short
+    // duration genuinely been configured — this simulates "time compression," not a
+    // different code path.
+    if (options.deadlineMs !== undefined) {
+      const submissionDeadline = new Date(Date.now() + options.deadlineMs);
+      const processingGraceDeadline = new Date(submissionDeadline.getTime() + 60_000);
+      await db.sql`UPDATE vinks SET submission_deadline = ${submissionDeadline.toISOString()},
+        processing_grace_deadline = ${processingGraceDeadline.toISOString()} WHERE id = ${vinkId}`;
+    }
+
     return { vinkId };
   }
 
@@ -122,7 +136,7 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
     await db.drop();
   });
 
-  it('funded journey: both members authorize → FUNDED, captured, balanced ledger, events', async () => {
+  it('RM3A: funded journey — captures IMMEDIATELY on the first authorization (real Postgres), funds on the last, balanced ledger, events', async () => {
     const { vinkId } = await createOpenVink();
     const first = await app.inject({
       method: 'POST',
@@ -131,8 +145,13 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
       payload: {},
     });
     assert.equal(first.statusCode, 200);
-    assert.equal(first.json().contribution.status, 'AUTHORIZED');
+    // RM3A: captured immediately, before the vink itself is anywhere near funded.
+    assert.equal(first.json().contribution.status, 'CAPTURED');
     assert.equal(first.json().vinkState, 'OPEN');
+    const firstContributionId = first.json().contribution.id as string;
+    const firstTotals = await ledgerTotals([firstContributionId]);
+    assert.equal(firstTotals.debits, firstTotals.credits);
+    assert.equal(firstTotals.debits, 12_000); // this one contribution's own capture (6000) + funding move (6000)
 
     const second = await app.inject({
       method: 'POST',
@@ -159,6 +178,7 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
       WHERE aggregate_id = ${vinkId} ORDER BY seq`;
     const types = events.map((row) => row.event_type as string);
     for (const expected of [
+      'ContributionCaptureInitiated', // RM3A: the new capture-immediately edge
       'SubmissionsClosed',
       'ProcessingGraceStarted',
       'ContributionCaptured',
@@ -250,7 +270,7 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
     assert.equal(totals.debits, totals.credits);
   });
 
-  it('decline + deadline: submissions close via sweep, grace expiry releases the hold (E2)', async () => {
+  it('RM3A: decline + deadline — submissions close via sweep, grace expiry REFUNDS the already-captured contribution (not a hold release), lands EXPIRED (E2)', async () => {
     const { vinkId } = await createOpenVink({ deadlineMs: 1_200 });
     const declined = await app.inject({
       method: 'POST',
@@ -265,16 +285,21 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
       headers: authed('memberB'),
       payload: {},
     });
-    assert.equal(ok.json().contribution.status, 'AUTHORIZED');
+    // RM3A: captured immediately — real money already moved before the deadline is ever hit.
+    assert.equal(ok.json().contribution.status, 'CAPTURED');
 
     await new Promise((resolve) => setTimeout(resolve, 1_300));
     // The real sweep body (BullMQ invokes the same function on a schedule). With one
-    // DECLINED and one AUTHORIZED there are ZERO unresolved attempts, so the D5 resolver's
-    // fast path decides EXPIRED at close — no idle grace wait (doc 03 §1).
+    // DECLINED and one CAPTURED there are ZERO unresolved attempts, so the D5 resolver's
+    // fast path decides at close — no idle grace wait (doc 03 §1).
     const swept = await runSweeps(db.sql, provider);
     assert.ok(swept.closed >= 1);
     const afterClose = await db.sql`SELECT state FROM vinks WHERE id = ${vinkId}`;
     assert.equal(afterClose[0]!.state, 'EXPIRED');
+    // Passed through REFUNDS_PENDING on the way — real, audited, not skipped.
+    const history = await db.sql`SELECT to_state FROM vink_state_history
+      WHERE vink_id = ${vinkId} ORDER BY seq`;
+    assert.ok(history.some((row) => row.to_state === 'REFUNDS_PENDING'));
 
     // Late deadline runs are harmless no-ops (idempotent timers, Plan §10).
     const rerun = await app.inject({
@@ -289,19 +314,21 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
       await db.sql`SELECT status FROM contributions WHERE vink_id = ${vinkId} ORDER BY status`;
     assert.deepEqual(
       finalStates.map((row) => row.status),
-      ['CANCELLED', 'DECLINED'],
+      ['DECLINED', 'REFUNDED'],
     );
     const providerStatus = await provider.retrievePaymentStatus(
       (
         await db.sql`SELECT provider_reference FROM contributions
-        WHERE vink_id = ${vinkId} AND status = 'CANCELLED'`
+        WHERE vink_id = ${vinkId} AND status = 'REFUNDED'`
       )[0]!.provider_reference as string,
     );
-    assert.equal(providerStatus.status, 'CANCELED');
-    // Nothing was captured → nothing was posted for this vink's contributions.
+    assert.equal(providerStatus.status, 'REFUNDED');
+    // RM3A: money DID move (capture + funding move + refund reversal) and nets to zero — the
+    // exact scenario the pre-RM3A hold model could never produce.
     const ids = await db.sql`SELECT id FROM contributions WHERE vink_id = ${vinkId}`;
     const totals = await ledgerTotals(ids.map((row) => row.id as string));
-    assert.equal(totals.debits, 0);
+    assert.equal(totals.debits, totals.credits);
+    assert.ok(totals.debits > 0);
   });
 
   it('lost response (E5): RESOLUTION_PENDING, resolve replays the same key, one charge only', async () => {
@@ -323,7 +350,9 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
       payload: {},
     });
     assert.equal(resolved.statusCode, 200);
-    assert.equal(resolved.json().contribution.status, 'AUTHORIZED');
+    // RM3A: the resolver captures immediately once it learns the authorization genuinely
+    // succeeded — same capture-immediately treatment as the direct-authorize path.
+    assert.equal(resolved.json().contribution.status, 'CAPTURED');
 
     const rows =
       await db.sql`SELECT count(*)::int AS n FROM contributions WHERE vink_id = ${vinkId}`;

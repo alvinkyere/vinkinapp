@@ -82,16 +82,21 @@ const envSchema = z.object({
   /** Origin for the ops console's browser fetches (PV11, apps/operations-console) — a
    * second allowed CORS origin alongside VINKIN_PUBLIC_BASE_URL. */
   OPERATIONS_CONSOLE_BASE_URL: z.url().default('http://localhost:3200'),
-  /** ENG1 timer semantics: one server-side source of truth for how long a Vink stays OPEN,
-   * replacing the client-computed absolute deadline `apps/mobile` used to hardcode. Default
-   * (86400 = 24h) is the EXACT current behavior, not a product-timing change — no decision
-   * closes what the pilot's real window should be (checked docs/spec/decision-log.md and the
-   * docs/design/ product-behavior docs; neither specifies a number). Revisit once one does. */
-  VINK_OPEN_DURATION_SECONDS: z.coerce.number().int().positive().default(86_400),
+  /** ENG1 timer semantics established this as real, server-side config (replacing the
+   * client-computed absolute deadline `apps/mobile` used to hardcode); RM4A (D47) is the
+   * decision that finally closes what the value itself should be — D47's own spec: "7-minute
+   * maximum Vink lifetime." Was 86_400 (24h, ENG1's own "no decision exists yet, preserve
+   * exact prior behavior" default). `packages/application/src/commands.ts`'s own
+   * `DEFAULT_OPEN_DURATION_SECONDS` is a second, necessary copy of this SAME value
+   * (`packages/application` can't depend on `apps/api`) — `env.test.ts` asserts they match. */
+  VINK_OPEN_DURATION_SECONDS: z.coerce.number().int().positive().default(420),
   /** Spec §14 "Recommended initial timing": processing grace runs T to T+60s after the
    * deadline. Default (60) matches the Spec's own recommendation and the value this was
    * already hardcoded to (`PROCESSING_GRACE_SECONDS` in commands.ts) — a promotion to real
-   * config, not a behavior change. "The grace duration must be configurable" (§14). */
+   * config, not a behavior change. "The grace duration must be configurable" (§14).
+   * RM4A (D47): deliberately left unchanged — D47's 7-minute figure names the submission
+   * window specifically; grace is a separate, already-tuned buffer between the deadline and
+   * the funding decision. */
   VINK_PROCESSING_GRACE_SECONDS: z.coerce.number().int().positive().default(60),
   /** How often the deadline-sweep job polls for OPEN/grace/stuck-contribution work
    * (apps/api/src/jobs/sweeps.ts). Default (10) matches the previous hardcoded

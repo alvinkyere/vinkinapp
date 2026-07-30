@@ -5,6 +5,7 @@
 
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { buildApp } from './app.ts';
 import { createIsolatedTestDb, type IsolatedTestDb } from './testing/integration-db.ts';
 import { runSweeps } from './jobs/sweeps.ts';
@@ -85,13 +86,50 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
     return vinkId;
   }
 
+  /** RM3B (D47): the sweep now provisions from the card pool — seed a real, disabled pool
+   * card (same technique as `card-pool.integration.test.ts`'s own `seedRealCard`) before
+   * relying on the sweep to provision one. */
+  async function seedPoolCard(): Promise<void> {
+    const { providerCardholderId } = await provider.createCardholder({
+      idempotencyKey: `cardholder:it:${randomUUID()}`,
+      externalAccountId: 'vinkin-financial-account',
+      legalName: 'VinkIn Inc',
+    });
+    const issued = await provider.issueTemporaryCard({
+      idempotencyKey: `issue:it:${randomUUID()}`,
+      providerCardholderId,
+      spendLimit: { amountMinor: 100_000, currency: 'USD' },
+      metadata: {},
+    });
+    await provider.disableCard(issued.providerCardId);
+    await db.sql`INSERT INTO cards (id, provider_card_id, display_last_four, status)
+      VALUES (${randomUUID()}, ${issued.providerCardId}, '4242', 'AVAILABLE')`;
+  }
+
   async function provisionViaSweep(vinkId: string): Promise<void> {
+    await seedPoolCard();
     const swept = await runSweeps(db.sql, provider);
     assert.ok(swept.cardsProvisioned >= 1);
     assert.equal(
       (await db.sql`SELECT state FROM vinks WHERE id = ${vinkId}`)[0]!.state,
       'CARD_READY',
     );
+  }
+
+  /** RM3B (D47): the real provider_card_id + presented wallet token for a card-pool-
+   * provisioned vink — the token the merchant-authorization request must present to be
+   * approved. */
+  async function poolCardInfo(
+    vinkId: string,
+  ): Promise<{ providerCardId: string; walletToken: string }> {
+    const rows = await db.sql`
+      SELECT c.provider_card_id, t.provider_token_id
+      FROM card_assignments ca
+      JOIN cards c ON c.id = ca.card_id
+      JOIN card_wallet_tokens t ON t.card_assignment_id = ca.id
+      WHERE ca.vink_id = ${vinkId}`;
+    const row = rows[0] as { provider_card_id: string; provider_token_id: string };
+    return { providerCardId: row.provider_card_id, walletToken: row.provider_token_id };
   }
 
   before(async () => {
@@ -135,6 +173,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
     assert.equal(snapshot.json().card.spendingLimitMinor, 12_000);
     assert.equal(snapshot.json().card.merchantLocked, false);
 
+    const { walletToken } = await poolCardInfo(vinkId);
     const auth = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
@@ -143,6 +182,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
         merchantIdentifier: 'GROCER-1',
         mcc: '5411',
         amountMinor: 12_000,
+        presentedWalletToken: walletToken,
       },
     });
     assert.equal(auth.statusCode, 201);
@@ -162,8 +202,15 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
 
     const vinkRow = await db.sql`SELECT state FROM vinks WHERE id = ${vinkId}`;
     assert.equal(vinkRow[0]!.state, 'COMPLETED');
-    const cardRow = await db.sql`SELECT status FROM temporary_cards WHERE vink_id = ${vinkId}`;
-    assert.equal(cardRow[0]!.status, 'CLOSED');
+    // RM3B: settlement tears the card down and returns it to the pool (not `temporary_cards`
+    // — this vink was provisioned from the card pool).
+    const assignmentRow = await db.sql`SELECT status, provisioning_status FROM card_assignments
+      WHERE vink_id = ${vinkId}`;
+    assert.equal(assignmentRow[0]!.status, 'RETURNED');
+    assert.equal(assignmentRow[0]!.provisioning_status, 'SANITIZED');
+    const cardRow = await db.sql`SELECT c.status FROM cards c
+      JOIN card_assignments ca ON ca.card_id = c.id WHERE ca.vink_id = ${vinkId}`;
+    assert.equal(cardRow[0]!.status, 'AVAILABLE');
 
     // Ledger balances across every posting for the vink.
     const totals = await db.sql`
@@ -193,9 +240,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
   it('EXACTLY ONE: a duplicate merchant authorization does not create a second purchase (E4)', async () => {
     const vinkId = await fundedVink();
     await provisionViaSweep(vinkId);
-    const card =
-      await db.sql`SELECT provider_card_id FROM temporary_cards WHERE vink_id = ${vinkId}`;
-    const providerCardId = card[0]!.provider_card_id as string;
+    const { providerCardId, walletToken } = await poolCardInfo(vinkId);
 
     // Drive the SAME provider authorization id twice through the engine directly.
     const outcome = provider.simulateMerchantAuthorization({
@@ -212,6 +257,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
       merchantIdentifier: 'GROCER-1',
       mcc: '5411',
       amountMinor: 12_000,
+      presentedWalletToken: walletToken,
     };
     // Both requests reuse the same provider auth id by pre-seeding — call the engine route
     // twice; the second must dedupe. (The route mints a provider id per call, so we assert
@@ -238,6 +284,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
   it('E7: settlement overage moves the Vink to RECOVERY_REQUIRED (recovery is PV7)', async () => {
     const vinkId = await fundedVink();
     await provisionViaSweep(vinkId);
+    const { walletToken } = await poolCardInfo(vinkId);
     const auth = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
@@ -246,6 +293,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
         merchantIdentifier: 'GROCER-1',
         mcc: '5411',
         amountMinor: 12_000,
+        presentedWalletToken: walletToken,
       },
     });
     const authorizationId = auth.json().authorizationId as string;

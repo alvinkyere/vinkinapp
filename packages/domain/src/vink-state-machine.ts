@@ -15,6 +15,14 @@
  *
  * The FUNDING_REVERSAL → EXPIRED edge is a G13 interpretation, ratified by the owner
  * 2026-07-17 (D11 amendment).
+ *
+ * RM3A (D47): unfunded expiry may need to refund already-captured money (capture-immediately
+ * funding engine), not merely cancel holds. REFUNDS_PENDING / REFUND_RECOVERY_REQUIRED sit
+ * between PROCESSING_GRACE and EXPIRED — mirroring the existing RECOVERY_REQUIRED /
+ * RECOVERY_PENDING precedent for "an outcome that isn't automatically resolvable needs a
+ * visible non-terminal holding state" — because EXPIRED is a tested terminal state with no
+ * exits; it cannot itself gain an outgoing REFUNDS_PENDING edge. See
+ * `packages/application/src/contributions.ts`'s `resolveFunding` failure branch.
  */
 
 import { IllegalTransitionError } from './errors.ts';
@@ -26,6 +34,8 @@ export type VinkState =
   | 'SUBMISSIONS_CLOSED'
   | 'PROCESSING_GRACE'
   | 'FUNDED'
+  | 'REFUNDS_PENDING' // RM3A (D47): unfunded expiry, refunding already-captured contributions
+  | 'REFUND_RECOVERY_REQUIRED' // RM3A (D47): a refund failed or a contribution's provider truth is unknown
   | 'EXPIRED'
   | 'CARD_PROVISIONING'
   | 'CARD_READY'
@@ -46,6 +56,9 @@ export type VinkEvent =
   | 'PROCESSING_GRACE_STARTED'
   | 'FUNDING_CONFIRMED' // session resolver only (D5)
   | 'FUNDING_FAILED' // session resolver only (D5)
+  | 'REFUNDS_COMPLETED' // RM3A (D47): every captured contribution refunded, or none needed it
+  | 'REFUND_RECOVERY_NEEDED' // RM3A (D47): a refund failed, or a contribution's status is still unknown
+  | 'REFUND_RECOVERY_RESOLVED' // RM3A (D47): sweep-confirmed every outstanding contribution resolved
   | 'CARD_PROVISIONING_STARTED'
   | 'CARD_ISSUED'
   | 'CARD_PROVISIONING_FAILED'
@@ -87,7 +100,20 @@ const TRANSITIONS: Readonly<Record<VinkState, Partial<Record<VinkEvent, VinkTran
   },
   PROCESSING_GRACE: {
     FUNDING_CONFIRMED: { to: 'FUNDED', emits: 'VinkFunded' },
-    FUNDING_FAILED: { to: 'EXPIRED', emits: 'VinkExpired' },
+    // RM3A (D47): destination changed from EXPIRED to REFUNDS_PENDING — capture-immediately
+    // means some contributions may already hold real captured money that must be refunded,
+    // not merely cancelled, before this vink can reach its true terminal state.
+    FUNDING_FAILED: { to: 'REFUNDS_PENDING', emits: 'VinkRefundsPending' },
+  },
+  REFUNDS_PENDING: {
+    REFUNDS_COMPLETED: { to: 'EXPIRED', emits: 'VinkExpired' },
+    REFUND_RECOVERY_NEEDED: {
+      to: 'REFUND_RECOVERY_REQUIRED',
+      emits: 'VinkRefundRecoveryRequired',
+    },
+  },
+  REFUND_RECOVERY_REQUIRED: {
+    REFUND_RECOVERY_RESOLVED: { to: 'EXPIRED', emits: 'VinkExpired' },
   },
   FUNDED: {
     // Owner's illustrative "CardProvisioningStarted" — realized as the Plan §12 catalog

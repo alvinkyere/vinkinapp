@@ -34,6 +34,7 @@ const ALL_EVENTS: ContributionEvent[] = [
   'PROVIDER_RESULT_UNKNOWN',
   'AUTHORIZATION_TIMED_OUT',
   'SESSION_FUNDED',
+  'CAPTURE_INITIATED',
   'PARTICIPANT_EXITED',
   'SESSION_EXPIRED',
   'CAPTURE_SUCCEEDED',
@@ -75,6 +76,7 @@ describe('Contribution state machine (Plan §9)', () => {
         'ContributionResolutionRequired',
       ],
       ['AUTHORIZED', 'SESSION_FUNDED', 'CAPTURE_PENDING', 'ContributionCaptureStarted'],
+      ['AUTHORIZED', 'CAPTURE_INITIATED', 'CAPTURE_PENDING', 'ContributionCaptureInitiated'],
       [
         'AUTHORIZED',
         'PARTICIPANT_EXITED',
