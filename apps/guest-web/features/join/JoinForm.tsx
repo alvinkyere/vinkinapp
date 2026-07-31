@@ -10,6 +10,7 @@ import { humanErrorMessage } from '../../lib/human-errors';
 import { formatMoney } from '../../lib/money';
 import { CATEGORY_LABELS } from '../../lib/purchase-category';
 import { StatusBadge } from '../../components/StatusBadge';
+import { useNow } from '../../lib/use-countdown';
 import type { GuestSession, PublicVinkSummary } from '../../lib/types';
 
 export function JoinForm({
@@ -22,7 +23,11 @@ export function JoinForm({
   onJoined: (session: GuestSession) => void;
 }) {
   const [displayName, setDisplayName] = useState('');
-  const deadlineLabel = summary.joinable ? countdownLabel(summary.submissionDeadline) : null;
+  // RM4B (D47): ticks every second so this never freezes on the shortened (post-RM4A)
+  // submission window — `countdownLabel`'s own Phase 6 §13 copy is unchanged, only how often
+  // it's recomputed.
+  const now = useNow();
+  const deadlineLabel = summary.joinable ? countdownLabel(summary.submissionDeadline, now) : null;
 
   const mutation = useMutation({
     mutationFn: (name: string) => joinVink(publicCode, name),

@@ -6,6 +6,7 @@ import '../../core/errors/api_exception.dart';
 import '../../core/errors/human_errors.dart';
 import '../../design_system/components/vink_avatar.dart';
 import '../../design_system/components/vink_buttons.dart';
+import '../../design_system/components/vink_deadline_countdown.dart';
 import '../../design_system/components/vink_empty_state.dart';
 import '../../design_system/components/vink_inline_error.dart';
 import '../../design_system/components/vink_logo.dart';
@@ -349,7 +350,6 @@ class _ActiveVinkCardV2 extends StatelessWidget {
     // the one source of truth for this bar — never derived from `fundedAmountMinor`, which
     // keeps its own separate, all-at-once-at-full-resolution meaning.
     final progress = item.contributionProgress;
-    final timeLabel = _timeRemainingLabel(vink.submissionDeadline);
     final actionLabel = _nextActionLabel(vink.state);
     final statusLabel = vinkStatusLabel(vink.state);
     final title = vink.purpose ?? purchaseCategoryLabel(vink.purchaseCategory);
@@ -477,15 +477,25 @@ class _ActiveVinkCardV2 extends StatelessWidget {
                     '${progress.confirmedParticipantCount} of ${progress.totalParticipantCount} people are in',
                     style: VinkTypography.bodySmallSecondary,
                   ),
-                  if (timeLabel != null) ...[
-                    Icon(
-                      Icons.schedule_rounded,
-                      size: 16,
-                      color: VinkColors.smoke,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(timeLabel, style: VinkTypography.bodySmallSecondary),
-                  ],
+                  VinkDeadlineCountdown(
+                    deadline: vink.submissionDeadline,
+                    builder: (context, remaining) {
+                      final timeLabel = formatTimeRemaining(remaining);
+                      if (timeLabel == null) return const SizedBox.shrink();
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.schedule_rounded,
+                            size: 16,
+                            color: VinkColors.smoke,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(timeLabel, style: VinkTypography.bodySmallSecondary),
+                        ],
+                      );
+                    },
+                  ),
                 ],
               ),
               const SizedBox(height: VinkSpacing.md),

@@ -18,6 +18,7 @@ import '../../core/realtime/realtime_client.dart';
 import '../../core/repositories/vink_repository.dart';
 import '../../design_system/components/money_text.dart';
 import '../../design_system/components/vink_bottom_sheet.dart';
+import '../../design_system/components/vink_deadline_countdown.dart';
 import '../../design_system/components/vink_buttons.dart';
 import '../../design_system/components/vink_empty_state.dart';
 import '../../design_system/components/vink_inline_error.dart';
@@ -500,18 +501,6 @@ String _stateCopy(String state) => switch (state) {
   _ => '',
 };
 
-/// Only meaningful while OPEN (submissions still being collected) — same phrasing as the
-/// Home screen's Active Vink card (`features/home/home_screen.dart`), shown here too so the
-/// live lobby carries the same "time pressure" signal, not just a static progress bar.
-String? _timeRemainingLabel(DateTime? deadline) {
-  if (deadline == null) return null;
-  final diff = deadline.difference(DateTime.now());
-  if (diff.isNegative) return null;
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m left';
-  if (diff.inHours < 24) return '${diff.inHours}h left';
-  return '${diff.inDays}d left';
-}
-
 /// D24/D25's eight-value guest-safe `contributionStatus`, reused as-is for a signed-in
 /// participant (Slice I2B) — deliberately terse, not the organizer body's longer
 /// `_stateCopy` sentences (some of which, e.g. "Thanks for organizing", are organizer-
@@ -857,24 +846,32 @@ class _LobbyBody extends StatelessWidget {
             ],
           ),
         ),
-        if (vink.state == 'OPEN' &&
-            _timeRemainingLabel(vink.submissionDeadline) != null) ...[
-          const SizedBox(height: VinkSpacing.lg),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.schedule_rounded, size: 16, color: VinkColors.smoke),
-              const SizedBox(width: 4),
-              Text(
-                // `_timeRemainingLabel` already reads "21h left" — prefixing "Closes in"
-                // produced a real, visible "Closes in 21h left" redundancy, caught via
-                // self-screenshot.
-                _timeRemainingLabel(vink.submissionDeadline)!,
-                style: VinkTypography.bodySmallSecondary,
-              ),
-            ],
+        if (vink.state == 'OPEN')
+          VinkDeadlineCountdown(
+            deadline: vink.submissionDeadline,
+            builder: (context, remaining) {
+              // `formatTimeRemaining` reads "21h left" — prefixing "Closes in" produced a
+              // real, visible "Closes in 21h left" redundancy, caught via self-screenshot.
+              // `pastLabel: null` hides this row entirely once the deadline passes, same as
+              // the pre-RM4B behavior.
+              final label = formatTimeRemaining(remaining, pastLabel: null);
+              if (label == null) return const SizedBox.shrink();
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: VinkSpacing.lg),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.schedule_rounded, size: 16, color: VinkColors.smoke),
+                      const SizedBox(width: 4),
+                      Text(label, style: VinkTypography.bodySmallSecondary),
+                    ],
+                  ),
+                ],
+              );
+            },
           ),
-        ],
         const SizedBox(height: VinkSpacing.lg),
         // Concept-image: one outlined "Share Invite" action, not three separate buttons —
         // Copy link/Share/Show QR are all still reachable, now offered from one sheet
