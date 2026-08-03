@@ -8,6 +8,43 @@ contract.
 
 ---
 
+## D48 — SH1 opens a new, repeatable Security-Hardening (`SH`-numbered) track, parallel to but distinct from the fixed ENG0–ENG15 sequence
+
+- **Decision:** the owner supplied a "Security Hardening Milestone (SH1)" brief — a
+  comprehensive offensive security review, self-named `SH1` and framed as the first of a
+  repeatable series ("...future security milestones (SH2, SH3, etc.)"). `ENG10`–`ENG15` already
+  have fixed, different scopes defined in `docs/architecture/eng-roadmap.md` ("Closed simulated
+  pilot," "Provider integration foundation," etc.), so SH1 does not get folded into an
+  ENG-numbered slot or renumber anything. It's treated the same way the Real-Money Beta track
+  (D47, `RM1`–`RM7`) was: a separate, owner-opened sequence with its own prefix, tracked via
+  milestone reports (`milestone-reports/SH1-SECURITY-HARDENING.md`) and this running log, not
+  via a new section in `eng-roadmap.md` itself (that file is a static, owner-authored reference
+  of the ENG0–ENG15 sequence — the RM track was never added there either; both live in
+  `CLAUDE.md`'s narrative and milestone reports instead).
+- **Date:** 2026-08-03
+- **Status:** ACCEPTED (flagged here per the owner's own answer, during SH1 scoping, that this
+  should "register as the next ENG milestone" — interpreted as "follow the milestone-report/
+  decision-log convention," not literally overwrite a fixed ENG10–15 slot, since those already
+  have different owner-authored scopes; disclosed as a judgment call, not decided silently, per
+  the repo's own hard rule (§9) — open to renumbering if the owner prefers something else)
+- **Reason:** ENG8 ("Security hardening") already closed as a one-time pass before the original
+  external-pilot gate; the brief's own repeatable `SH1/SH2/SH3` framing signals an intentionally
+  recurring verification cadence distinct from ENG8's one-time checklist, and the RM1–RM4B
+  track added the largest new financial attack surface in the codebase's history (card pool,
+  wallet tokens, capture-immediately funding) with zero dedicated security review before SH1 —
+  a real, current gap, not a re-run of already-closed ENG8 ground.
+- **Alternatives considered:** treat it as literally "ENG10" (rejected — ENG10 already has a
+  fixed, different, owner-authored scope, "Closed simulated pilot," reusing the number would
+  overwrite it silently); skip any log entry and just ship the code changes (rejected — the
+  brief's own "no security issue should be fixed silently" instruction and this repo's §9 rule
+  both call for a durable, citable record of a new process/naming convention, not just the
+  fixes themselves).
+- **Affected modules:** process/documentation only — `docs/architecture/eng-roadmap.md` is
+  unchanged (SH1 doesn't claim any of its numbered slots); `CLAUDE.md`'s running log and
+  `milestone-reports/` gain the SH1 entry.
+- **Revisit trigger:** an owner decision to fold future SH-numbered work into the ENG sequence
+  instead, or to renumber/rename the track.
+
 ## D47 — Real-Money Beta: VinkIn-as-cardholder funds flow, reusable card pool, dual-timer Vink/card lifecycle, wallet-only card exposure
 
 - **Decision:** the owner supplied and approved a full "VinkIn Real Money Beta" specification,

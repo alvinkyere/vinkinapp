@@ -25,9 +25,15 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     memberB: `pv7_b_${stamp}`,
   };
   const tokens: Record<string, string> = {};
+  let operatorToken: string;
 
   function authed(who: keyof typeof users) {
     return { authorization: `Bearer ${tokens[who]}` };
+  }
+  // SH1-A: /internal/simulator/* now requires an operator token (previously reachable with
+  // no auth at all, gated only by the environment allowlist).
+  function opAuthed() {
+    return { authorization: `Bearer ${operatorToken}` };
   }
 
   async function fundedVink(): Promise<string> {
@@ -122,6 +128,7 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     const auth = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
+      headers: opAuthed(),
       payload: {
         merchantName: 'Grocer',
         merchantIdentifier: 'GROCER-1',
@@ -135,6 +142,7 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     await app.inject({
       method: 'POST',
       url: `/internal/simulator/authorizations/${authorizationId}/capture`,
+      headers: opAuthed(),
       payload: { vinkId, providerAuthorizationId, settledAmountMinor: 13_500 },
     });
     assert.equal(
@@ -173,6 +181,13 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
       });
       tokens[who] = registered.json().accessToken;
     }
+    const opLogin = await app.inject({
+      method: 'POST',
+      url: '/internal/ops/auth/login',
+      payload: { operatorName: 'Test Operator', password: db.env.OPERATOR_PASSWORD },
+    });
+    assert.equal(opLogin.statusCode, 200);
+    operatorToken = opLogin.json().operatorToken as string;
   });
 
   after(async () => {
@@ -185,6 +200,7 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     const start = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/recovery/start`,
+      headers: opAuthed(),
       payload: {},
     });
     assert.equal(start.statusCode, 200);
@@ -223,6 +239,7 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     let res = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/recovery/start`,
+      headers: opAuthed(),
       payload: { scenario: 'DECLINE' },
     });
     assert.equal(res.json().outcome, 'RETRY_SCHEDULED');
@@ -230,6 +247,7 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
       res = await app.inject({
         method: 'POST',
         url: `/internal/simulator/vinks/${vinkId}/recovery/retry`,
+        headers: opAuthed(),
         payload: { scenario: 'DECLINE' },
       });
       assert.equal(res.json().outcome, 'RETRY_SCHEDULED');
@@ -237,6 +255,7 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     res = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/recovery/retry`,
+      headers: opAuthed(),
       payload: { scenario: 'DECLINE' },
     });
     assert.equal(res.json().outcome, 'DEFAULTED');
@@ -282,6 +301,7 @@ describe('recovery + refunds end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     const retry = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/contributions/${failed[0]!.id}/retry-refund`,
+      headers: opAuthed(),
       payload: {},
     });
     assert.equal(retry.json().status, 'REFUNDED');

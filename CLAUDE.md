@@ -1668,10 +1668,90 @@ unchanged (RM4A stayed entirely inside `commands.ts`/`contributions.ts`/`purchas
 unaffected (confirming the provider interface and reconciliation correlation logic are
 genuinely untouched), `pnpm typecheck/lint/format:check/guard` clean, 12/12 packages.
 
-Next: RM4B — real ticking countdowns in `apps/mobile`/`apps/guest-web`, including seconds-level
-display below one minute (owner-approved during planning) — a disclosed engineering
-placeholder pending real product/copy review, starting only on further direction, per the same
-checkpoint-before-continuing precedent as every RM slice split so far.
+**RM4B done** (`milestone-reports/RM4B-COUNTDOWN-TICKING.md`): frontend countdown ticking, the
+last piece of D47's dual-timer lifecycle. An audit found the countdown display on both clients
+was a pure render-time computation with no periodic re-render — invisible at the old 24h
+granularity, would visibly freeze at RM4A's shortened 7-minute default. New
+`apps/mobile/lib/design_system/components/vink_deadline_countdown.dart`
+(`VinkDeadlineCountdown`, a `Timer.periodic`-driven widget with an injectable clock for
+testability, plus `formatTimeRemaining` extending the existing "Xm/Xh/Xd left" format with
+seconds below one minute) wired into `_ActiveVinkCardV2` and the Lobby screen — **deliberately
+not** the legacy flag-off `_ActiveVinkCard`, which I6 already established must stay
+byte-for-byte untouched for rollback. New `apps/guest-web/lib/use-countdown.ts`'s `useNow()`
+hook wired into `JoinForm.tsx`, ticking the existing, untouched `countdownLabel` (Phase 6 §13)
+instead of evaluating it once. **Disclosed judgment call**: seconds-level display, owner-
+approved during RM4A planning, was added on mobile (no ratified copy blocks it) but
+deliberately **not** added to guest-web — Phase 6 §13's own ratified, tested copy ("Closes in
+under a minute," no numbers) would have been silently overridden by an engineering-track
+decision; flagged as open rather than resolved either way. The 10-minute card usage window
+remains entirely unsurfaced on both clients — disclosed as out of scope (no existing UI to make
+"tick"; adding one would be a new surface, not this slice's narrower fix). **11 new Flutter
+tests** (`vink_deadline_countdown_test.dart`, including a widget test proving three real ticks
+against an injected fake clock genuinely change the rendered text — not just that the format
+function returns the right string), **1 new guest-web Playwright test**
+(`rm4b-countdown-tick.spec.ts`) using `page.clock` to deterministically fast-forward the
+*browser's* time against a real RM4A-computed 7-minute server deadline — zero real wall-clock
+wait, runs in ~540ms, proves the label updates live with no reload. **`flutter test` 265/265**
+(up from 254), `flutter analyze` unchanged at the 26-issue baseline; guest-web **44 Playwright
+passed** (up from 43), same 8 pre-existing-unrelated failures, `tsc`/`eslint` clean;
+`pnpm typecheck/lint/format:check/guard` clean, 12/12 packages. Zero backend files touched.
+
+This closes the full D47 Real-Money Beta dual-timer lifecycle sequence: RM1 (card pool schema)
+→ RM2 (provider-boundary lifecycle) → RM3A (capture-immediately funding) → RM3B (card-pool
+cutover) → RM4A (backend dual-timer lifecycle) → RM4B (frontend countdown ticking). Remaining
+named RM slices: RM5 (wallet provisioning — blocked on external Apple/Google Wallet
+credentials, same class of gap ENG5's Sign in with Apple/Google and Android App Links already
+hit), RM6 (ops-console dispute review + one scoped, audited operator-refund route), RM7
+(beta-cap configuration). Awaiting owner direction on which to take up next.
+
+**SH1 done** (`milestone-reports/SH1-SECURITY-HARDENING.md`, D48) — a new, repeatable
+Security-Hardening track (`SH`-numbered, distinct from the fixed ENG0–ENG15 sequence) opened by
+an owner-supplied offensive-security brief. Not a rebuild of ENG8 (already closed, one-time,
+before the original pilot gate) — a fresh adversarial pass over what changed since, chiefly the
+entire RM1–RM4B card-pool/wallet-token/capture-immediately surface, which had never had a
+dedicated security review. Two Explore-agent audits mapped the auth surface and cross-checked
+existing CI security tooling before any change, matching ENG6 Slice 1/ENG8's own audit-first
+precedent. **Real, confirmed IDOR fixed**: `POST .../contributions/:id/resolve` had no
+ownership check at all — any authenticated user could resolve, and via RM3A capture-immediately
+actually capture money on, any other participant's pending contribution on any vink. Fixed with
+a `requester` field on `ResolveContributionInput` (`packages/application/src/contributions.ts`)
+enforced for the HTTP route, left `undefined` for the two trusted internal callers
+(`jobs/sweeps.ts`, the dev-only simulator resolve-pending route) — proved the regression test
+genuinely catches the bug via a `git stash` revert-and-restore, not just asserted. **Real,
+confirmed environment-gating gap fixed, flagged to the owner before fixing** (`AskUserQuestion`,
+since remediation choice affects legitimate demo/QA flows): all eight `/internal/simulator/*`
+dev-utility routes carried zero bearer auth, gated only by an environment allowlist that
+includes `demo` — the live hosted pilot's own `VINKIN_ENV` per ENG4's own hosted-activation
+note — meaning any internet caller could manipulate any vink's deadline/resolution/refund state
+unauthenticated. `MockFinancialProvider` still drives all command execution
+(`server.ts:26`, confirmed), so no real money could have moved through it, but it was a live,
+unauthenticated cross-tenant hole. Fixed by requiring `requireOperator` (owner's chosen
+remediation) on all eight routes; updated all five affected integration test files to
+authenticate as an operator. A real local OWASP ZAP scan (installed via Homebrew — this
+environment has no Docker, disclosed substitution for the brief's literal docker-compose ask)
+found guest-web/operations-console had **zero security headers** at all (ENG8's helmet work
+only ever covered `apps/api`) — fixed via `next.config.ts` `headers()` in both apps
+(`X-Frame-Options`, a scoped CSP, `X-Content-Type-Options`, `Referrer-Policy`,
+`poweredByHeader: false`), deliberately not a full script-src lockdown, the same "don't guess at
+a CSP that breaks hydration without dedicated testing" caution ENG8 disclosed for the API's own
+CSP. ZAP's one High finding (Path Traversal) was manually reproduced and disproven — a real
+false positive. A fresh `pnpm audit` caught **two real CVEs that appeared since ENG8** (a
+`brace-expansion` bypass advisory, a second `postcss` lineage via `@tailwindcss/postcss`) — both
+fixed via scoped `pnpm-workspace.yaml` overrides, same-major patch bumps with no compatibility
+risk (unlike ENG8's rejected major-jump fix for the same package); `pnpm audit` is now clean
+with 0 findings and no ignore list at all. Added `.github/workflows/codeql.yml` (the one
+concretely-missing CI security item). Secret scanning (gitleaks + trufflehog, full git history
++ uncommitted diff) found 4 raw hits, all confirmed false positives (fake test-fixture secrets,
+auto-generated lockfile checksums). **`packages/application` 149/149** (up from 147),
+**`apps/api` integration 290/290** (up from 288), guest-web Playwright 44 passed/8 failed
+(matches RM4B's own documented pre-existing-failure baseline exactly — no regression),
+operations-console Playwright 1/2 (the one failure traced to this local dev database's empty
+card pool, a pre-existing environment-seeding gap confirmed via server logs, unrelated to any
+SH1 change — the failing test's own comment says "no simulator shortcut," it never touches the
+newly-gated routes), `pnpm typecheck/lint/format:check/guard` clean, 12/12 packages throughout.
+No Critical/High findings remain unresolved. Disclosed, not built this pass: GitGuardian/Snyk/a
+live staging ZAP run (no accounts/URL exist), a full authenticated ZAP crawl behind JWT auth, a
+full script-src CSP — each flagged as SH2 follow-up material in the milestone report.
 
 ## Hard rules (from the Spec — never relax to make something pass)
 

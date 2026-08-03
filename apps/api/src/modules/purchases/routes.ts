@@ -30,6 +30,7 @@ import type { Sql } from '../../db/client.ts';
 import { simulatorRoutesPermitted } from '../../config/simulator-guard.ts';
 import { authorizationIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
+import { requireOperator } from '../ops/routes.ts';
 import { toCommandLogger } from '../../observability/command-logger.ts';
 import { toCommandMetrics } from '../../observability/command-metrics.ts';
 import { withProviderLogging } from '../../observability/provider-logging.ts';
@@ -104,6 +105,9 @@ export function registerPurchaseRoutes(
 
   // Provision the temporary card once a Vink is FUNDED.
   app.post('/internal/simulator/vinks/:vinkId/provision-card', async (request, reply) => {
+    // SH1-A: env-allowlist alone is not enough — `demo` (the live hosted pilot's own
+    // VINKIN_ENV) is on that allowlist, so this must also require an operator token.
+    if ((await requireOperator(request, reply, env)) === null) return;
     const { vinkId } = vinkIdParams.parse(request.params);
     return handle(reply, 201, async () => {
       const card = await provisionCardCommand(contextFor(request), {
@@ -122,6 +126,7 @@ export function registerPurchaseRoutes(
 
   // A merchant swipes the card: provider-side auth (mock) → VinkIn §17 decision (engine).
   app.post('/internal/simulator/vinks/:vinkId/merchant-authorizations', async (request, reply) => {
+    if ((await requireOperator(request, reply, env)) === null) return; // SH1-A
     const { vinkId } = vinkIdParams.parse(request.params);
     const body = merchantSchema.parse(request.body ?? {});
     return handle(reply, 201, async () => {
@@ -173,6 +178,7 @@ export function registerPurchaseRoutes(
   app.post(
     '/internal/simulator/authorizations/:authorizationId/reverse',
     async (request, reply) => {
+      if ((await requireOperator(request, reply, env)) === null) return; // SH1-A
       const { authorizationId } = authorizationIdParams.parse(request.params);
       const body = z.object({ vinkId: z.uuid() }).parse(request.body);
       return handle(reply, 200, async () => {
@@ -189,6 +195,7 @@ export function registerPurchaseRoutes(
   app.post(
     '/internal/simulator/authorizations/:authorizationId/capture',
     async (request, reply) => {
+      if ((await requireOperator(request, reply, env)) === null) return; // SH1-A
       const { authorizationId } = authorizationIdParams.parse(request.params);
       const body = z
         .object({

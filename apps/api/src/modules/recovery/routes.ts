@@ -27,6 +27,7 @@ import type { Sql } from '../../db/client.ts';
 import { simulatorRoutesPermitted } from '../../config/simulator-guard.ts';
 import { vinkAndContributionIdParams, vinkIdParams } from '../../middleware/params.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
+import { requireOperator } from '../ops/routes.ts';
 import { toCommandLogger } from '../../observability/command-logger.ts';
 import { toCommandMetrics } from '../../observability/command-metrics.ts';
 import { withProviderLogging } from '../../observability/provider-logging.ts';
@@ -102,6 +103,9 @@ export function registerRecoveryRoutes(
   }
 
   app.post('/internal/simulator/vinks/:vinkId/recovery/start', async (request, reply) => {
+    // SH1-A: env-allowlist alone is not enough — `demo` (the live hosted pilot's own
+    // VINKIN_ENV) is on that allowlist, so this must also require an operator token.
+    if ((await requireOperator(request, reply, env)) === null) return;
     const { vinkId } = vinkIdParams.parse(request.params);
     const body = z.object({ scenario: scenarioSchema }).parse(request.body ?? {});
     return handle(reply, 200, async () => {
@@ -119,6 +123,7 @@ export function registerRecoveryRoutes(
   });
 
   app.post('/internal/simulator/vinks/:vinkId/recovery/retry', async (request, reply) => {
+    if ((await requireOperator(request, reply, env)) === null) return; // SH1-A
     const { vinkId } = vinkIdParams.parse(request.params);
     const body = z.object({ scenario: scenarioSchema }).parse(request.body ?? {});
     return handle(reply, 200, async () => {
@@ -135,6 +140,7 @@ export function registerRecoveryRoutes(
   });
 
   app.post('/internal/simulator/vinks/:vinkId/refund-failed-session', async (request, reply) => {
+    if ((await requireOperator(request, reply, env)) === null) return; // SH1-A
     const { vinkId } = vinkIdParams.parse(request.params);
     return handle(reply, 200, () =>
       refundFailedSessionCommand(refundCtx(request), { vinkId: vinkId as VinkId }),
@@ -144,6 +150,7 @@ export function registerRecoveryRoutes(
   app.post(
     '/internal/simulator/vinks/:vinkId/contributions/:contributionId/retry-refund',
     async (request, reply) => {
+      if ((await requireOperator(request, reply, env)) === null) return; // SH1-A
       const params = vinkAndContributionIdParams.parse(request.params);
       return handle(reply, 200, async () => {
         const contribution = await retryRefundCommand(refundCtx(request), {

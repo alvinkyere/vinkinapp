@@ -24,6 +24,13 @@ describe(
     let app: Awaited<ReturnType<typeof buildApp>>;
     const stamp = Date.now();
     let userCounter = 0;
+    let operatorToken: string;
+
+    // SH1-A: /internal/simulator/* now requires an operator token (previously reachable with
+    // no auth at all, gated only by the environment allowlist).
+    function opAuthed() {
+      return { authorization: `Bearer ${operatorToken}` };
+    }
 
     before(async () => {
       db = await createIsolatedTestDb('rm3b');
@@ -37,6 +44,13 @@ describe(
         },
         checkRedis: async () => {},
       });
+      const opLogin = await app.inject({
+        method: 'POST',
+        url: '/internal/ops/auth/login',
+        payload: { operatorName: 'Test Operator', password: db.env.OPERATOR_PASSWORD },
+      });
+      assert.equal(opLogin.statusCode, 200);
+      operatorToken = opLogin.json().operatorToken as string;
     });
 
     after(async () => {
@@ -147,6 +161,7 @@ describe(
       return app.inject({
         method: 'POST',
         url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
+        headers: opAuthed(),
         payload: {
           merchantName: 'Corner Grocer',
           merchantIdentifier: 'GROCER-1',
@@ -199,6 +214,7 @@ describe(
       const capture1 = await app.inject({
         method: 'POST',
         url: `/internal/simulator/authorizations/${auth1.json().authorizationId}/capture`,
+        headers: opAuthed(),
         payload: {
           vinkId: vink1,
           providerAuthorizationId: auth1.json().providerAuthorizationId,

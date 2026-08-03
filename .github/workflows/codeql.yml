@@ -1,0 +1,33 @@
+name: CodeQL
+
+# SH1-D: the one concretely-missing CI security-automation item (ci.yml's own
+# "security-scans" job already covers dependency audit + Semgrep SAST since ENG8). Scoped to
+# javascript-typescript only — CodeQL has no Dart/Flutter support, and every non-mobile app in
+# this repo (apps/api, apps/guest-web, apps/operations-console, packages/*) is TypeScript.
+# Runs on its own schedule too, not just push/PR, so drift in CodeQL's own query packs still
+# gets caught between code changes.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 3 * * 1' # weekly, Monday — matches Dependabot's own weekly cadence
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:javascript-typescript'

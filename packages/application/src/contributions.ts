@@ -874,6 +874,17 @@ export interface ResolveContributionInput {
   /** For the lost-response replay (no provider reference yet): same scenario, same key. */
   scenario?: ContributionScenario;
   now?: Date;
+  /**
+   * SH1-A: the caller's identity, required for every externally-reachable (HTTP) invocation.
+   * `undefined` is reserved for trusted internal callers that are not driven by a single
+   * request — `jobs/sweeps.ts`'s system-wide stuck-contribution sweep and the dev/test-only
+   * `/internal/simulator/*` resolve-pending route (both already gated by other means: the
+   * sweep isn't attacker-reachable at all, the simulator route by `simulatorAllowed`). When
+   * present, the requester must be the vink's organizer or the contribution's own participant
+   * — without this, any authenticated user could resolve (and, via `captureImmediately`,
+   * capture real money on) any other user's pending contribution on any vink.
+   */
+  requester?: ContributionRequester;
 }
 
 export async function resolveContributionCommand(
@@ -891,6 +902,25 @@ export async function resolveContributionCommand(
         'PARTICIPANT_NOT_FOUND',
         `contribution ${input.contributionId} not found`,
       );
+    }
+    if (input.requester !== undefined) {
+      const isOrganizer =
+        input.requester.kind === 'user' && input.requester.userId === vink.organizerUserId;
+      if (!isOrganizer) {
+        const participants = await tx.listParticipants(vink.id);
+        const owner = participants.find((row) => row.id === contribution.participantId);
+        const isOwnContribution =
+          owner !== undefined &&
+          (input.requester.kind === 'user'
+            ? owner.userId === input.requester.userId
+            : owner.guestIdentityId === input.requester.guestIdentityId);
+        if (!isOwnContribution) {
+          throw new ApplicationError(
+            'FORBIDDEN',
+            'requester may only resolve their own contribution or, as organizer, one on their own vink',
+          );
+        }
+      }
     }
     const now = input.now ?? ctx.clock.now();
     if (

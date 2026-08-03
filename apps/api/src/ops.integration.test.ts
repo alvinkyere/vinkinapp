@@ -162,6 +162,19 @@ describe('operations console end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     assert.equal(orgTokenRejected.statusCode, 401); // a regular user JWT is not an operator token
   });
 
+  it('SH1-A: the reverse direction also fails closed — an operator token is not a user access token', async () => {
+    // Structural, not just an application-level check: `verifyAccessToken` requires a
+    // string `sub`/`sid`, and operator tokens carry neither (they carry `typ: 'operator'`/
+    // `operatorName` instead — `auth/operator-tokens.ts`'s own header comment says this
+    // works "vice versa" of the case above; this proves the vice versa, not just asserts it.
+    const opTokenRejected = await app.inject({
+      method: 'GET',
+      url: '/api/v1/vinks',
+      headers: opAuthed(),
+    });
+    assert.equal(opTokenRejected.statusCode, 401);
+  });
+
   it('EXIT GATE: an operator finds a vink, inspects every table it touches, and every mock financial event is explained', async () => {
     const { vinkId, publicCode } = await fundedVink();
 

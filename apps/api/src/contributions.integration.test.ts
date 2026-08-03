@@ -24,9 +24,15 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
     memberB: `pv5_b_${stamp}`,
   };
   const tokens: Record<string, string> = {};
+  let operatorToken: string;
 
   function authed(who: keyof typeof users) {
     return { authorization: `Bearer ${tokens[who]}` };
+  }
+  // SH1-A: /internal/simulator/* now requires an operator token (previously reachable with
+  // no auth at all, gated only by the environment allowlist).
+  function opAuthed() {
+    return { authorization: `Bearer ${operatorToken}` };
   }
 
   async function createOpenVink(options: { requiredMinor?: number; deadlineMs?: number } = {}) {
@@ -129,6 +135,13 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
       assert.equal(registered.statusCode, 201);
       tokens[who] = registered.json().accessToken;
     }
+    const opLogin = await app.inject({
+      method: 'POST',
+      url: '/internal/ops/auth/login',
+      payload: { operatorName: 'Test Operator', password: db.env.OPERATOR_PASSWORD },
+    });
+    assert.equal(opLogin.statusCode, 200);
+    operatorToken = opLogin.json().operatorToken as string;
   });
 
   after(async () => {
@@ -305,6 +318,7 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
     const rerun = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/run-deadlines`,
+      headers: opAuthed(),
       payload: { nowOverride: new Date(Date.now() + 2 * 60 * 1000).toISOString() },
     });
     assert.equal(rerun.statusCode, 200);
@@ -359,6 +373,48 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
     assert.equal((rows[0] as { n: number }).n, 1);
   });
 
+  it("SH1-A (IDOR fix): an unrelated participant cannot resolve another participant's pending contribution over real HTTP; the organizer can", async () => {
+    const { vinkId } = await createOpenVink();
+    provider.simulateLostResponse();
+    const lost = await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/contributions/authorize`,
+      headers: authed('memberA'),
+      payload: {},
+    });
+    assert.equal(lost.json().contribution.status, 'RESOLUTION_PENDING');
+    const contributionId = lost.json().contribution.id as string;
+
+    // memberB is a real, authenticated participant of the SAME vink — just not this
+    // contribution's owner. Before the SH1-A fix this call succeeded (200) and could capture
+    // real money against memberA's own payment method.
+    const forbidden = await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/contributions/${contributionId}/resolve`,
+      headers: authed('memberB'),
+      payload: {},
+    });
+    assert.equal(forbidden.statusCode, 403);
+    assert.equal(forbidden.json().error, 'FORBIDDEN');
+    const stillPending =
+      await db.sql`SELECT status FROM contributions WHERE id = ${contributionId}`;
+    assert.equal(
+      stillPending[0]!.status,
+      'RESOLUTION_PENDING',
+      'a rejected unauthorized resolve must not mutate state',
+    );
+
+    // The organizer may resolve any contribution on their own vink.
+    const asOrganizer = await app.inject({
+      method: 'POST',
+      url: `/api/v1/vinks/${vinkId}/contributions/${contributionId}/resolve`,
+      headers: authed('organizer'),
+      payload: {},
+    });
+    assert.equal(asOrganizer.statusCode, 200);
+    assert.equal(asOrganizer.json().contribution.status, 'CAPTURED');
+  });
+
   it('delayed authorization resolves late and funds during grace (simulator pending-resolve)', async () => {
     const { vinkId } = await createOpenVink({ deadlineMs: 1_200 });
     const delayed = await app.inject({
@@ -385,6 +441,7 @@ describe('mock contribution flow end-to-end (PostgreSQL)', { skip: !RUN }, () =>
     const confirmed = await app.inject({
       method: 'POST',
       url: `/internal/simulator/contributions/${delayed.json().contribution.id}/resolve-pending`,
+      headers: opAuthed(),
       payload: { vinkId, outcome: 'AUTHORIZED' },
     });
     assert.equal(confirmed.statusCode, 200);

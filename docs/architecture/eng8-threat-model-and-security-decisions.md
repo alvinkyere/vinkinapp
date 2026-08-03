@@ -41,6 +41,8 @@ citation) or the honest gap.
 | 8 | Deadline manipulation | Mitigated (as of ENG1) | Deadlines are entirely server-computed and server-enforced (`VINK_OPEN_DURATION_SECONDS`/`VINK_PROCESSING_GRACE_SECONDS`, `apps/api/src/config/env.ts`) — the client cannot set or influence `submissionDeadline` at all (ENG1's "timer semantics" milestone removed the client's ability to send one). The deadline sweep itself runs from PG-owned truth (D5), not client-reported time. |
 | 9 | Refund abuse | Partial | Refunds only ever fire from a server-decided trigger (a failed-session sweep, or an operator-triggered retry through the audited ops console) — no route lets any client request an arbitrary refund amount or target. Gap: no explicit rate/velocity limit exists on the operator-triggered retry path specifically; low real risk since it requires the shared operator credential (D17) already gating that whole surface. |
 | 10 | Privilege escalation in operations tools | Partial, disclosed since D17 | Every ops/reconciliation route requires a valid operator token (`requireOperator`, shared verbatim between `modules/ops/routes.ts` and `modules/reconciliation/routes.ts`) on top of environment gating. The known weak point, unchanged by ENG8 and already ratified as an accepted risk (D17): one shared operator password, not per-operator accounts — every operator action is attributed to a typed name the operator enters themselves, not a verified identity. D17's own revisit trigger (PV12, multiple operators on rotating shifts) still applies; not re-litigated here. |
+| 11 (SH1) | Horizontal privilege escalation via `resolveContributionCommand` | Mitigated | Found and fixed by SH1 (`milestone-reports/SH1-SECURITY-HARDENING.md`): `POST .../contributions/:id/resolve` had no ownership check at all — any authenticated user could resolve, and via RM3A capture-immediately, actually capture money on, any other participant's pending contribution on any vink. Fixed with a `requester` field enforced against the vink's organizer or the contribution's own participant, proven with a regression test confirmed to fail pre-fix and pass post-fix. |
+| 12 (SH1) | Unauthenticated `/internal/simulator/*` on the hosted `demo` environment | Mitigated | Found and fixed by SH1: eight dev/test-only utility routes were gated only by an environment allowlist that includes `demo` — the live hosted pilot's own `VINKIN_ENV`, per the ENG4 hosted-activation note — with no bearer auth at all, letting any internet caller manipulate any vink's deadline/resolution/refund state. `MockFinancialProvider` still drives all command execution (`server.ts:26`), so no real money could move through this specific gap, but it was a real, live, unauthenticated cross-tenant state-manipulation hole. Fixed by requiring `requireOperator` on all eight routes. |
 
 ## Disclosed gaps carried out of this milestone
 
@@ -48,12 +50,12 @@ citation) or the honest gap.
   choice (see the ENG8 milestone report). No retention/deletion policy or legal requirement
   has been specified anywhere in this project's docs; inventing one from code would be a
   product/legal decision made silently, which this repo's own §9 rule prohibits.
-- **`brace-expansion` (GHSA-mh99-v99m-4gvg)** — the one dependency-audit finding left
-  unfixed, deliberately: it is an ESLint-only transitive dependency (never shipped to
-  runtime, never processes untrusted/attacker-controlled input), and its patched version is a
-  major-version jump declared incompatible by its own direct dependent (`minimatch@3.1.5`
-  requires `brace-expansion@^1.1.7`). Recorded via `pnpm-workspace.yaml`'s
-  `auditConfig.ignoreGhsas`, not silently absent from the audit output.
+- **`brace-expansion` (GHSA-mh99-v99m-4gvg) — closed by SH1, not carried forward.** ENG8 left
+  this deliberately unfixed (a major-version jump its own direct dependent declared
+  incompatible). SH1 found a same-major patch release now exists in each affected lineage's
+  own declared range (no longer a major jump), fixed both via scoped `pnpm-workspace.yaml`
+  overrides, and removed the `ignoreGhsas` entry — `pnpm audit` now reports 0 vulnerabilities
+  with no ignore list at all. See `milestone-reports/SH1-SECURITY-HARDENING.md`.
 - **Semgrep's actual findings against this codebase were not dry-run locally** — this
   environment's disk was too constrained (repeatedly documented across earlier milestones —
   see ENG1-TIMER-SEMANTICS.md, I6.md) to safely install Semgrep's toolchain for a local

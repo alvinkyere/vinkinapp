@@ -24,9 +24,15 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
     memberB: `pv6_b_${stamp}`,
   };
   const tokens: Record<string, string> = {};
+  let operatorToken: string;
 
   function authed(who: keyof typeof users) {
     return { authorization: `Bearer ${tokens[who]}` };
+  }
+  // SH1-A: /internal/simulator/* now requires an operator token (previously reachable with
+  // no auth at all, gated only by the environment allowlist).
+  function opAuthed() {
+    return { authorization: `Bearer ${operatorToken}` };
   }
 
   /** Create + fund a $120 vink, returning its id (both members authorize). */
@@ -152,6 +158,13 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
       });
       tokens[who] = registered.json().accessToken;
     }
+    const opLogin = await app.inject({
+      method: 'POST',
+      url: '/internal/ops/auth/login',
+      payload: { operatorName: 'Test Operator', password: db.env.OPERATOR_PASSWORD },
+    });
+    assert.equal(opLogin.statusCode, 200);
+    operatorToken = opLogin.json().operatorToken as string;
   });
 
   after(async () => {
@@ -177,6 +190,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
     const auth = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
+      headers: opAuthed(),
       payload: {
         merchantName: 'Corner Grocer',
         merchantIdentifier: 'GROCER-1',
@@ -194,6 +208,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
     const capture = await app.inject({
       method: 'POST',
       url: `/internal/simulator/authorizations/${authorizationId}/capture`,
+      headers: opAuthed(),
       payload: { vinkId, providerAuthorizationId, settledAmountMinor: 12_000 },
     });
     assert.equal(capture.statusCode, 200);
@@ -265,11 +280,13 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
     await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
+      headers: opAuthed(),
       payload: body,
     });
     const second = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
+      headers: opAuthed(),
       payload: body,
     });
     // The card is now merchant-locked and in PURCHASE_AUTHORIZED, so a fresh swipe is
@@ -288,6 +305,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
     const auth = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
+      headers: opAuthed(),
       payload: {
         merchantName: 'Corner Grocer',
         merchantIdentifier: 'GROCER-1',
@@ -302,6 +320,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
     const capture = await app.inject({
       method: 'POST',
       url: `/internal/simulator/authorizations/${authorizationId}/capture`,
+      headers: opAuthed(),
       payload: { vinkId, providerAuthorizationId, settledAmountMinor: 13_500 },
     });
     assert.equal(capture.json().settlementStatus, 'OVERAGE');
@@ -321,6 +340,7 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
     const auth = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
+      headers: opAuthed(),
       payload: { amountMinor: 12_000 },
     });
     assert.equal(auth.statusCode, 404); // no card to charge

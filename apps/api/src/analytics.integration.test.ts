@@ -160,6 +160,7 @@ describe('funnel analytics end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     const auth = await app.inject({
       method: 'POST',
       url: `/internal/simulator/vinks/${vinkId}/merchant-authorizations`,
+      headers: { authorization: `Bearer ${operatorToken}` }, // SH1-A
       payload: {
         merchantName: 'Corner Grocer',
         merchantIdentifier: 'PV12-GROCER',
@@ -171,6 +172,7 @@ describe('funnel analytics end-to-end (PostgreSQL)', { skip: !RUN }, () => {
     await app.inject({
       method: 'POST',
       url: `/internal/simulator/authorizations/${auth.json().authorizationId}/capture`,
+      headers: { authorization: `Bearer ${operatorToken}` }, // SH1-A
       payload: {
         vinkId,
         providerAuthorizationId: auth.json().providerAuthorizationId,

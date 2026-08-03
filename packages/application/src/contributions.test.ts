@@ -290,6 +290,68 @@ describe('mock contribution flow (Plan PV5)', () => {
     assert.equal(events.filter((event) => event.type === 'payment.captured').length, 1);
   });
 
+  it('SH1-A: resolveContributionCommand rejects a requester who is neither the contribution owner nor the organizer (IDOR fix)', async () => {
+    const f = await fixture();
+    f.provider.simulateLostResponse();
+    const lost = await authorizeContributionCommand(f.ctx, {
+      vinkId: f.vinkId,
+      requester: f.memberA,
+    });
+    assert.equal(lost.contribution.status, 'RESOLUTION_PENDING');
+
+    // memberB is a genuine, active participant of the SAME vink — just not this
+    // contribution's owner. Before this fix, `resolveContributionCommand` had no ownership
+    // check at all: any authenticated requester could resolve (and, via captureImmediately,
+    // capture real money on) any other participant's pending contribution.
+    await assert.rejects(
+      resolveContributionCommand(f.ctx, {
+        contributionId: lost.contribution.id,
+        vinkId: f.vinkId,
+        requester: f.memberB,
+      }),
+      isAppError('FORBIDDEN'),
+    );
+    // A stranger with no relationship to the vink at all is rejected identically.
+    await assert.rejects(
+      resolveContributionCommand(f.ctx, {
+        contributionId: lost.contribution.id,
+        vinkId: f.vinkId,
+        requester: { kind: 'user', userId: 'stranger' },
+      }),
+      isAppError('FORBIDDEN'),
+    );
+    // The rejected attempts must not have mutated anything.
+    assert.equal(
+      (await f.store.listContributionsForUpdate(f.vinkId)).find(
+        (row) => row.id === lost.contribution.id,
+      )?.status,
+      'RESOLUTION_PENDING',
+    );
+
+    // The contribution's own owner may resolve it.
+    const resolvedByOwner = await resolveContributionCommand(f.ctx, {
+      contributionId: lost.contribution.id,
+      vinkId: f.vinkId,
+      requester: f.memberA,
+    });
+    assert.equal(resolvedByOwner.status, 'CAPTURED');
+  });
+
+  it('SH1-A: the organizer may resolve any contribution on their own vink; trusted internal callers (no requester, e.g. the sweep) are unaffected', async () => {
+    const f = await fixture();
+    f.provider.simulateLostResponse();
+    const lost = await authorizeContributionCommand(f.ctx, {
+      vinkId: f.vinkId,
+      requester: f.memberA,
+    });
+    const resolvedByOrganizer = await resolveContributionCommand(f.ctx, {
+      contributionId: lost.contribution.id,
+      vinkId: f.vinkId,
+      requester: { kind: 'user', userId: ORGANIZER },
+    });
+    assert.equal(resolvedByOrganizer.status, 'CAPTURED');
+  });
+
   it('locks split/cover/remove once a live contribution exists', async () => {
     const f = await fixture();
     await authorizeContributionCommand(f.ctx, { vinkId: f.vinkId, requester: f.memberA });

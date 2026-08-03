@@ -30,6 +30,7 @@ import type { Env } from '../../config/env.ts';
 import type { Sql } from '../../db/client.ts';
 import { simulatorRoutesPermitted } from '../../config/simulator-guard.ts';
 import { requireUser } from '../../auth/http.ts';
+import { requireOperator } from '../ops/routes.ts';
 import {
   contributionIdParams,
   vinkAndContributionIdParams,
@@ -196,6 +197,7 @@ export function registerContributionRoutes(
         const contribution = await resolveContributionCommand(contextFor(request), {
           vinkId: params.vinkId as VinkId,
           contributionId: params.contributionId as ContributionId,
+          requester: { kind: 'user', userId: claims.userId },
           ...(body.scenario !== undefined && { scenario: body.scenario }),
         });
         return { contribution: contributionView(contribution) };
@@ -209,6 +211,11 @@ export function registerContributionRoutes(
     // Runs the deadline jobs for one vink. `nowOverride` exists so tests can cross the
     // processing-grace boundary without waiting a minute; production never registers this.
     app.post('/internal/simulator/vinks/:vinkId/run-deadlines', async (request, reply) => {
+      // SH1-A: this dev/test-only surface previously carried NO auth at all beyond the
+      // environment allowlist — `demo` (what the live hosted pilot actually runs, per
+      // CLAUDE.md's ENG4 hosted-activation note) is on that allowlist, so this route was
+      // reachable, unauthenticated, against any vinkId, on the real public deployment.
+      if ((await requireOperator(request, reply, env)) === null) return;
       const { vinkId } = vinkIdParams.parse(request.params);
       const body = z.object({ nowOverride: z.iso.datetime().optional() }).parse(request.body ?? {});
       const now = body.nowOverride !== undefined ? new Date(body.nowOverride) : new Date();
@@ -230,6 +237,7 @@ export function registerContributionRoutes(
       app.post(
         '/internal/simulator/contributions/:contributionId/resolve-pending',
         async (request, reply) => {
+          if ((await requireOperator(request, reply, env)) === null) return; // SH1-A
           const { contributionId } = contributionIdParams.parse(request.params);
           const body = z
             .object({ vinkId: z.uuid(), outcome: z.enum(['AUTHORIZED', 'DECLINED']) })
