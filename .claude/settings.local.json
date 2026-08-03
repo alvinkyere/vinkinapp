@@ -167,7 +167,11 @@
       "Bash(node --test src/config/env.test.ts)",
       "Bash(node --test src/commands.test.ts)",
       "Bash(node --test --test-name-pattern=\"grace expiry with one contribution still pending\" src/contributions.test.ts)",
-      "Bash(VINKIN_INTEGRATION=1 node --test rm4a-dual-timer-lifecycle.integration.test.ts)"
+      "Bash(VINKIN_INTEGRATION=1 node --test rm4a-dual-timer-lifecycle.integration.test.ts)",
+      "Bash(git status *)",
+      "Bash(VINKIN_ENV=development PORT=3000 VINKIN_PUBLIC_BASE_URL=http://127.0.0.1:3100 OPERATIONS_CONSOLE_BASE_URL=http://127.0.0.1:3200 node src/server.ts)",
+      "Bash(node vinkin-demo-check.mjs)",
+      "Bash(pkill -f \"xcodebuild\")"
     ],
     "additionalDirectories": [
       "/Users/alvinkyere870gmail.com/Downloads/Vinkin - v1/docs",
