@@ -39,7 +39,7 @@ dependencies:
   # omitted for PV9 — hand-written immutable models keep the build free of a codegen step;
   # revisit if the model surface grows large enough to justify it.
   flutter_riverpod: ^2.6.1
-  go_router: ^14.8.1
+  go_router: ^17.3.0
   dio: ^5.7.0
   flutter_secure_storage: ^9.2.2
   web_socket_channel: ^3.0.1
