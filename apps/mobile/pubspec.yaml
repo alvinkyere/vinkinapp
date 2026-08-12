@@ -73,6 +73,11 @@ dependencies:
   app_links: ^7.2.1
   sentry_flutter: ^9.25.0
 
+  # RM4C-C (D49) — real Stripe-hosted card entry (PaymentSheet). The organizer/participant
+  # sees a real, provider-hosted card-entry sheet in stripe_sandbox mode; mock mode never
+  # imports or initializes this package at all (gated at the call site, not just unused).
+  flutter_stripe: ^12.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

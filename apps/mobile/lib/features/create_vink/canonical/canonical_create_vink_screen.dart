@@ -118,7 +118,7 @@ class _CanonicalCreateVinkScreenState
   }
 
   List<PersonEntry> get _allParticipants => [
-    if (_organizer != null) _organizer!,
+    ?_organizer,
     ..._people,
   ];
 

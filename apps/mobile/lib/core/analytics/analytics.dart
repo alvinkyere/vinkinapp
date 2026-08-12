@@ -78,7 +78,7 @@ class HttpAnalytics implements Analytics {
           'events': [
             {
               'eventName': event,
-              if (vinkId != null) 'vinkId': vinkId,
+              'vinkId': ?vinkId,
               'properties': properties,
               'occurredAt': DateTime.now().toUtc().toIso8601String(),
             },

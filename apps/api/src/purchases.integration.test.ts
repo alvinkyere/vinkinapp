@@ -345,4 +345,34 @@ describe('mock card + purchase flow end-to-end (PostgreSQL)', { skip: !RUN }, ()
     });
     assert.equal(auth.statusCode, 404); // no card to charge
   });
+
+  it('card-pool seed route: operator-gated, creates real provider cards the sweep can use', async () => {
+    const unauthed = await app.inject({
+      method: 'POST',
+      url: '/internal/simulator/card-pool/seed',
+      payload: { count: 1 },
+    });
+    assert.equal(unauthed.statusCode, 401);
+
+    const before = await db.sql`SELECT count(*)::int AS n FROM cards WHERE status = 'AVAILABLE'`;
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/internal/simulator/card-pool/seed',
+      headers: opAuthed(),
+      payload: { count: 2 },
+    });
+    assert.equal(seeded.statusCode, 201);
+    assert.equal(seeded.json().seeded.length, 2);
+    const after = await db.sql`SELECT count(*)::int AS n FROM cards WHERE status = 'AVAILABLE'`;
+    assert.equal((after[0] as { n: number }).n, (before[0] as { n: number }).n + 2);
+
+    // A seeded card is genuinely usable end-to-end: the sweep provisions it from FUNDED.
+    const vinkId = await fundedVink();
+    const swept = await runSweeps(db.sql, provider);
+    assert.ok(swept.cardsProvisioned >= 1);
+    assert.equal(
+      (await db.sql`SELECT state FROM vinks WHERE id = ${vinkId}`)[0]!.state,
+      'CARD_READY',
+    );
+  });
 });

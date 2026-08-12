@@ -8,7 +8,9 @@ import type {
   CardResult,
   CardStatusResult,
   CardholderResult,
+  ContributionPaymentIntentResult,
   CreateCardholderInput,
+  CreateContributionPaymentIntentInput,
   CreateCustomerInput,
   CreateWalletProvisioningSessionInput,
   CustomerResult,
@@ -56,6 +58,12 @@ export interface FinancialProvider {
   setupPaymentMethod(input: SetupPaymentMethodInput): Promise<SetupPaymentMethodResult>;
 
   authorizeContribution(input: AuthorizeContributionInput): Promise<AuthorizationResult>;
+  /** RM4C — see `ContributionPaymentIntentResult`'s own doc comment. The resulting
+   * `providerPaymentId` is resolved exactly like any other PROCESSING authorization:
+   * `retrievePaymentStatus` / `resolveContributionCommand`, never a distinct code path. */
+  createContributionPaymentIntent(
+    input: CreateContributionPaymentIntentInput,
+  ): Promise<ContributionPaymentIntentResult>;
   captureContribution(input: CaptureContributionInput): Promise<CaptureResult>;
   cancelContributionAuthorization(input: CancelAuthorizationInput): Promise<CancelResult>;
   refundContribution(input: RefundContributionInput): Promise<RefundResult>;

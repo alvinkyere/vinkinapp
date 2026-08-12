@@ -280,3 +280,27 @@ export interface ParseWebhookInput {
   signatureHeader: string;
   webhookSecret: string;
 }
+
+// ---------------------------------------------------------------------------
+// RM4C — real hosted card collection. Unlike `authorizeContribution` (which requires an
+// already-established `providerMethodId`, set up server-side from an opaque token), this
+// pair models a provider-side payment object created with NO payment method attached yet:
+// the client collects real card details directly with the provider's own hosted UI (Stripe
+// Elements / PaymentSheet) using `clientSecret`. §35's "never raw PAN/CVV reaches VinkIn"
+// invariant holds structurally here — VinkIn's server never receives a card number, only
+// this opaque secret, which is useless for moving money without the client also supplying
+// real card details straight to the provider itself.
+// ---------------------------------------------------------------------------
+
+export interface CreateContributionPaymentIntentInput {
+  idempotencyKey: string; // create-intent:v1:{slotId}:{attemptGeneration} (§12 shape)
+  providerCustomerId: string;
+  amount: Money;
+  metadata: Record<string, string>; // vinkId, participantId, contributionId
+}
+
+export interface ContributionPaymentIntentResult {
+  providerPaymentId: string;
+  /** Opaque, client-safe. Never contains or derives raw card data (§35). */
+  clientSecret: string;
+}

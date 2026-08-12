@@ -400,6 +400,71 @@ export function runFinancialProviderContractTests(name: string, makeKit: MakeKit
       assert.ok(Date.parse(status.occurredAt) > 0, 'provider-side timestamp required (§28)');
     });
 
+    // ---- RM4C: hosted card collection (client-secret intents) ------------------
+
+    it('createContributionPaymentIntent: lands PROCESSING with no method attached, resolves via provider truth', async (t) => {
+      const kit = await makeKit();
+      if (!kit.confirmContributionPaymentIntent) {
+        return t.skip('kit provides no confirmContributionPaymentIntent hook');
+      }
+      const { providerCustomerId } = await kit.provider.createCustomer({
+        idempotencyKey: `cus:intent-ok:${freshSlotId()}`,
+        externalUserId: freshSlotId(),
+      });
+      const slotId = freshSlotId();
+      const { providerPaymentId, clientSecret } =
+        await kit.provider.createContributionPaymentIntent({
+          idempotencyKey: operationId.authorize(slotId, 1),
+          providerCustomerId,
+          amount: usd(5_000),
+          metadata: { vinkId: 'contract-suite-vink', contributionSlotId: slotId },
+        });
+      assert.ok(clientSecret.length > 0, 'clientSecret must be non-empty');
+      let status = await kit.provider.retrievePaymentStatus(providerPaymentId);
+      assert.equal(status.status, 'PROCESSING');
+      await kit.confirmContributionPaymentIntent(providerPaymentId, 'ok');
+      status = await kit.provider.retrievePaymentStatus(providerPaymentId);
+      assert.equal(status.status, 'AUTHORIZED');
+    });
+
+    it('createContributionPaymentIntent: a declined confirmation is reported, never assumed authorized', async (t) => {
+      const kit = await makeKit();
+      if (!kit.confirmContributionPaymentIntent) {
+        return t.skip('kit provides no confirmContributionPaymentIntent hook');
+      }
+      const { providerCustomerId } = await kit.provider.createCustomer({
+        idempotencyKey: `cus:intent-decline:${freshSlotId()}`,
+        externalUserId: freshSlotId(),
+      });
+      const slotId = freshSlotId();
+      const { providerPaymentId } = await kit.provider.createContributionPaymentIntent({
+        idempotencyKey: operationId.authorize(slotId, 1),
+        providerCustomerId,
+        amount: usd(5_000),
+        metadata: { vinkId: 'contract-suite-vink', contributionSlotId: slotId },
+      });
+      await kit.confirmContributionPaymentIntent(providerPaymentId, 'decline');
+      const status = await kit.provider.retrievePaymentStatus(providerPaymentId);
+      assert.equal(status.status, 'DECLINED');
+    });
+
+    it('createContributionPaymentIntent rejects a request missing required metadata as INVALID_REQUEST', async () => {
+      const kit = await makeKit();
+      const { providerCustomerId } = await kit.provider.createCustomer({
+        idempotencyKey: `cus:intent-invalid:${freshSlotId()}`,
+        externalUserId: freshSlotId(),
+      });
+      await assert.rejects(
+        kit.provider.createContributionPaymentIntent({
+          idempotencyKey: operationId.authorize(freshSlotId(), 1),
+          providerCustomerId,
+          amount: usd(5_000),
+          metadata: {},
+        }),
+        isProviderError('INVALID_REQUEST'),
+      );
+    });
+
     // ---- webhook identity & ordering (§28) --------------------------------------
 
     it('duplicate webhook delivery carries the SAME provider event id', async (t) => {

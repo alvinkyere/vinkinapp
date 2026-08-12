@@ -8,7 +8,12 @@ import { startSweepScheduler } from './jobs/sweeps.ts';
 import { startOutboxPublisher } from './realtime/outbox-publisher.ts';
 import { RedisRealtimeHub } from './realtime/redis-hub.ts';
 import { MockFinancialProvider } from '../../../packages/payment-provider/src/index.ts';
-import { MockDeliveryProvider } from '../../../packages/delivery/src/index.ts';
+import type { FinancialProvider } from '../../../packages/payment-provider/src/index.ts';
+import {
+  MockDeliveryProvider,
+  ResendDeliveryProvider,
+} from '../../../packages/delivery/src/index.ts';
+import type { DeliveryProvider } from '../../../packages/delivery/src/index.ts';
 import { startCrashReporter } from './observability/sentry.ts';
 import {
   StripeFinancialProvider,
@@ -22,12 +27,33 @@ const stopOtel = await startOtel(env);
 const { metrics, stop: stopMetrics } = await startMetrics(env);
 const sql = createDb(env);
 const redis = createRedis(env);
-// The only provider until the M0 gate admits a real adapter (master plan §28).
-const provider = new MockFinancialProvider();
-// Slice I4 — the only delivery provider until a real one is selected (§4); threaded through
-// regardless of VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED — that flag (env-boot-refused
-// outside development/test) is the actual gate, not whether this exists.
-const deliveryProvider = new MockDeliveryProvider();
+// RM4C (D49): `VINKIN_FINANCIAL_PROVIDER` selects the one provider driving every command in
+// this process — defaults to `mock` (the only provider until this milestone, master plan
+// §28, unchanged behavior). `stripe_sandbox` is a genuine, explicit opt-in for demonstrating
+// real participant card payments through Stripe's sandbox; `loadStripeAdapterConfig` already
+// enforces D46's sandbox-only guarantee (`assertSandboxModeKey` — a live-mode key fails to
+// construct this at all, regardless of this flag or VINKIN_ENV). See env.ts's own doc
+// comment for the disclosed trade-off: card-pool/wallet-provisioning commands (RM2/RM3B)
+// will visibly throw NOT_SUPPORTED in this mode, since Stripe honestly declares
+// `walletProvisioning: false` — never silently emulated (§9, §21, D7).
+const provider: FinancialProvider =
+  env.VINKIN_FINANCIAL_PROVIDER === 'stripe_sandbox'
+    ? new StripeFinancialProvider(loadStripeAdapterConfig())
+    : new MockFinancialProvider();
+// RM4D — closes the "no real delivery provider is selected yet (§4)" gap Slice I4 first
+// disclosed: `RESEND_API_KEY`/`RESEND_FROM_EMAIL` presence is the actual selector (same
+// credential-is-the-guard discipline as `VINKIN_FINANCIAL_PROVIDER` above), not `VINKIN_ENV`.
+// Absent both, this is byte-for-byte the same `MockDeliveryProvider` every prior milestone
+// ran against. Threaded through regardless of the four delivery-gated flags
+// (VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED et al.) — those flags (env.ts's own
+// conditional boot-refusal) are the actual gate, not whether this exists.
+const deliveryProvider: DeliveryProvider =
+  env.RESEND_API_KEY !== undefined && env.RESEND_FROM_EMAIL !== undefined
+    ? new ResendDeliveryProvider(
+        { apiKey: env.RESEND_API_KEY, fromEmail: env.RESEND_FROM_EMAIL },
+        { isProduction: env.VINKIN_ENV === 'production' },
+      )
+    : new MockDeliveryProvider();
 // Redis-backed (D16): shared with the outbox publisher below, and correct across multiple
 // API instances. A dedicated connection for SUBSCRIBE — ioredis locks a connection into
 // subscriber-only mode the moment .subscribe() is first called.

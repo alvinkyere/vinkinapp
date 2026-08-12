@@ -1753,6 +1753,182 @@ No Critical/High findings remain unresolved. Disclosed, not built this pass: Git
 live staging ZAP run (no accounts/URL exist), a full authenticated ZAP crawl behind JWT auth, a
 full script-src CSP — each flagged as SH2 follow-up material in the milestone report.
 
+**Email delivery provider done** (`milestone-reports/EMAIL-DELIVERY-PROVIDER.md`) — the owner
+supplied a large "RM4D" brief describing the full invitation lifecycle from scratch. Audit
+first (RM4D-A) found two things worth flagging before writing code: "RM4D" collides with this
+repo's real, unrelated `RM` sequence (Real-Money Beta, D47 — currently on **RM4C**, a hosted
+Stripe card-payment-session slice, found actively in progress in a **concurrent session** this
+same day, see below); and nearly everything the brief described already exists — guest-specific
+D14 hashed `vgt_` tokens, duplicate-send protection (migration `0010`), member-invite
+accept/decline (D44), and a provider-neutral `packages/delivery` abstraction, all gated for one
+repeatedly-disclosed reason across `env.ts`: "no real delivery provider is selected yet (§4)".
+Owner-approved scope via `AskUserQuestion`: close that one real gap — select and wire a real
+email provider — not rebuild what already exists. Chose **Resend**; new
+`packages/delivery/src/resend/` (`ResendDeliveryProvider`, template rendering for all four
+`DeliveryTemplateInput` kinds, HTML-escaped, with a non-production test-mode banner); SMS stays
+honestly ungated-as-working (`SMS_NOT_SUPPORTED_BY_RESEND`, no provider selected). `env.ts`'s
+four delivery-gated flags (`VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED` et al.) now stay
+boot-refused outside development/test **unless** `RESEND_API_KEY`/`RESEND_FROM_EMAIL` are
+configured — credential presence is the guard, matching `assertSandboxModeKey`/
+`VINKIN_FINANCIAL_PROVIDER`'s own discipline; absent credentials, behavior is byte-for-byte
+unchanged. **Real delivery proven, not assumed**: a credential-gated sandbox test
+(`VINKIN_RESEND_SANDBOX_TEST=1`, mirrors `VINKIN_STRIPE_SANDBOX_TEST`) sent a real
+`guest_invite`-shaped email through the live Resend API using the owner's own verified
+`vinkin.org` domain/key; Resend accepted it with a real message id, and **the owner
+independently confirmed it arrived** in their real inbox. **Concurrent-session note,
+disclosed**: `env.ts`/`server.ts` were found already carrying same-day `RM4C`/`D49` content
+when this milestone started editing them; every edit was re-read immediately beforehand and
+applied as a clean additive diff (verified via `git diff` after each change) — no RM4C content
+was touched or reverted, and `pnpm format:check` warnings in RM4C's own in-flight files
+(`webhooks/routes.ts`, `rm4c-payment-session.integration.test.ts`,
+`packages/application/src/contributions.ts`) were left alone, not reformatted.
+**`packages/delivery` 13/13** offline (+ 1/1 credential-gated real-API test, run manually with
+real credentials this session), **`apps/api/src/config/env.test.ts` 12/12** (3 new, 9
+pre-existing unmodified), **`packages/application` 149/149** unaffected,
+`pnpm typecheck/lint/format:check/guard` clean for every file this milestone touched, 12/12
+packages. Every invitation/guest/email-adjacent `apps/api` integration suite re-verified green
+individually against real PostgreSQL (`invites` 6/6, `guest-invitation-delivery` 10/10, `guest`
+3/3, `email-verification` 9/9, `vinks` 11/11) — a single full-monorepo
+`VINKIN_INTEGRATION=1 pnpm test` run hit the same class of shared-local-Postgres parallel-suite
+contention `eng9-infra-restart.manual.ts` already documents (worsened by the concurrent
+session's own DB activity), disclosed as environment contention, not a regression, and
+confirmed by the clean individual re-runs. Not built this pass (already existed, or genuinely
+out of scope by the owner's own "close the real gap only" direction): generic share-link
+identity isolation, a from-scratch adversarial guest-token-claiming test suite, and SMS
+delivery.
+
+**RM4C done, PARTIALLY COMPLETE** (`milestone-reports/RM4C-REALISTIC-PAYMENT-SELECTION.md`,
+D49) — "realistic payment selection and Stripe sandbox checkout," an owner brief executed
+audit-through-close in one pass per its own "don't stop after the audit" instruction. The
+audit found the milestone less greenfield than assumed: a real, tested `StripeFinancialProvider`
+sandbox adapter already existed (ENG6, 22/22 contract tests against a real sandbox) with a
+working signed webhook route — what was missing was that **neither client ever sent any
+payment data at all**; both called a single argument-free
+`POST .../contributions/authorize` and the mock decided everything server-side.
+**Central design insight**: RM4C-C needed no new resolver — a verified Stripe webhook re-enters
+the contribution engine through the EXISTING, SH1-hardened `resolveContributionCommand` (E5's
+stuck-pending recovery path) as a trusted internal caller, exactly like `jobs/sweeps.ts`'s own
+pattern; the webhook is a TRIGGER to re-check real provider truth (`retrievePaymentStatus`),
+never itself the decision — preserving D5 and D15 exactly as ratified, with zero new financial
+logic. **`AskUserQuestion`-confirmed architecture decision (D49)**: `VINKIN_FINANCIAL_PROVIDER`
+is a single global switch (`mock` default / `stripe_sandbox` opt-in) driving every command's
+provider, not per-flow routing — the disclosed trade-off is that RM2/RM3B's card-pool commands
+will throw real `NOT_SUPPORTED` in sandbox mode (Stripe's own `walletProvisioning: false`,
+unchanged pre-existing gap), never silently emulated. New `FinancialProvider.
+createContributionPaymentIntent` (client-secret-based hosted card collection, no pre-attached
+payment method) implemented in both the mock and the real Stripe adapter, proven by 3 new
+shared contract-suite tests using Stripe's own documented test-PaymentMethod IDs for
+server-side confirmation. New `GET /api/v1/payment-methods` (public, pure `paymentModeInfo()`
+projection, D13-compliant) reports all four methods with truthful availability — card always
+`available`; Apple Pay always `requires_configuration` (no merchant ID/entitlements exist
+anywhere, confirmed by audit); Venmo/Cash App Pay always `coming_soon` (no approved adapter,
+per D7's own "review before building" rule) — never a button that leads nowhere silently.
+**A narrow, disclosed provider-import-guard exception (D49 §3)**: `@stripe/stripe-js`/
+`@stripe/react-stripe-js` (browser-only, no secret key, cannot move money alone) were added to
+an explicit allowlist in `tooling/scripts/check-provider-imports.mjs` — blocking them would
+have made RM4C's own explicit "use Stripe's client-side components" requirement impossible,
+since that SDK is designed to be imported straight into the UI; the server-side `stripe`
+package guard is completely unaffected. **guest-web**: new Stripe Elements card-entry UI
+(`PaymentPanel`/`CardPaymentForm`/`PaymentMethodList`/`SandboxModeBanner`) wired into
+`SessionView`'s V2 (flag-on) path only; mock mode renders the pre-existing "Approve $X" button
+completely unchanged (`legacyButton`, never touched by new code) — verified via the full
+Playwright suite, **44 passed/8 failed, byte-identical to the documented pre-existing
+baseline** (confirmed with `git stash` isolation: the same 8 fail identically on unmodified
+`main`). **apps/mobile**: `flutter_stripe` added; new `VinkPaymentPanel`/
+`VinkPaymentMethodList`/`VinkSandboxModeBanner` wired into both the organizer and participant
+Lobby "Pay" buttons the same way (mock mode renders the exact pre-existing `VinkPrimaryButton`
+unchanged). **Real native verification, not just static analysis**: a real
+`flutter build ios --simulator --no-codesign` succeeded, genuinely fetching Stripe's real
+`stripe-ios-spm` Swift package; the built app was installed and launched on a real booted
+simulator and confirmed to boot cleanly with no crash (screenshot captured) — proving the
+native SDK actually links, not merely that the Dart typechecks. **Adversarial security tests**
+(`apps/api/src/rm4c-payment-session.integration.test.ts`, real PostgreSQL, 8 tests) prove: a
+provider-side confirmation with no webhook delivered yet never marks a contribution paid; a
+duplicate webhook captures exactly once (4 ledger entries, not 8); a non-participant gets 403
+creating a payment session; a double-tap session request is idempotent (no fresh secret); a
+stale/deadline-passed session is rejected; the guest path works end-to-end through the same
+webhook-driven engine. **`packages/payment-provider-contract-tests` 33/33** (up from 30),
+**`packages/application` 154/154** (up from 149), **`apps/api` non-integration 97/97** (up
+from 91), **`apps/api` integration 307/307** (up from 293), **`apps/mobile` 269/269** (up from
+265, `flutter analyze` unchanged at 7 pre-existing issues), `pnpm typecheck/lint/format:check/
+guard` clean, 12/12 packages. **PARTIALLY COMPLETE, not COMPLETE**: no Stripe test-mode
+credentials exist in this environment — the owner chose (via `AskUserQuestion`) to add them to
+`.env` directly rather than paste them into the conversation, but had not done so by session
+end, so the real-sandbox-charge/real-webhook/real-screenshot visual-acceptance bar was proven
+correct by construction and against the mock, but not exercised against `api.stripe.com`
+itself — the milestone report's own "smallest owner-action checklist" names the exact five
+steps to close that gap. Apple Pay (no Apple Developer account) and Venmo/Cash App Pay (no
+approved adapter, out of scope to build without a review pass) remain genuinely, disclosedly
+blocked on external prerequisites unchanged by this milestone.
+
+**RM4C real-sandbox verification, same day**: the owner supplied real Stripe test-mode
+credentials mid-milestone. Using them immediately caught **two genuine adapter bugs** the mock
+could never have caught: `createContributionPaymentIntent` omitted `allow_redirects: 'never'`
+(Stripe rejects a redirect-eligible confirmation with no `return_url` — reproduced live via
+`curl` before fixing); and `retrievePaymentStatus` had no way to report a real decline for this
+flow at all, since Stripe reverts a declined PaymentIntent's own status to
+`requires_payment_method` (retriable), never a terminal state — fixed by inspecting
+`latest_charge.status === 'failed'` (the most-recent-attempt-only field, confirmed live, so a
+later successful retry on the same intent is unaffected). A **third, real guest-web UX bug**
+was found only by manually driving the actual browser: creating a payment session flips
+`contributionStatus` to `'processing'` the instant it exists (server truth, delivered almost
+immediately over the realtime subscription), which used to correctly mean "nothing left for
+the user to do" but for RM4C-C means "still typing the card number" — without a fix the live
+update unmounted the real Stripe Elements card form mid-entry; fixed with a new
+`paymentInProgress` client flag (`SessionView.tsx`) keeping the panel mounted from session-
+creation through confirmation. All three fixes are covered by tests; re-verified 33/33 mock +
+17/17 real-sandbox contract tests (16 disclosed issuing-side skips unchanged), **`apps/api`
+non-integration 97/97, integration 307/307 (312/312 with credentials present)**,
+**`packages/application` 154/154**, guest-web Playwright 44/44 non-baseline. **Real, visual,
+browser-driven proof captured** (via `stripe listen` genuinely forwarding Stripe's own
+webhooks to this machine): a real Visa test card typed into Stripe's real hosted iframe
+resolved to "Everyone's in / $30.00 of $30.00 funded / You're in. / Paid," driven entirely by
+the real webhook with zero client-side "mark as paid"; a real always-declining test card
+resolved to "Your card has been declined." with a working retry, correctly never counted
+toward funding; a separate real-account proof showed a fully-funded single-contributor vink
+correctly cascading into RM3B's own pre-existing card-provisioning attempt, correctly failing
+(this Stripe account has no Financial-Account-v2 access, the same wall ENG6 already
+documented) and correctly auto-refunding via RM4A's own existing refund-auto-chain — proof
+RM4C-C's new code integrates cleanly with the entire pre-existing lifecycle, not just in
+isolation. **Not captured**: a live on-device `apps/mobile` PaymentSheet interaction — native
+`PaymentSheet` is a platform view controller entirely outside Flutter's own widget tree, and
+no XCUITest-class automation exists anywhere in this codebase to drive it; the Dart-side code
+is identical in provenance to guest-web's now-fully-proven flow and independently verified via
+a real `flutter build ios --simulator --no-codesign` (genuinely fetching Stripe's
+`stripe-ios-spm` package) installed and launched cleanly on a real booted simulator.
+**Disclosed, unrelated**: mid-verification the guest-web Playwright suite briefly showed 8/52
+passing instead of 44/8 after a manual API-server restart omitted
+`VINKIN_PUBLIC_BASE_URL=http://127.0.0.1:3100` — the exact `localhost`-vs-`127.0.0.1` CORS trap
+ENG0/PV13 already flagged as a recurring, still-unfixed footgun; confirmed via git-stash
+isolation as environment, not a regression, and resolved by restarting with the documented env
+var. **RM4C remains PARTIALLY COMPLETE** by the letter of its own exit criteria (mobile's own
+on-device capture is the sole remaining gap — a tooling gap, not a code gap) but every other
+criterion, including genuine real-Stripe-sandbox card payments from guest-web, is now fully
+met and visually proven, not merely argued correct by construction.
+
+**Product screenshots refreshed** (`milestone-reports/PRODUCT-SCREENSHOTS-REFRESH.md`,
+2026-08-05, owner request outside the ENG/RM/PV/SH sequences: "screenshots for all the
+workflows in the app"). The PV13-SCREENSHOTS set (2026-07-20) predated the canonical
+create flow, the I7 vessel, Invites, and RM4C's real Stripe payment UI. Scoped via
+`AskUserQuestion`: core organizer/guest journey + Invites flow, real Stripe sandbox payment,
+journey honestly ends at FUNDED (this Stripe account still has no Financial Account v2 access,
+so card provisioning can't be faked past that point). **17 real screenshots**, all captured
+against a real booted iOS Simulator / real Playwright production build / real local backend +
+real `stripe listen` webhook forwarding — 01–07 and 10–13 refreshed, 14–16 new (Invites), 17
+new (guest-web's real Stripe Elements card entry — mobile's own native `PaymentSheet` still
+can't be driven by touch injection, the same RM4C-disclosed gap). 08–09 deliberately left
+stale rather than faked with the mock provider. Caught and fixed/disclosed several real
+findings along the way (see the report): a register-screen hit-test-miss now fixed by
+`ensureVisible()`-wrapping every tap; a genuine D44×RM4C interaction (an `INVITED` member's
+payment-session call is correctly `403` until they accept) never exercised together before;
+RM4A's real 7-minute open-window default racing a full real-device capture run; the sweep's
+own automatic RM3B card provisioning racing a FUNDED capture and cascading to EXPIRED
+(confirmed via direct DB query, not guessed) — worked around for the capture session only,
+both reverted after; a byte-identical false-positive screenshot pair caught by diffing MD5s,
+not by trusting a passing wait condition; and the exact recurring stale-server-process and
+`localhost`/`127.0.0.1` CORS classes of bug this project's own history already documents,
+hit again.
+
 ## Hard rules (from the Spec — never relax to make something pass)
 
 - Ledger is append-only, balanced, integer minor units; DB triggers enforce it

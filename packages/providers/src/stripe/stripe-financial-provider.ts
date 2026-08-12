@@ -29,7 +29,9 @@ import type {
   CardResult,
   CardStatusResult,
   CardholderResult,
+  ContributionPaymentIntentResult,
   CreateCardholderInput,
+  CreateContributionPaymentIntentInput,
   CreateCustomerInput,
   CustomerResult,
   IssueTemporaryCardInput,
@@ -160,6 +162,54 @@ export class StripeFinancialProvider implements FinancialProvider {
           declineReason: stripeDeclineReason(error.decline_code ?? error.code ?? null),
         };
       }
+      translateStripeError(error);
+    }
+  }
+
+  /** RM4C — real hosted card collection. Deliberately `confirm: false`/no `payment_method`
+   * (unlike `authorizeContribution` above, which is the server-side-token path): the client
+   * collects the card directly with Stripe's own hosted UI (Elements/PaymentSheet) using
+   * `client_secret`, never sending raw card data to VinkIn (§35). `capture_method: 'manual'`
+   * matches every other contribution authorization in this codebase — `retrievePaymentStatus`
+   * / `resolveContributionCommand` resolve the outcome exactly like any other PROCESSING
+   * authorization once the client (and, where required, 3DS) confirms. */
+  async createContributionPaymentIntent(
+    input: CreateContributionPaymentIntentInput,
+  ): Promise<ContributionPaymentIntentResult> {
+    if (input.metadata.vinkId === undefined || input.metadata.vinkId.length === 0) {
+      throw new ProviderError(
+        'INVALID_REQUEST',
+        'createContributionPaymentIntent.metadata.vinkId is required',
+      );
+    }
+    try {
+      const intent = await this.stripe.paymentIntents.create(
+        {
+          amount: input.amount.amountMinor,
+          currency: input.amount.currency.toLowerCase(),
+          customer: input.providerCustomerId,
+          capture_method: 'manual',
+          // `allow_redirects: 'never'` matches this codebase's own established choice (guest-
+          // web/mobile both disclose "no return-URL page exists") — confirmed live against the
+          // real sandbox that omitting this makes Stripe REQUIRE a `return_url` at confirm
+          // time and reject the confirmation otherwise (a real bug this file's own RM4C
+          // sandbox contract-test run caught: a client confirming with no return_url got a
+          // configuration error, not a card outcome, and the PaymentIntent never left
+          // `requires_payment_method`). This does not disable 3DS — an in-page authentication
+          // challenge is `next_action.type: use_stripe_sdk`, not a redirect.
+          automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+          metadata: input.metadata,
+        },
+        { idempotencyKey: input.idempotencyKey },
+      );
+      if (intent.client_secret === null) {
+        throw new ProviderError(
+          'PROVIDER_UNAVAILABLE',
+          'Stripe did not return a client secret for the created payment intent',
+        );
+      }
+      return { providerPaymentId: intent.id, clientSecret: intent.client_secret };
+    } catch (error) {
       translateStripeError(error);
     }
   }
@@ -387,10 +437,18 @@ export class StripeFinancialProvider implements FinancialProvider {
       const capturedTotal = intent.amount_received;
       const refundedTotal = charge?.amount_refunded ?? 0;
       const fullyRefunded = charge !== null && charge.refunded;
+      // RM4C finding, confirmed live against the real sandbox: a declined confirmation
+      // attempt does NOT move the PaymentIntent itself to a terminal status — it reverts to
+      // `requires_payment_method` (Stripe deliberately allows retrying with a different card
+      // on the SAME intent), so `intent.status` alone can never report a decline. Only the
+      // Charge Stripe creates for that failed attempt carries `status: 'failed'` — this only
+      // ever reflects the MOST RECENT attempt (`latest_charge`), so a later successful retry
+      // on the same intent is unaffected.
+      const latestAttemptFailed = charge !== null && charge.status === 'failed';
       const currency = intent.currency.toUpperCase() as 'USD';
       return {
         providerPaymentId: intent.id,
-        status: this.mapFullStatus(intent, fullyRefunded),
+        status: this.mapFullStatus(intent, fullyRefunded, latestAttemptFailed),
         authorizedAmount:
           intent.status === 'canceled' ? null : { amountMinor: intent.amount, currency },
         capturedTotal: capturedTotal > 0 ? { amountMinor: capturedTotal, currency } : null,
@@ -405,11 +463,13 @@ export class StripeFinancialProvider implements FinancialProvider {
   private mapFullStatus(
     intent: Stripe.PaymentIntent,
     fullyRefunded: boolean,
+    latestAttemptFailed: boolean,
   ): ProviderPaymentStatusCode {
     if (fullyRefunded) return 'REFUNDED';
     if (intent.status === 'requires_capture') return 'AUTHORIZED';
     if (intent.status === 'succeeded') return 'CAPTURED';
     if (intent.status === 'canceled') return 'CANCELED';
+    if (intent.status === 'requires_payment_method' && latestAttemptFailed) return 'DECLINED';
     return 'PROCESSING';
   }
 

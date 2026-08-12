@@ -99,16 +99,27 @@ export async function runSweeps(
     const due = await sql`SELECT id FROM vinks
     WHERE state = 'OPEN' AND submission_deadline <= ${now.toISOString()}`;
     for (const row of due) {
-      await closeSubmissionsCommand(ctx, { vinkId: (row as { id: string }).id as VinkId, now });
-      result.closed += 1;
+      try {
+        await closeSubmissionsCommand(ctx, { vinkId: (row as { id: string }).id as VinkId, now });
+        result.closed += 1;
+      } catch {
+        // One vink's own close attempt must not abort the rest of this sweep tick — same
+        // defensive shape as every other per-row loop below. Previously unguarded: a single
+        // stuck/malformed row here silently killed the entire tick, including unrelated
+        // fresh vinks further down (card provisioning, contribution resolution, etc.).
+      }
     }
 
     const graceDue = await sql`SELECT id FROM vinks
     WHERE state IN ('SUBMISSIONS_CLOSED', 'PROCESSING_GRACE')
       AND processing_grace_deadline <= ${now.toISOString()}`;
     for (const row of graceDue) {
-      await resolveGraceCommand(ctx, { vinkId: (row as { id: string }).id as VinkId, now });
-      result.graceResolved += 1;
+      try {
+        await resolveGraceCommand(ctx, { vinkId: (row as { id: string }).id as VinkId, now });
+        result.graceResolved += 1;
+      } catch {
+        // Same reasoning as closeSubmissionsCommand above — previously unguarded.
+      }
     }
 
     // FUNDED vinks with no card-pool assignment yet enter the card pipeline (§16), via RM3B's
@@ -168,10 +179,14 @@ export async function runSweeps(
     // contributions is out of REFUND_FAILED/RESOLUTION_PENDING.
     const recoveryDue = await sql`SELECT id FROM vinks WHERE state = 'REFUND_RECOVERY_REQUIRED'`;
     for (const row of recoveryDue) {
-      const outcome = await resolveRefundRecoveryCommand(ctx, {
-        vinkId: (row as { id: string }).id as VinkId,
-      });
-      if (outcome === 'RESOLVED') result.refundRecoveriesResolved += 1;
+      try {
+        const outcome = await resolveRefundRecoveryCommand(ctx, {
+          vinkId: (row as { id: string }).id as VinkId,
+        });
+        if (outcome === 'RESOLVED') result.refundRecoveriesResolved += 1;
+      } catch {
+        // Same reasoning as closeSubmissionsCommand above — previously unguarded.
+      }
     }
 
     // RM4A (D47): the 10-minute card usage window's own sweep trigger — RM1's

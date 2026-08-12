@@ -220,8 +220,9 @@ void main() {
         'AUTHORIZATION_DECLINED',
       ]) {
         final result = _classify(code == 'UNAUTHENTICATED' ? 401 : 400, code);
-        if (result.requiresSignIn)
+        if (result.requiresSignIn) {
           expect(result.canRetry, isFalse, reason: code);
+        }
       }
     });
   });

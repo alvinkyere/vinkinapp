@@ -2,7 +2,9 @@ import { API_BASE_URL } from './config';
 import { ApiError } from './api-error';
 import type {
   AuthorizeContributionResponse,
+  CreatePaymentSessionResponse,
   GuestVinkViewResult,
+  PaymentModeInfo,
   PublicVinkSummary,
   PublicVinkView,
 } from './types';
@@ -58,6 +60,25 @@ export function authorizeGuestContribution(
   guestToken: string,
 ): Promise<AuthorizeContributionResponse> {
   return request<AuthorizeContributionResponse>('/api/v1/guest/contributions/authorize', {
+    method: 'POST',
+    guestToken,
+    body: JSON.stringify({}),
+  });
+}
+
+// RM4C-B — public, unauthenticated: nothing returned is sensitive (a Stripe publishable key
+// is designed to be embedded in client code; the method list is static configuration).
+export function getPaymentMethods(): Promise<PaymentModeInfo> {
+  return request<PaymentModeInfo>('/api/v1/payment-methods');
+}
+
+// RM4C-C — real hosted card collection. Returns a client-safe secret only in stripe_sandbox
+// mode (null in mock mode, where the existing `authorizeGuestContribution` flow is used
+// instead) — never a payment method, never raw card data.
+export function createGuestContributionPaymentSession(
+  guestToken: string,
+): Promise<CreatePaymentSessionResponse> {
+  return request<CreatePaymentSessionResponse>('/api/v1/guest/contributions/payment-session', {
     method: 'POST',
     guestToken,
     body: JSON.stringify({}),

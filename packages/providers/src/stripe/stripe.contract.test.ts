@@ -9,6 +9,7 @@
  */
 
 import { createHmac, randomUUID } from 'node:crypto';
+import Stripe from 'stripe';
 import { runFinancialProviderContractTests } from '../../../payment-provider-contract-tests/src/contract-suite.ts';
 import type { ProviderTestKit } from '../../../payment-provider-contract-tests/src/test-kit.ts';
 import { StripeFinancialProvider } from './stripe-financial-provider.ts';
@@ -19,6 +20,12 @@ const RUN = process.env.VINKIN_STRIPE_SANDBOX_TEST === '1';
 function makeStripeKit(): ProviderTestKit {
   const config = loadStripeAdapterConfig();
   const provider = new StripeFinancialProvider(config);
+  // RM4C's confirmContributionPaymentIntent hook needs `paymentIntents.confirm` directly —
+  // not part of the FinancialProvider interface itself (confirming with a specific test
+  // payment method is a test-only concern, never something application code does), so this
+  // test file constructs its own raw client, same credentials, same package (legal per D7/
+  // §42 — `packages/providers` is already an approved provider-SDK home).
+  const stripeClient = new Stripe(config.secretKey, { apiVersion: '2026-06-24.dahlia' });
 
   // Stripe's own documented test PaymentMethod IDs for exercising specific outcomes in test
   // mode (https://docs.stripe.com/testing) — not a VinkIn invention, Stripe's own fixtures.
@@ -67,6 +74,34 @@ function makeStripeKit(): ProviderTestKit {
     // way to force these specific outcomes on demand the way an in-process mock can — the
     // dependent tests document their own skip via the suite's existing `t.skip(...)` pattern
     // when a kit omits the hook.
+
+    // RM4C — confirming a `createContributionPaymentIntent` result server-side, without a
+    // browser, using Stripe's own documented test PaymentMethod IDs
+    // (https://docs.stripe.com/testing#cards): this is exactly how Stripe recommends testing
+    // a client-confirmed flow from a backend test. `pm_card_visa` always succeeds;
+    // `pm_card_visa_chargeDeclined` always declines at confirmation (not at attach, unlike
+    // the decline-family tokens above — this family is designed for direct one-time
+    // confirmation, which is exactly this call shape).
+    async confirmContributionPaymentIntent(providerPaymentId, behavior) {
+      const paymentMethod = behavior === 'ok' ? 'pm_card_visa' : 'pm_card_visa_chargeDeclined';
+      try {
+        await stripeClient.paymentIntents.confirm(providerPaymentId, {
+          payment_method: paymentMethod,
+        });
+      } catch (error) {
+        // A card decline surfaces as a thrown StripeCardError from `confirm()` (unlike
+        // `authorizeContribution`'s own initial-authorization decline path) — this hook's
+        // only job is to drive the PaymentIntent to its real terminal state; the suite's own
+        // assertion re-reads that state via `retrievePaymentStatus` afterward rather than
+        // trusting this call's own success/failure. Only a genuine card decline is swallowed
+        // here — any other error (e.g. a configuration mistake) must fail loudly, a real bug
+        // this file's own first sandbox run caught: a missing `allow_redirects: 'never'` on
+        // the adapter's own `createContributionPaymentIntent` made Stripe require a
+        // `return_url` at confirm time, which is a `StripeInvalidRequestError`, not a decline
+        // — the old broad `'payment_intent' in error` check silently swallowed that too.
+        if (!(error instanceof Stripe.errors.StripeCardError)) throw error;
+      }
+    },
 
     // drainEvents/duplicateLastEvent/swapLastTwoEvents: same reason — no local event log to
     // drain against a real sandbox. signWebhook IS provided (see below): it doesn't need

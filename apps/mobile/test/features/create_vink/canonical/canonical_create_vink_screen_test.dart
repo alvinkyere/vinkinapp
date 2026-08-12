@@ -700,8 +700,9 @@ void main() {
               ],
             );
           }
-          if (method == 'PUT' && path == '/api/v1/vinks/vink-1/split')
+          if (method == 'PUT' && path == '/api/v1/vinks/vink-1/split') {
             return {};
+          }
           if (method == 'GET' &&
               path == '/api/v1/vinks/vink-1' &&
               openCalls > 0) {

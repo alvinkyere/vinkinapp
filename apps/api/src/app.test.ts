@@ -54,6 +54,49 @@ describe('app (no infrastructure required)', () => {
     await app.close();
   });
 
+  describe('RM4C-B: GET /api/v1/payment-methods', () => {
+    it('mock mode (default): card available, everything else truthfully gated, no publishable key', async () => {
+      const app = await buildApp({ env, sql: null, checkDb: healthy, checkRedis: healthy });
+      const response = await app.inject({ method: 'GET', url: '/api/v1/payment-methods' });
+      assert.equal(response.statusCode, 200);
+      const body = response.json();
+      assert.equal(body.mode, 'mock');
+      assert.equal(body.publishableKey, null);
+      const card = body.methods.find((m: { type: string }) => m.type === 'card');
+      assert.equal(card.availability, 'available');
+      assert.equal(card.unavailableReason, undefined);
+      for (const type of ['apple_pay', 'venmo', 'cash_app_pay']) {
+        const method = body.methods.find((m: { type: string }) => m.type === type);
+        assert.notEqual(method.availability, 'available');
+        assert.ok(
+          typeof method.unavailableReason === 'string' && method.unavailableReason.length > 0,
+          `${type} must carry a truthful, non-empty reason when not available`,
+        );
+      }
+      await app.close();
+    });
+
+    it('stripe_sandbox mode: exposes the configured test-mode publishable key', async () => {
+      const stripeEnv = loadEnv({
+        VINKIN_ENV: 'test',
+        LOG_LEVEL: 'error',
+        VINKIN_FINANCIAL_PROVIDER: 'stripe_sandbox',
+        STRIPE_PUBLISHABLE_KEY: 'pk_test_fixture_key',
+      });
+      const app = await buildApp({
+        env: stripeEnv,
+        sql: null,
+        checkDb: healthy,
+        checkRedis: healthy,
+      });
+      const response = await app.inject({ method: 'GET', url: '/api/v1/payment-methods' });
+      const body = response.json();
+      assert.equal(body.mode, 'stripe_sandbox');
+      assert.equal(body.publishableKey, 'pk_test_fixture_key');
+      await app.close();
+    });
+  });
+
   describe('ENG3 app-version enforcement', () => {
     it('VINKIN_MINIMUM_APP_VERSION unset (the default): never enforced, any header value passes', async () => {
       const app = await buildApp({ env, sql: null, checkDb: healthy, checkRedis: healthy });

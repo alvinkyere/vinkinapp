@@ -12,7 +12,9 @@ import type {
   CardStatusResult,
   CardholderResult,
   ContributionDeclineReason,
+  ContributionPaymentIntentResult,
   CreateCardholderInput,
+  CreateContributionPaymentIntentInput,
   CreateCustomerInput,
   CreateWalletProvisioningSessionInput,
   CustomerResult,
@@ -355,6 +357,43 @@ export class MockFinancialProvider implements FinancialProvider {
       this.payments.set(providerPaymentId, record);
       this.emit('payment.authorized', providerPaymentId, { amountMinor: input.amount.amountMinor });
       return { providerPaymentId, status: 'AUTHORIZED' };
+    });
+  }
+
+  /** RM4C — real hosted card collection. No `providerMethodId` exists yet: the client
+   * collects the card directly with the provider's own hosted UI using `clientSecret`. Lands
+   * PROCESSING, exactly like the existing `tok_pending` shape — resolved later via
+   * `resolvePendingAuthorization` (this mock) or a real webhook/`retrievePaymentStatus`
+   * (Stripe), never a distinct status vocabulary or code path. */
+  async createContributionPaymentIntent(
+    input: CreateContributionPaymentIntentInput,
+  ): Promise<ContributionPaymentIntentResult> {
+    assertMoney(input.amount, 'createContributionPaymentIntent.amount');
+    if (input.metadata.vinkId === undefined || input.metadata.vinkId.length === 0) {
+      throw new ProviderError(
+        'INVALID_REQUEST',
+        'createContributionPaymentIntent.metadata.vinkId is required',
+      );
+    }
+    return this.idempotent(input.idempotencyKey, input, () => {
+      if (!this.customers.has(input.providerCustomerId)) {
+        throw new ProviderError('OBJECT_NOT_FOUND', `no customer ${input.providerCustomerId}`);
+      }
+      const providerPaymentId = this.nextId('pay');
+      const record: PaymentRecord = {
+        id: providerPaymentId,
+        customerId: input.providerCustomerId,
+        methodId: '', // not yet attached — collected client-side, unlike the token-based flow
+        status: 'PROCESSING',
+        authorizedAmount: input.amount,
+        capturedTotal: 0,
+        refundedTotal: 0,
+        currency: input.amount.currency,
+        occurredAt: this.timestamp(),
+        metadata: input.metadata,
+      };
+      this.payments.set(providerPaymentId, record);
+      return { providerPaymentId, clientSecret: `${providerPaymentId}_secret_mock` };
     });
   }
 

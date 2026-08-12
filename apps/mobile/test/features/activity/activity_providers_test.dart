@@ -52,8 +52,9 @@ class _FakeVinkRepository extends VinkRepository {
     dynamic cancelToken,
   }) async {
     organizerCalls++;
-    if (failingVinkIds.contains(vinkId))
+    if (failingVinkIds.contains(vinkId)) {
       throw Exception('simulated failure for $vinkId');
+    }
     return activityByVinkId[vinkId] ?? organizerActivity;
   }
 
@@ -63,8 +64,9 @@ class _FakeVinkRepository extends VinkRepository {
     dynamic cancelToken,
   }) async {
     participantCalls++;
-    if (failingVinkIds.contains(vinkId))
+    if (failingVinkIds.contains(vinkId)) {
       throw Exception('simulated failure for $vinkId');
+    }
     return activityByVinkId[vinkId] ?? participantActivity;
   }
 }

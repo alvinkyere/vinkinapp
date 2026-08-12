@@ -23,6 +23,7 @@ import '../../design_system/components/vink_buttons.dart';
 import '../../design_system/components/vink_empty_state.dart';
 import '../../design_system/components/vink_inline_error.dart';
 import '../../design_system/components/vink_participant_row.dart';
+import '../../design_system/components/vink_payment_panel.dart';
 import '../../design_system/components/vink_progress_indicator.dart';
 import '../../design_system/components/vink_progress_vessel.dart';
 import '../../design_system/components/vink_simulation_notice.dart';
@@ -411,11 +412,13 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
                 ),
               )
             : _LobbyBody(
+                vinkId: widget.vinkId,
                 snapshot: snapshot!,
                 cancelError: _cancelError,
                 contributing: _contributing,
                 contributionError: _contributionError,
                 onPayShare: _payMyShare,
+                onProcessing: () => unawaited(_loadInitialSnapshot()),
                 inkProgressVessel: widget.inkProgressVessel,
               ),
       ),
@@ -467,10 +470,12 @@ class _VinkLobbyScreenState extends ConsumerState<VinkLobbyScreen> {
                 ),
               )
             : _ParticipantLobbyBody(
+                vinkId: widget.vinkId,
                 view: view!,
                 contributing: _participantContributing,
                 contributionError: _participantContributionError,
                 onPayShare: _payMyShareAsParticipant,
+                onProcessing: () => unawaited(_loadParticipantView()),
                 inkProgressVessel: widget.inkProgressVessel,
               ),
       ),
@@ -518,17 +523,21 @@ String _participantStatusCopy(String contributionStatus) =>
 
 class _ParticipantLobbyBody extends StatelessWidget {
   const _ParticipantLobbyBody({
+    required this.vinkId,
     required this.view,
     required this.contributing,
     required this.contributionError,
     required this.onPayShare,
+    required this.onProcessing,
     required this.inkProgressVessel,
   });
 
+  final String vinkId;
   final ParticipantVinkView view;
   final bool contributing;
   final String? contributionError;
   final Future<void> Function() onPayShare;
+  final VoidCallback onProcessing;
   final bool inkProgressVessel;
 
   @override
@@ -619,12 +628,16 @@ class _ParticipantLobbyBody extends StatelessWidget {
               ),
               const SizedBox(height: VinkSpacing.md),
               if (canPay)
-                VinkPrimaryButton(
-                  label:
-                      'Pay ${MoneyText.format(participant.allocatedAmountMinor)}',
-                  glow: true,
-                  loading: contributing,
-                  onPressed: () => onPayShare(),
+                VinkPaymentPanel(
+                  vinkId: vinkId,
+                  onProcessing: onProcessing,
+                  legacyButton: VinkPrimaryButton(
+                    label:
+                        'Pay ${MoneyText.format(participant.allocatedAmountMinor)}',
+                    glow: true,
+                    loading: contributing,
+                    onPressed: () => onPayShare(),
+                  ),
                 )
               else
                 Text(
@@ -645,19 +658,23 @@ class _ParticipantLobbyBody extends StatelessWidget {
 
 class _LobbyBody extends StatelessWidget {
   const _LobbyBody({
+    required this.vinkId,
     required this.snapshot,
     required this.cancelError,
     required this.contributing,
     required this.contributionError,
     required this.onPayShare,
+    required this.onProcessing,
     required this.inkProgressVessel,
   });
 
+  final String vinkId;
   final VinkSnapshot snapshot;
   final String? cancelError;
   final bool contributing;
   final String? contributionError;
   final Future<void> Function() onPayShare;
+  final VoidCallback onProcessing;
   final bool inkProgressVessel;
 
   @override
@@ -789,12 +806,16 @@ class _LobbyBody extends StatelessWidget {
                   style: VinkTypography.amountMedium,
                 ),
                 const SizedBox(height: VinkSpacing.md),
-                VinkPrimaryButton(
-                  label:
-                      'Pay my ${MoneyText.format(organizer.allocatedAmountMinor)}',
-                  glow: true,
-                  loading: contributing,
-                  onPressed: () => onPayShare(),
+                VinkPaymentPanel(
+                  vinkId: vinkId,
+                  onProcessing: onProcessing,
+                  legacyButton: VinkPrimaryButton(
+                    label:
+                        'Pay my ${MoneyText.format(organizer.allocatedAmountMinor)}',
+                    glow: true,
+                    loading: contributing,
+                    onPressed: () => onPayShare(),
+                  ),
                 ),
               ],
             ),

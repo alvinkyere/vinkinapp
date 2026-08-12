@@ -144,8 +144,9 @@ void main() {
         options: Options(headers: {'Authorization': 'Bearer $organizerToken'}),
       );
       funded = (snapshot.data['vink']['state'] as String) != 'OPEN';
-      if (!funded)
+      if (!funded) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
     }
     expect(
       funded,
@@ -161,8 +162,9 @@ void main() {
         options: Options(headers: {'Authorization': 'Bearer $organizerToken'}),
       );
       cardReady = snapshot.data['vink']['state'] == 'CARD_READY';
-      if (!cardReady)
+      if (!cardReady) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
     }
     expect(
       cardReady,
@@ -198,8 +200,9 @@ void main() {
         options: Options(headers: {'Authorization': 'Bearer $organizerToken'}),
       );
       completed = snapshot.data['vink']['state'] == 'COMPLETED';
-      if (!completed)
+      if (!completed) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
     }
     expect(completed, isTrue, reason: 'the vink should settle to COMPLETED');
 

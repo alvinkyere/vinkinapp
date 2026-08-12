@@ -101,4 +101,89 @@ describe('environment configuration', () => {
     assert.equal(env.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS, 60);
     assert.equal(env.VINKIN_API_PUBLIC_BASE_URL, 'http://localhost:3000');
   });
+
+  // RM4D — a real delivery provider (Resend) now exists. RESEND_API_KEY/RESEND_FROM_EMAIL
+  // must be configured together; neither alone constructs a working adapter.
+  it('RESEND_API_KEY and RESEND_FROM_EMAIL must be set together', () => {
+    assert.throws(
+      () => loadEnv({ RESEND_API_KEY: 're_fake' }),
+      /RESEND_API_KEY and RESEND_FROM_EMAIL must be set together/,
+    );
+    assert.throws(
+      () => loadEnv({ RESEND_FROM_EMAIL: 'hello@vinkin.org' }),
+      /RESEND_API_KEY and RESEND_FROM_EMAIL must be set together/,
+    );
+    const env = loadEnv({ RESEND_API_KEY: 're_fake', RESEND_FROM_EMAIL: 'hello@vinkin.org' });
+    assert.equal(env.RESEND_API_KEY, 're_fake');
+    assert.equal(env.RESEND_FROM_EMAIL, 'hello@vinkin.org');
+  });
+
+  // RM4D — each of the four delivery-gated flags now stays boot-refused outside
+  // development/test UNLESS a real provider (RESEND_API_KEY/RESEND_FROM_EMAIL) is configured,
+  // proving the original ENG5/Slice-I4-era boot-refusal (still exercised, unchanged, by the
+  // earlier tests in this file) has become conditional rather than unconditional.
+  it('a configured Resend provider allows the delivery-gated flags outside development/test', () => {
+    const resendConfig = { RESEND_API_KEY: 're_fake', RESEND_FROM_EMAIL: 'hello@vinkin.org' };
+    for (const flag of [
+      'VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED',
+      'VINKIN_EMAIL_VERIFICATION_ENABLED',
+      'VINKIN_PASSWORD_RESET_ENABLED',
+      'VINKIN_MAGIC_LINK_ENABLED',
+    ] as const) {
+      const env = loadEnv({
+        VINKIN_ENV: 'staging',
+        JWT_SECRET: 'a-genuinely-configured-secret-value-123',
+        [flag]: '1',
+        ...resendConfig,
+      });
+      assert.equal(env[flag], '1');
+    }
+  });
+
+  it('still refuses the delivery-gated flags outside development/test when no real provider is configured', () => {
+    assert.throws(
+      () =>
+        loadEnv({
+          VINKIN_ENV: 'staging',
+          JWT_SECRET: 'a-genuinely-configured-secret-value-123',
+          VINKIN_PASSWORD_RESET_ENABLED: '1',
+        }),
+      /VINKIN_PASSWORD_RESET_ENABLED must stay off/,
+    );
+  });
+
+  // RM4C (D49) — VINKIN_FINANCIAL_PROVIDER=stripe_sandbox requires a real, test-mode
+  // publishable key; defaults to `mock` (today's behavior, unchanged) when unset.
+  it('defaults VINKIN_FINANCIAL_PROVIDER to mock with no publishable key required', () => {
+    const env = loadEnv({});
+    assert.equal(env.VINKIN_FINANCIAL_PROVIDER, 'mock');
+    assert.equal(env.STRIPE_PUBLISHABLE_KEY, undefined);
+  });
+
+  it('refuses stripe_sandbox mode with no STRIPE_PUBLISHABLE_KEY configured', () => {
+    assert.throws(
+      () => loadEnv({ VINKIN_FINANCIAL_PROVIDER: 'stripe_sandbox' }),
+      /STRIPE_PUBLISHABLE_KEY must be set/,
+    );
+  });
+
+  it('refuses a live-mode-shaped STRIPE_PUBLISHABLE_KEY even in stripe_sandbox mode (D46 applies to the publishable key too)', () => {
+    assert.throws(
+      () =>
+        loadEnv({
+          VINKIN_FINANCIAL_PROVIDER: 'stripe_sandbox',
+          STRIPE_PUBLISHABLE_KEY: 'pk_live_not_a_real_key',
+        }),
+      /must be a test-mode key/,
+    );
+  });
+
+  it('accepts stripe_sandbox mode with a genuinely test-mode-shaped publishable key', () => {
+    const env = loadEnv({
+      VINKIN_FINANCIAL_PROVIDER: 'stripe_sandbox',
+      STRIPE_PUBLISHABLE_KEY: 'pk_test_not_a_real_key',
+    });
+    assert.equal(env.VINKIN_FINANCIAL_PROVIDER, 'stripe_sandbox');
+    assert.equal(env.STRIPE_PUBLISHABLE_KEY, 'pk_test_not_a_real_key');
+  });
 });

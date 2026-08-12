@@ -63,6 +63,10 @@ async function buildContactSheet() {
     '11-guest-contribution.png',
     '12-guest-live-progress.png',
     '13-guest-funded.png',
+    '14-invites-home-card.png',
+    '15-invites-tab-pending.png',
+    '16-invites-tab-accepted.png',
+    '17-guest-stripe-card-entry.png',
   ];
   const cells = files
     .map(
@@ -81,7 +85,7 @@ async function buildContactSheet() {
     path.join(REPO_ROOT, 'artifacts/product-screenshots/vinkin-screenshot-contact-sheet.png'),
     {
       width: 1400,
-      height: 1900,
+      height: 2480,
     },
   );
 }

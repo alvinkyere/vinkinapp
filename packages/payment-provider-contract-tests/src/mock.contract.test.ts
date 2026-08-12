@@ -40,6 +40,11 @@ function makeMockKit(): ProviderTestKit {
 
     resolvePendingAuthorization: (paymentId, outcome) =>
       provider.resolvePendingAuthorization(paymentId, outcome),
+    confirmContributionPaymentIntent: (paymentId, behavior) =>
+      provider.resolvePendingAuthorization(
+        paymentId,
+        behavior === 'ok' ? 'AUTHORIZED' : 'DECLINED',
+      ),
     expireAuthorization: (paymentId) => provider.expireAuthorization(paymentId),
     simulateTransientFailure: () => provider.simulateTransientFailure(),
     simulateLostResponse: () => provider.simulateLostResponse(),

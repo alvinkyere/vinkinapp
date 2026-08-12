@@ -370,6 +370,148 @@ export async function authorizeContributionCommand(
 }
 
 // ---------------------------------------------------------------------------
+// CreateContributionPaymentSessionCommand (RM4C, D49) — real hosted card collection. Unlike
+// `authorizeContributionCommand` above (which authorizes against an already-known mock
+// scenario token, synchronously), this command has no payment method yet: it creates a
+// provider-side payment intent and hands the client an opaque, client-safe secret to
+// complete card entry directly with the provider's own hosted UI (Stripe Elements /
+// PaymentSheet). The contribution lands AUTHORIZATION_PENDING — resolved later through the
+// EXISTING, already-hardened `resolveContributionCommand` (E5/SH1's IDOR-fixed resolver),
+// triggered either by a verified provider webhook or by the client itself asking "check now"
+// after confirming — both are equally authoritative because both call
+// `provider.retrievePaymentStatus` against the provider's own real truth, never the client's
+// own claim of success. This deliberately reuses D5's single-resolver path rather than
+// inventing a second one: no new code decides FUNDING_CONFIRMED/FUNDING_FAILED.
+// ---------------------------------------------------------------------------
+
+export interface CreateContributionPaymentSessionInput {
+  vinkId: VinkId;
+  requester: ContributionRequester;
+}
+
+export interface CreateContributionPaymentSessionResult {
+  contribution: Contribution;
+  vinkState: Vink['state'];
+  /** null when an existing in-flight session was returned instead of starting a new one (a
+   * double tap / reload) — the client should check status rather than re-render card entry,
+   * since a fresh client secret isn't minted for an attempt already in flight. */
+  clientSecret: string | null;
+  replayed: boolean;
+}
+
+export async function createContributionPaymentSessionCommand(
+  ctx: ContributionCommandContext,
+  input: CreateContributionPaymentSessionInput,
+): Promise<CreateContributionPaymentSessionResult> {
+  const result = await ctx.uow.run(async (tx) => {
+    const vink = await tx.getVinkForUpdate(input.vinkId);
+    if (vink === null)
+      throw new ApplicationError('VINK_NOT_FOUND', `vink ${input.vinkId} not found`);
+    if (vink.state !== 'OPEN') {
+      throw new ApplicationError(
+        'INVALID_COMMAND',
+        `contributions are accepted only while OPEN (state: ${vink.state})`,
+      );
+    }
+    // RM4A (D47): same deadline enforcement as authorizeContributionCommand — never trust
+    // the sweep alone to have already flipped state off OPEN.
+    if (ctx.clock.now().getTime() >= new Date(vink.submissionDeadline).getTime()) {
+      throw new ApplicationError('INVALID_COMMAND', 'the submission deadline has passed');
+    }
+    const participants = await tx.listParticipants(vink.id);
+    const participant = findOwnParticipant(participants, input.requester);
+    if (participant === undefined) {
+      throw new ApplicationError(
+        'FORBIDDEN',
+        'requester is not an active participant of this vink',
+      );
+    }
+    if (participant.allocatedAmount.amountMinor === 0) {
+      throw new ApplicationError(
+        'INVALID_COMMAND',
+        'no allocation to authorize — ask the organizer to set the split',
+      );
+    }
+
+    const contributions = await tx.listContributionsForUpdate(vink.id);
+    const own = contributions.filter((row) => row.participantId === participant.id);
+    const live = own.find(isLive);
+    if (live !== undefined) {
+      // Business-level idempotency, same rule as authorizeContributionCommand's own double-tap
+      // guard — a hosted-collection secret is single-reveal by design, so a replay returns the
+      // existing contribution with no new secret rather than restarting card entry.
+      return { contribution: live, vinkState: vink.state, clientSecret: null, replayed: true };
+    }
+
+    const amount = participant.allocatedAmount;
+    assertWithinApprovedMaximum(
+      amount,
+      participant.maximumApprovedAmount,
+      'createContributionPaymentSession',
+    );
+
+    const now = ctx.clock.now();
+    const attemptNumber = own.length + 1;
+    let contribution: Contribution = {
+      id: newContributionId(),
+      vinkId: vink.id,
+      participantId: participant.id,
+      attemptNumber,
+      requestedAmount: amount,
+      authorizedAmount: null,
+      capturedAmount: null,
+      refundedAmount: null,
+      status: 'CREATED',
+      providerReference: null,
+      idempotencyKey: idempotencyKey.authorizeContribution(vink.id, participant.id, attemptNumber),
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    await tx.insertContribution(contribution);
+    const actor = requesterActor(input.requester);
+    contribution = await applyContributionTransition(
+      tx,
+      contribution,
+      'AUTHORIZATION_STARTED',
+      actor,
+      ctx.correlationId,
+      now,
+    );
+
+    // No `setupPaymentMethod` call: unlike the token-based flow, there is no payment method
+    // yet — the client collects it directly from the provider using `clientSecret`.
+    const { providerCustomerId } = await ctx.provider.createCustomer({
+      idempotencyKey: `customer:v1:${participant.id}`,
+      externalUserId: participant.id,
+    });
+    const { providerPaymentId, clientSecret } = await ctx.provider.createContributionPaymentIntent({
+      idempotencyKey: operationId.createPaymentIntent(participant.id, attemptNumber),
+      providerCustomerId,
+      amount,
+      metadata: {
+        vinkId: vink.id,
+        participantId: participant.id,
+        contributionId: contribution.id,
+      },
+    });
+    contribution = { ...contribution, providerReference: providerPaymentId };
+    await tx.updateContribution(contribution);
+    return { contribution, vinkState: vink.state, clientSecret, replayed: false };
+  });
+  if (result.replayed) ctx.metrics?.recordReplay('createContributionPaymentSession');
+  ctx.metrics?.recordContributionOutcome(result.contribution.status);
+  logCommand(ctx.logger, 'createContributionPaymentSession', {
+    correlationId: ctx.correlationId,
+    actor: requesterActor(input.requester),
+    vinkId: input.vinkId,
+    idempotencyKey: result.contribution.idempotencyKey,
+    status: result.contribution.status,
+    replayed: result.replayed,
+  });
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // The D5 resolver and its entry points
 // ---------------------------------------------------------------------------
 

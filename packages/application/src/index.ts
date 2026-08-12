@@ -15,6 +15,7 @@ export * from './card-pool.ts';
 export * from './recovery.ts';
 export * from './refunds.ts';
 export * from './invites.ts';
+export * from './payment-methods.ts';
 export * from './support/transition.ts';
 export * from './support/contribution-transition.ts';
 export * from './support/public-code.ts';

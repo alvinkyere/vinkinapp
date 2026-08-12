@@ -8,6 +8,12 @@ export const operationId = {
   authorize: (contributionSlotId: string, attemptGeneration: number): string =>
     `authorize:v1:${contributionSlotId}:${attemptGeneration}`,
 
+  /** RM4C — hosted card collection (`createContributionPaymentIntent`); a distinct scope from
+   * `authorize` since it names a different provider-side operation (an intent with no
+   * payment method yet, not a token-based authorization). */
+  createPaymentIntent: (contributionSlotId: string, attemptGeneration: number): string =>
+    `create-payment-intent:v1:${contributionSlotId}:${attemptGeneration}`,
+
   capture: (contributionSlotId: string, captureGeneration: number): string =>
     `capture:v1:${contributionSlotId}:${captureGeneration}`,
 

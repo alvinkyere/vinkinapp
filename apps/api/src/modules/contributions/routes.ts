@@ -10,6 +10,7 @@ import {
   ApplicationError,
   authorizeContributionCommand,
   closeSubmissionsCommand,
+  createContributionPaymentSessionCommand,
   resolveContributionCommand,
   resolveGraceCommand,
   type ContributionCommandContext,
@@ -25,6 +26,7 @@ import {
 import {
   MockFinancialProvider,
   type FinancialProvider,
+  type ProviderEvent,
 } from '../../../../../packages/payment-provider/src/index.ts';
 import type { Env } from '../../config/env.ts';
 import type { Sql } from '../../db/client.ts';
@@ -38,7 +40,7 @@ import {
 } from '../../middleware/params.ts';
 import { GUEST_TOKEN_PREFIX, hashGuestToken } from '../../auth/guest-tokens.ts';
 import { PostgresVinkStore } from '../vinks/store.ts';
-import { toCommandLogger } from '../../observability/command-logger.ts';
+import { toCommandLogger, type PinoLike } from '../../observability/command-logger.ts';
 import { toCommandMetrics } from '../../observability/command-metrics.ts';
 import { withProviderLogging } from '../../observability/provider-logging.ts';
 import { NOOP_METRICS, type Metrics } from '../../observability/metrics.ts';
@@ -183,6 +185,50 @@ export function registerContributionRoutes(
     });
   });
 
+  // --- RM4C: real hosted card collection (Stripe sandbox client-secret intents) ----------
+
+  app.post('/api/v1/vinks/:vinkId/contributions/payment-session', async (request, reply) => {
+    const claims = await requireUser(request, reply, env);
+    if (claims === null) return;
+    const { vinkId } = vinkIdParams.parse(request.params);
+    const requester: ContributionRequester = { kind: 'user', userId: claims.userId };
+    return handle(reply, async () => {
+      const result = await createContributionPaymentSessionCommand(contextFor(request), {
+        vinkId: vinkId as VinkId,
+        requester,
+      });
+      return {
+        contribution: contributionView(result.contribution),
+        vinkState: result.vinkState,
+        clientSecret: result.clientSecret,
+        replayed: result.replayed,
+      };
+    });
+  });
+
+  app.post('/api/v1/guest/contributions/payment-session', async (request, reply) => {
+    const header = request.headers.authorization;
+    const token =
+      header?.startsWith(`Bearer ${GUEST_TOKEN_PREFIX}`) === true
+        ? header.slice('Bearer '.length)
+        : null;
+    if (token === null) return reply.code(401).send({ error: 'GUEST_UNAUTHENTICATED' });
+    const resolved = await store.findGuestParticipant(hashGuestToken(token), new Date());
+    if (resolved === null) return reply.code(401).send({ error: 'GUEST_UNAUTHENTICATED' });
+    return handle(reply, async () => {
+      const result = await createContributionPaymentSessionCommand(contextFor(request), {
+        vinkId: resolved.participant.vinkId,
+        requester: { kind: 'guest', guestIdentityId: resolved.guest.id },
+      });
+      return {
+        contribution: contributionView(result.contribution),
+        vinkState: result.vinkState,
+        clientSecret: result.clientSecret,
+        replayed: result.replayed,
+      };
+    });
+  });
+
   // --- Retry / resolve an unresolved contribution (E5) ----------------------
 
   app.post(
@@ -260,5 +306,72 @@ export function registerContributionRoutes(
         },
       );
     }
+  }
+}
+
+/**
+ * RM4C (D49) — the one place a verified provider webhook re-enters the contribution engine.
+ * Deliberately NOT a new resolver: a verified `payment.*` event is a TRIGGER to re-check
+ * provider truth, never itself trusted as the outcome — `resolveContributionCommand` (E5,
+ * SH1's own IDOR-fixed resolver) makes the actual decision via its own `retrievePaymentStatus`
+ * call against the provider's real API. `requester` is omitted (trusted internal caller,
+ * exactly like `jobs/sweeps.ts`'s own system-wide resolver) since this route already verified
+ * the provider's signature before this function is ever called — never a caller-supplied
+ * identity. Errors are logged, never thrown: webhook ingestion (dedupe/storage) has already
+ * succeeded and returned 200 by the time this runs; resolution is safe to retry (the sweep, or
+ * the client's own "check status" call, are both equally valid fallback triggers for the exact
+ * same idempotent resolver).
+ */
+export async function processContributionPaymentEvent(
+  sql: Sql,
+  provider: FinancialProvider,
+  event: ProviderEvent,
+  log: PinoLike,
+  metrics: Metrics = NOOP_METRICS,
+): Promise<void> {
+  const RELEVANT_TYPES = new Set([
+    'payment.authorized',
+    'payment.captured',
+    'payment.declined',
+    'payment.canceled',
+    'payment.authorization.expired',
+  ]);
+  if (!RELEVANT_TYPES.has(event.type)) return;
+
+  const rows = (await sql`
+    SELECT id, vink_id FROM contributions
+    WHERE provider_reference = ${event.objectId}
+      AND status IN ('AUTHORIZATION_PENDING', 'RESOLUTION_PENDING')
+  `) as unknown as { id: string; vink_id: string }[];
+  const row = rows[0];
+  // Not ours (a payment created outside this contribution engine — reconciliation's own
+  // ORPHANED classification already surfaces that), or already resolved by another trigger
+  // (the sweep, a client "check status" call) — either way, nothing to do here.
+  if (row === undefined) return;
+
+  const correlationId = `webhook:${event.provider}:${event.providerEventId}`;
+  const store = new PostgresVinkStore(sql);
+  const logger = toCommandLogger(log);
+  try {
+    await resolveContributionCommand(
+      {
+        uow: store,
+        clock: { now: () => new Date() },
+        correlationId,
+        provider: withProviderLogging(provider, correlationId, logger, metrics),
+        logger,
+        metrics: toCommandMetrics(metrics),
+      },
+      {
+        vinkId: row.vink_id as VinkId,
+        contributionId: row.id as ContributionId,
+      },
+    );
+  } catch (error) {
+    logger.error('webhook_contribution_resolve_failed', {
+      correlationId,
+      contributionId: row.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }

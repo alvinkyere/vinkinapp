@@ -114,3 +114,31 @@ export interface ApiErrorBody {
   error: string;
   message?: string;
 }
+
+// RM4C-B (D49) — mirrors packages/application/src/payment-methods.ts's own wire shape
+// exactly (server is the single source of truth on availability; the client never guesses).
+export type PaymentMethodType = 'card' | 'apple_pay' | 'venmo' | 'cash_app_pay';
+export type PaymentMethodAvailability =
+  'available' | 'unavailable' | 'requires_configuration' | 'coming_soon';
+
+export interface PaymentMethodOption {
+  type: PaymentMethodType;
+  displayName: string;
+  availability: PaymentMethodAvailability;
+  unavailableReason?: string;
+}
+
+export type FinancialProviderMode = 'mock' | 'stripe_sandbox';
+
+export interface PaymentModeInfo {
+  mode: FinancialProviderMode;
+  publishableKey: string | null;
+  methods: PaymentMethodOption[];
+}
+
+export interface CreatePaymentSessionResponse {
+  contribution: ContributionView;
+  vinkState: string;
+  clientSecret: string | null;
+  replayed: boolean;
+}

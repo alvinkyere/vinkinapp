@@ -229,8 +229,9 @@ void main() {
       'and still shows the QR/link phase (I4-compatible)',
       (tester) async {
         final client = FakeApiClient((method, path, body) async {
-          if (path == '/api/v1/vinks/vink-1/participants')
+          if (path == '/api/v1/vinks/vink-1/participants') {
             throw ApiException(statusCode: 404, code: 'USER_NOT_FOUND');
+          }
           if (method == 'POST' && path == '/api/v1/vinks/vink-1/guests') {
             expect(body!['deliveryMode'], 'manual');
             expect(body.containsKey('contactDestination'), isFalse);
@@ -270,8 +271,9 @@ void main() {
       'ONLY a customer-safe confirmation — no link, no provider diagnostics',
       (tester) async {
         final client = FakeApiClient((method, path, body) async {
-          if (path == '/api/v1/vinks/vink-1/participants')
+          if (path == '/api/v1/vinks/vink-1/participants') {
             throw ApiException(statusCode: 404, code: 'USER_NOT_FOUND');
+          }
           if (method == 'POST' && path == '/api/v1/vinks/vink-1/guests') {
             expect(body!['deliveryMode'], 'sms');
             expect(body['contactDestination'], '+15551234567');
@@ -320,8 +322,9 @@ void main() {
       'duplicate-invite (INVITE_ALREADY_SENT) closes quietly instead of erroring',
       (tester) async {
         final client = FakeApiClient((method, path, body) async {
-          if (path == '/api/v1/vinks/vink-1/participants')
+          if (path == '/api/v1/vinks/vink-1/participants') {
             throw ApiException(statusCode: 404, code: 'USER_NOT_FOUND');
+          }
           if (method == 'POST' && path == '/api/v1/vinks/vink-1/guests') {
             throw ApiException(
               statusCode: 409,

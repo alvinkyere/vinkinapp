@@ -106,10 +106,11 @@ const envSchema = z.object({
    * see `packages/application/src/delivery.ts`'s own doc comment for why guest dispatch is
    * separately deferred). Default off. Unlike the other static flags above, this one is
    * boot-refused outside `development`/`test` (enforced in `loadEnv` below, not just
-   * documented) — no real delivery provider has been selected (§4, external dependency), so
-   * enabling this anywhere real traffic could reach it would either silently no-op (the mock
-   * adapter is the only one that exists) or, worse, look like a real send capability that
-   * isn't there. Manual sharing is always available regardless of this flag. */
+   * documented) UNLESS a real delivery provider is configured (RM4D — `RESEND_API_KEY`/
+   * `RESEND_FROM_EMAIL`, see below): absent real credentials, enabling this anywhere real
+   * traffic could reach it would either silently no-op (the mock adapter) or, worse, look
+   * like a real send capability that isn't there. Manual sharing is always available
+   * regardless of this flag. */
   VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED: z.enum(['0', '1']).default('0'),
   /** Slice I4B (D38) — abuse-prevention cooldown between guest-invitation resend attempts,
    * per participant (`apps/api/src/modules/vinks/routes.ts`'s resend route). Same "real
@@ -123,9 +124,8 @@ const envSchema = z.object({
    * see `app-version.ts` for the (fail-open on anything malformed) comparison. */
   VINKIN_MINIMUM_APP_VERSION: z.string().optional(),
   /** ENG5 Slice 1 (email verification) — same off-by-default, boot-refused-outside-dev/test
-   * discipline as `VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED` immediately above, and for
-   * the identical reason: no real email-sending provider is selected yet (§4), so a real send
-   * capability can't exist outside development/test regardless of this flag. */
+   * (unless a real delivery provider is configured, RM4D) discipline as
+   * `VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED` immediately above. */
   VINKIN_EMAIL_VERIFICATION_ENABLED: z.enum(['0', '1']).default('0'),
   /** How long an email-verification link stays valid. Default (24h) is a plain, undisputed
    * default — no ratified decision specifies a different value (checked
@@ -137,18 +137,20 @@ const envSchema = z.object({
    * test needs to shrink this to exercise "resend accepted" without an actual 60s sleep). */
   EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().nonnegative().default(60),
   /** ENG5 Slice 2 (password reset) — same off-by-default, boot-refused-outside-dev/test
-   * discipline as `VINKIN_EMAIL_VERIFICATION_ENABLED`, for the identical reason (no real
-   * email provider selected yet, §4). A separate flag, not a reuse of the email-verification
-   * one — the two are independently rollout-able capabilities, same "one flag per feature"
-   * convention `VINKIN_INVITES_ENABLED` established alongside the older delivery flag. */
+   * (unless a real delivery provider is configured, RM4D) discipline as
+   * `VINKIN_EMAIL_VERIFICATION_ENABLED`. A separate flag, not a reuse of the email-
+   * verification one — the two are independently rollout-able capabilities, same "one flag
+   * per feature" convention `VINKIN_INVITES_ENABLED` established alongside the older delivery
+   * flag. */
   VINKIN_PASSWORD_RESET_ENABLED: z.enum(['0', '1']).default('0'),
   /** Deliberately shorter than `EMAIL_VERIFICATION_TOKEN_TTL_SECONDS` (1h vs. 24h) — a
    * password-reset link is a more security-sensitive bearer secret (it grants a full account
    * takeover, not just an email-ownership proof) and standard practice keeps its window short. */
   PASSWORD_RESET_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3_600),
   PASSWORD_RESET_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().nonnegative().default(60),
-  /** ENG5 Slice 3 (magic links) — same off-by-default, boot-refused-outside-dev/test
-   * discipline and same reason as its two siblings; own flag, independently rollout-able. */
+  /** ENG5 Slice 3 (magic links) — same off-by-default, boot-refused-outside-dev/test (unless
+   * a real delivery provider is configured, RM4D) discipline as its two siblings; own flag,
+   * independently rollout-able. */
   VINKIN_MAGIC_LINK_ENABLED: z.enum(['0', '1']).default('0'),
   /** Shortest TTL of the three token families — a magic link grants an immediate real login
    * with no further factor (not even a password), the highest-stakes bearer secret this
@@ -184,6 +186,39 @@ const envSchema = z.object({
    * in every environment, regardless of this flag — the credential format is the guard, not
    * the environment name. */
   VINKIN_STRIPE_WEBHOOKS_ENABLED: z.enum(['0', '1']).default('0'),
+  /** RM4C — which `FinancialProvider` drives real command execution (`server.ts`'s single
+   * `provider` instance, used by every application command: contributions, card pool,
+   * purchases). Defaults to `mock` — today's behavior, unchanged, everywhere including CI —
+   * so this is a genuine opt-in, never a silent behavior change. Owner-directed scoping
+   * (2026-08-03, see docs/spec/decision-log.md D49): `stripe_sandbox` is for demonstrating a
+   * genuinely real Stripe-sandbox card-payment flow to participants; organizer-side card-pool
+   * issuance/wallet-provisioning (RM2/RM3B) will visibly fail with a real, truthful
+   * `NOT_SUPPORTED` in this mode, since the Stripe adapter honestly declares
+   * `walletProvisioning: false` (blocked on Stripe's own Financial Account v2 wall,
+   * unchanged by this milestone) — never a silent capability emulation (§9, §21, D7). Same
+   * boot-time safety mechanism as `VINKIN_STRIPE_WEBHOOKS_ENABLED`: not environment-scoped,
+   * because `assertSandboxModeKey`'s unconditional live-key rejection is what actually keeps
+   * this sandbox-only (D46) — a live-mode-shaped `STRIPE_SECRET_KEY` fails to construct the
+   * adapter at all, regardless of this flag or `VINKIN_ENV`. */
+  VINKIN_FINANCIAL_PROVIDER: z.enum(['mock', 'stripe_sandbox']).default('mock'),
+  /** RM4C — the ONE Stripe credential a client ever sees, embedded in Stripe.js/PaymentSheet
+   * initialization so the client can collect card details directly with Stripe (§35, never
+   * VinkIn's own server). Publishable keys are not secret by Stripe's own design, but D46's
+   * sandbox-only guarantee still applies here: `assertTestModePublishableKey` below refuses a
+   * live-shaped (`pk_live_`) key exactly like `assertSandboxModeKey` refuses a live secret
+   * key, since exposing one would be the first concrete step toward a client that could
+   * actually move real money. */
+  STRIPE_PUBLISHABLE_KEY: z.string().optional(),
+  /** RM4D — the real email delivery provider (Resend), closing the "no real delivery provider
+   * is selected yet (§4)" gap `VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED`/
+   * `VINKIN_EMAIL_VERIFICATION_ENABLED`/`VINKIN_PASSWORD_RESET_ENABLED`/
+   * `VINKIN_MAGIC_LINK_ENABLED` have each documented since ENG5/Slice I4. Both optional:
+   * absent means `server.ts` keeps constructing `MockDeliveryProvider`, byte-for-byte
+   * unchanged from before this milestone. Validated below as both-or-neither — a credential
+   * with no sender identity (or vice versa) can't construct a working adapter. */
+  RESEND_API_KEY: z.string().optional(),
+  /** e.g. "VinkIn <hello@vinkin.org>" — passed to Resend verbatim as the `from` header. */
+  RESEND_FROM_EMAIL: z.string().optional(),
   /** ENG7 ("Observability and auditability") — a release identifier attached to every log
    * line (Pino `base` binding, `app.ts`/`observability/logger.ts`) and Sentry event
    * (`observability/sentry.ts`), so a specific deployed build can be identified in logs and
@@ -213,44 +248,62 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
       'OPERATOR_PASSWORD must be explicitly set in demo — the development default is refused',
     );
   }
+  if ((env.RESEND_API_KEY !== undefined) !== (env.RESEND_FROM_EMAIL !== undefined)) {
+    throw new Error(
+      'RESEND_API_KEY and RESEND_FROM_EMAIL must be set together — a credential with no ' +
+        'sender identity (or vice versa) cannot construct a working ResendDeliveryProvider',
+    );
+  }
+  // RM4D: a real delivery provider (Resend) now exists. Each of the four flags below stays
+  // boot-refused outside development/test UNLESS a real provider is actually configured
+  // (`RESEND_API_KEY` set) — the original reason for refusal ("no real delivery provider is
+  // selected yet, §4") no longer holds once one is; the presence of real credentials is the
+  // guard, not the environment name, same discipline `assertSandboxModeKey`/
+  // `VINKIN_STRIPE_WEBHOOKS_ENABLED` established for Stripe. Absent credentials, behavior is
+  // byte-for-byte unchanged from before this milestone.
+  const hasRealDeliveryProvider = env.RESEND_API_KEY !== undefined;
   if (
     env.VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED === '1' &&
     env.VINKIN_ENV !== 'development' &&
-    env.VINKIN_ENV !== 'test'
+    env.VINKIN_ENV !== 'test' &&
+    !hasRealDeliveryProvider
   ) {
     throw new Error(
       'VINKIN_AUTOMATIC_INVITATION_DELIVERY_ENABLED must stay off outside development/test ' +
-        '— no real delivery provider is selected yet (§4)',
+        'unless RESEND_API_KEY/RESEND_FROM_EMAIL are configured (§4)',
     );
   }
   if (
     env.VINKIN_EMAIL_VERIFICATION_ENABLED === '1' &&
     env.VINKIN_ENV !== 'development' &&
-    env.VINKIN_ENV !== 'test'
+    env.VINKIN_ENV !== 'test' &&
+    !hasRealDeliveryProvider
   ) {
     throw new Error(
       'VINKIN_EMAIL_VERIFICATION_ENABLED must stay off outside development/test ' +
-        '— no real delivery provider is selected yet (§4)',
+        'unless RESEND_API_KEY/RESEND_FROM_EMAIL are configured (§4)',
     );
   }
   if (
     env.VINKIN_PASSWORD_RESET_ENABLED === '1' &&
     env.VINKIN_ENV !== 'development' &&
-    env.VINKIN_ENV !== 'test'
+    env.VINKIN_ENV !== 'test' &&
+    !hasRealDeliveryProvider
   ) {
     throw new Error(
       'VINKIN_PASSWORD_RESET_ENABLED must stay off outside development/test ' +
-        '— no real delivery provider is selected yet (§4)',
+        'unless RESEND_API_KEY/RESEND_FROM_EMAIL are configured (§4)',
     );
   }
   if (
     env.VINKIN_MAGIC_LINK_ENABLED === '1' &&
     env.VINKIN_ENV !== 'development' &&
-    env.VINKIN_ENV !== 'test'
+    env.VINKIN_ENV !== 'test' &&
+    !hasRealDeliveryProvider
   ) {
     throw new Error(
       'VINKIN_MAGIC_LINK_ENABLED must stay off outside development/test ' +
-        '— no real delivery provider is selected yet (§4)',
+        'unless RESEND_API_KEY/RESEND_FROM_EMAIL are configured (§4)',
     );
   }
   if (
@@ -272,6 +325,20 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
       'VINKIN_GOOGLE_SIGN_IN_ENABLED must stay off outside development/test ' +
         '— no real Google Cloud OAuth client is configured yet',
     );
+  }
+  if (env.VINKIN_FINANCIAL_PROVIDER === 'stripe_sandbox') {
+    if (env.STRIPE_PUBLISHABLE_KEY === undefined || env.STRIPE_PUBLISHABLE_KEY.length === 0) {
+      throw new Error(
+        'STRIPE_PUBLISHABLE_KEY must be set when VINKIN_FINANCIAL_PROVIDER=stripe_sandbox — ' +
+          'clients need it to collect card details directly with Stripe (§35)',
+      );
+    }
+    if (!env.STRIPE_PUBLISHABLE_KEY.startsWith('pk_test_')) {
+      throw new Error(
+        'STRIPE_PUBLISHABLE_KEY must be a test-mode key (pk_test_...) — D46 sandbox-only ' +
+          'guarantee applies to the publishable key too, not just the secret key',
+      );
+    }
   }
   return env;
 }

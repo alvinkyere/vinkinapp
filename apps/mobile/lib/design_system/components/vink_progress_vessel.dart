@@ -383,11 +383,13 @@ String organizerWaitingClause({
   required int totalAmountMinor,
   required List<String> unconfirmedNames,
 }) {
-  if (confirmedAmountMinor >= totalAmountMinor && totalAmountMinor > 0)
+  if (confirmedAmountMinor >= totalAmountMinor && totalAmountMinor > 0) {
     return "Everyone's ready";
+  }
   if (unconfirmedNames.isEmpty) return 'Waiting for everyone';
-  if (unconfirmedNames.length == 1)
+  if (unconfirmedNames.length == 1) {
     return 'Waiting for ${unconfirmedNames.first}';
+  }
   if (unconfirmedNames.length == 2) {
     return 'Waiting for ${unconfirmedNames[0]} and ${unconfirmedNames[1]}';
   }
@@ -404,8 +406,9 @@ String participantSafeWaitingClause({
   required int confirmedParticipantCount,
   required int totalParticipantCount,
 }) {
-  if (confirmedAmountMinor >= totalAmountMinor && totalAmountMinor > 0)
+  if (confirmedAmountMinor >= totalAmountMinor && totalAmountMinor > 0) {
     return "Everyone's ready";
+  }
   final remaining = totalParticipantCount - confirmedParticipantCount;
   if (confirmedParticipantCount == 0) return 'Waiting for everyone';
   if (remaining <= 0) return "Everyone's ready";

@@ -15,10 +15,14 @@ import { ZodError } from 'zod';
 import type { Env } from './config/env.ts';
 import type { Sql } from './db/client.ts';
 import { registerHealthRoutes, type HealthChecks } from './modules/health/routes.ts';
+import { registerPaymentMethodRoutes } from './modules/payment-methods/routes.ts';
 import { registerAuthRoutes, type AuthRateLimits } from './modules/auth/routes.ts';
 import { registerVinkRoutes } from './modules/vinks/routes.ts';
 import { registerSharingRoutes, type PublicRateLimits } from './modules/sharing/routes.ts';
-import { registerContributionRoutes } from './modules/contributions/routes.ts';
+import {
+  registerContributionRoutes,
+  processContributionPaymentEvent,
+} from './modules/contributions/routes.ts';
 import { registerPurchaseRoutes } from './modules/purchases/routes.ts';
 import { registerRecoveryRoutes } from './modules/recovery/routes.ts';
 import { registerRealtimeRoutes } from './modules/realtime/routes.ts';
@@ -241,6 +245,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   registerHealthRoutes(app, { checkDb: deps.checkDb, checkRedis: deps.checkRedis });
+  // RM4C-B: no DB dependency (pure function of env) — registered unconditionally, same as
+  // health routes, so it works even in the provider-less/DB-less test app shape.
+  registerPaymentMethodRoutes(app, deps.env);
   if (deps.sql !== null) {
     registerAuthRoutes(
       app,
@@ -269,7 +276,24 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       metrics,
     );
     for (const webhookConfig of deps.webhookRoutes ?? []) {
-      registerWebhookRoutes(app, deps.sql, webhookConfig, metrics);
+      // Captured locally: TS narrowing on `deps.sql !== null` above doesn't survive into the
+      // closure passed below.
+      const sql = deps.sql;
+      const commandProvider = deps.provider;
+      registerWebhookRoutes(
+        app,
+        sql,
+        webhookConfig,
+        metrics,
+        // RM4C (D49): re-enters the contribution engine (via the ALREADY-hardened
+        // `resolveContributionCommand`, never a new resolver) only when a real
+        // command-execution provider is wired in — `deps.provider` is undefined in the
+        // provider-less test/health-only app shape some existing tests build.
+        commandProvider !== undefined
+          ? (event, request) =>
+              processContributionPaymentEvent(sql, commandProvider, event, request.log, metrics)
+          : undefined,
+      );
     }
     registerReconciliationOpsRoutes(
       app,

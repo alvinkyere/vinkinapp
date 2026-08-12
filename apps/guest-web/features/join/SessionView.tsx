@@ -17,6 +17,7 @@ import { StatusBadge } from '../../components/StatusBadge';
 import { ProgressBar } from '../../components/ProgressBar';
 import { SimulationBanner } from '../../components/SimulationBanner';
 import { SignupConversion } from '../../components/SignupConversion';
+import { PaymentPanel } from './PaymentPanel';
 import { useGuestRealtime } from './use-guest-realtime';
 import type { GuestVinkView } from '../../lib/types';
 
@@ -56,6 +57,17 @@ export function SessionView({
   // success. Flag-on path never reads this — it reads `view.participant.contributionStatus`,
   // the server truth, instead.
   const [hasAuthorizedLocally, setHasAuthorizedLocally] = useState(false);
+  // RM4C-C: a REAL bug this milestone's own manual browser verification caught — creating a
+  // hosted-collection payment session transitions the contribution to AUTHORIZATION_PENDING
+  // (server truth) the instant it's created, which the realtime subscription below delivers
+  // almost immediately. `contributionStatus` maps that to 'processing', which used to
+  // legitimately mean "nothing more for the user to do" (the old, argument-free authorize
+  // flow) — but for RM4C-C it means "the user is still typing their card number," and without
+  // this flag the live update unmounts the card-entry form (and its real Stripe Elements
+  // iframe) out from under the guest before they can ever finish paying. Set the instant
+  // `PaymentPanel` creates a session, cleared only on reload (matches the existing
+  // reload-safety precedent — a reload can't recover a half-typed card either way).
+  const [paymentInProgress, setPaymentInProgress] = useState(false);
 
   // Idempotent server-side guarantee (D-established): if this guest already authorized in
   // a prior session (e.g. after a reload), a second click just confirms the same outcome
@@ -90,10 +102,18 @@ export function SessionView({
     return (
       <SessionViewV2
         view={view}
+        guestToken={guestToken}
         showSimulationBanner={showSimulationBanner}
         contributing={mutation.isPending}
         contributionError={mutation.isError ? humanErrorMessage(mutation.error) : null}
         onContribute={() => mutation.mutate()}
+        paymentInProgress={paymentInProgress}
+        onSessionStarted={() => setPaymentInProgress(true)}
+        // RM4C-C: the client never marks a contribution paid itself — this just nudges an
+        // immediate refetch after Stripe confirms client-side; the realtime subscription
+        // above (already fed by the same outbox/webhook pipeline every other transition
+        // uses) is what actually reflects the authoritative, webhook-resolved state.
+        onProcessing={() => void refetch()}
       />
     );
   }
@@ -186,23 +206,35 @@ export function SessionView({
  */
 function SessionViewV2({
   view,
+  guestToken,
   showSimulationBanner,
   contributing,
   contributionError,
   onContribute,
+  onProcessing,
+  paymentInProgress,
+  onSessionStarted,
 }: {
   view: GuestVinkView;
+  guestToken: string;
   showSimulationBanner: boolean;
   contributing: boolean;
   contributionError: string | null;
   onContribute: () => void;
+  onProcessing: () => void;
+  paymentInProgress: boolean;
+  onSessionStarted: () => void;
 }) {
   const { vink, participant } = view;
   const canContribute =
     vink.state === 'OPEN' &&
     participant.allocatedAmountMinor > 0 &&
     (participant.contributionStatus === 'not_started' ||
-      participant.contributionStatus === 'declined_retryable');
+      participant.contributionStatus === 'declined_retryable' ||
+      // RM4C-C: keep the card-entry panel mounted through the window between "session
+      // created" and "Stripe confirms" — see `paymentInProgress`'s own doc comment at its
+      // declaration site (SessionView) for the real bug this closes.
+      paymentInProgress);
   const isRecoveryRequired = participant.contributionStatus === 'recovery_required';
   // Slice I3A: none of these three resolve to a clean, celebratory "done" moment — a guest
   // whose own money is still being returned, was returned, or is tied up in an organizer
@@ -270,25 +302,35 @@ function SessionViewV2({
               The organizer hasn&apos;t assigned you a share yet.
             </p>
           ) : canContribute ? (
-            <>
-              {contributionError !== null ? (
-                // text-ink, not text-danger: explanatory error copy uses primary text (D36;
-                // docs/design/phase-8-visual-system-refinement.md §11).
-                <p role="alert" className="mt-3 text-sm text-ink">
-                  {contributionError}
-                </p>
-              ) : null}
-              <button
-                type="button"
-                onClick={onContribute}
-                disabled={contributing}
-                className="mt-4 w-full rounded-full bg-blue px-9 py-4 font-display text-sm font-bold tracking-wide text-white uppercase transition hover:bg-blue-deep disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {contributing
-                  ? 'Approving…'
-                  : `Approve ${formatMoney(participant.allocatedAmountMinor)}`}
-              </button>
-            </>
+            <div className="mt-4">
+              <PaymentPanel
+                guestToken={guestToken}
+                amountLabel={formatMoney(participant.allocatedAmountMinor)}
+                onProcessing={onProcessing}
+                onSessionStarted={onSessionStarted}
+                legacyButton={
+                  <>
+                    {contributionError !== null ? (
+                      // text-ink, not text-danger: explanatory error copy uses primary text
+                      // (D36; docs/design/phase-8-visual-system-refinement.md §11).
+                      <p role="alert" className="mb-3 text-sm text-ink">
+                        {contributionError}
+                      </p>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={onContribute}
+                      disabled={contributing}
+                      className="w-full rounded-full bg-blue px-9 py-4 font-display text-sm font-bold tracking-wide text-white uppercase transition hover:bg-blue-deep disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {contributing
+                        ? 'Approving…'
+                        : `Approve ${formatMoney(participant.allocatedAmountMinor)}`}
+                    </button>
+                  </>
+                }
+              />
+            </div>
           ) : (
             <p role="status" className="mt-3 text-sm font-medium text-blue">
               {contributionStatusSentence(

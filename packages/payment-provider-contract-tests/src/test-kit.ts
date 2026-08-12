@@ -33,6 +33,16 @@ export interface ProviderTestKit {
     providerPaymentId: string,
     outcome: 'AUTHORIZED' | 'DECLINED',
   ): void | Promise<void>;
+  /** RM4C — confirms a `createContributionPaymentIntent` result exactly the way the real
+   * client (Stripe Elements / PaymentSheet, or the mock's own equivalent) would, without a
+   * browser: 'ok' confirms with a valid test card, 'decline' with Stripe's own documented
+   * always-declines test card. Distinct from `resolvePendingAuthorization` (which resolves
+   * the OLD token-based `tok_pending` flow) since a client-secret-based intent has no
+   * pre-attached method to simply flip a status on. */
+  confirmContributionPaymentIntent?(
+    providerPaymentId: string,
+    behavior: 'ok' | 'decline',
+  ): void | Promise<void>;
   expireAuthorization?(providerPaymentId: string): void | Promise<void>;
   simulateTransientFailure?(): void; // next provider call fails BEFORE executing
   simulateLostResponse?(): void; // next provider call executes, then the response is lost

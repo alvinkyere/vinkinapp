@@ -8,6 +8,75 @@ contract.
 
 ---
 
+## D49 — RM4C: realistic payment selection, a global (not per-command) Stripe-sandbox provider switch, and a narrow provider-import-guard exception for Stripe's client-only SDKs
+
+- **Decision:** the owner supplied an RM4C brief ("realistic payment selection and Stripe
+  sandbox checkout") requiring the organizer mobile app and guest web to present real payment-
+  method options and complete at least Debit/credit card through a genuinely functional Stripe
+  sandbox flow, without exposing "Pay with Stripe" as a consumer method and without coupling the
+  UI directly to the Stripe SDK. Three sub-decisions, each disclosed and confirmed before
+  implementation (per §9):
+  1. **Provider selection is a single global switch, not per-command routing.** A new
+     `VINKIN_FINANCIAL_PROVIDER` env var (`mock` default, `stripe_sandbox` opt-in) selects the
+     ONE `FinancialProvider` instance `apps/api/src/server.ts` passes to every command —
+     contributions, card-pool, purchases alike — matching the one documented model
+     (`docs/product-validation/master-plan.md`: "only the provider adapter changes after
+     provider selection"). The real, disclosed trade-off: in `stripe_sandbox` mode, RM2/RM3B's
+     card-pool/wallet-provisioning commands will visibly throw `NOT_SUPPORTED`, since the real
+     Stripe adapter honestly declares `walletProvisioning: false` (unchanged pre-existing gap,
+     blocked on Stripe's own Financial Account v2 wall, ENG6's own finding) — never silently
+     emulated (§9, §21, D7). The alternative (two live provider instances, one for
+     contributions and one for card-pool) was considered and rejected — a genuinely new
+     architecture pattern with no precedent anywhere in this codebase, for a milestone whose
+     own scope is participant payment collection, not organizer card issuance.
+  2. **`packages/payment-provider-contract-tests`' `confirmContributionPaymentIntent` hook**
+     lets both `MockFinancialProvider` and the real Stripe sandbox adapter prove the new
+     client-secret-based hosted-collection method (`createContributionPaymentIntent`) through
+     the same conformance suite (D7) — Stripe's own documented test PaymentMethod IDs
+     (`pm_card_visa`, `pm_card_visa_chargeDeclined`) confirm a real sandbox PaymentIntent
+     server-side, the same technique Stripe's own docs recommend for backend testing.
+  3. **`tooling/scripts/check-provider-imports.mjs`'s `@stripe` scope block gained a narrow,
+     explicit allowlist** for `@stripe/stripe-js` and `@stripe/react-stripe-js` — browser-only
+     client SDKs that never hold a secret key and cannot move money by themselves (real card
+     collection happens entirely inside Stripe's own hosted iframe, using only the public
+     `STRIPE_PUBLISHABLE_KEY`). The guard's original purpose (D7/§42/§43: keep the
+     secret-key-bearing server SDK out of anywhere but the approved adapter directories) is
+     unaffected; blocking the client SDKs too would have made RM4C's own explicit requirement
+     ("use Stripe's supported client-side payment components") structurally impossible to
+     satisfy, since that SDK is deliberately designed to be imported straight into the UI
+     component rendering the card form.
+- **New architecture, not previously documented:** a verified provider webhook re-enters the
+  contribution engine through the EXISTING, SH1-hardened `resolveContributionCommand` (E5's
+  own stuck-pending recovery resolver) — never a new, competing resolver. A new
+  `processContributionPaymentEvent` (`apps/api/src/modules/contributions/routes.ts`) looks up
+  the contribution by `provider_reference` after a webhook is durably stored, and calls
+  `resolveContributionCommand` with `requester: undefined` (trusted internal caller, exactly
+  matching `jobs/sweeps.ts`'s own precedent). This preserves D5 (one resolver decides
+  FUNDING_CONFIRMED/FUNDING_FAILED) and D15 (provider calls inside the unit of work, unchanged)
+  — the webhook is a TRIGGER to re-check real provider truth via `retrievePaymentStatus`, never
+  itself trusted as the outcome, which is what makes "a client callback without a successful
+  webhook never marks the contribution paid" true by construction, proven by a dedicated
+  integration test (`apps/api/src/rm4c-payment-session.integration.test.ts`).
+- **Date:** 2026-08-03
+- **Status:** ACCEPTED — sub-decision 1 confirmed via `AskUserQuestion` before implementation
+  (owner chose "global flag, default off" over per-flow provider routing); sub-decisions 2/3
+  are engineering-scoped extensions of already-ratified D7 discipline, disclosed here rather
+  than made silently.
+- **Reason:** see brief summary above — RM4C's own text explicitly requires a genuinely
+  functional Stripe-sandbox card flow from both clients while keeping mock mode fully
+  supported and the provider boundary intact.
+- **Affected modules:** `packages/payment-provider` (types/interface/mock),
+  `packages/providers` (Stripe adapter, contract test), `packages/payment-provider-contract-tests`,
+  `packages/application` (`contributions.ts`'s new `createContributionPaymentSessionCommand`,
+  new `payment-methods.ts`), `apps/api` (`config/env.ts`, `server.ts`, `app.ts`,
+  `modules/contributions/routes.ts`, `modules/webhooks/routes.ts`, new
+  `modules/payment-methods/routes.ts`), `apps/guest-web` (new Stripe Elements payment UI),
+  `apps/mobile` (new `flutter_stripe` PaymentSheet UI), `tooling/scripts/check-provider-imports.mjs`.
+- **Revisit trigger:** Stripe's Financial Account v2 wall clearing (would let `walletProvisioning`
+  become `true` on the real adapter, removing sub-decision 1's disclosed trade-off); a real
+  Apple Developer account or an approved Venmo/Cash App Pay adapter (RM4C-D/E's own disclosed
+  external blockers, unchanged by this decision).
+
 ## D48 — SH1 opens a new, repeatable Security-Hardening (`SH`-numbered) track, parallel to but distinct from the fixed ENG0–ENG15 sequence
 
 - **Decision:** the owner supplied a "Security Hardening Milestone (SH1)" brief — a

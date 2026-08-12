@@ -17,14 +17,13 @@ class ApiClient {
   // is the same pattern for "app-version enforcement" — a test supplies a fixed value instead
   // of the real `PackageInfo.fromPlatform()` platform-channel call.
   ApiClient({
-    required SecureTokenStore tokenStore,
+    required this._tokenStore,
     Dio? dio,
     Future<String>? appVersion,
   })
     // ignore: prefer_initializing_formals — `_tokenStore` is deliberately private while the
     // constructor parameter stays public (`tokenStore`) for a readable call site elsewhere.
-    : _tokenStore = tokenStore,
-       _appVersion =
+    : _appVersion =
            appVersion ??
            PackageInfo.fromPlatform().then((info) => info.version),
        _dio =

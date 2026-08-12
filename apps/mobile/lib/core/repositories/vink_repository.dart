@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_controller.dart';
 import '../models/activity_entry.dart';
+import '../models/payment_method.dart';
 import '../models/pending_invite.dart';
 import '../models/vink.dart';
 import '../networking/api_client.dart';
@@ -129,6 +130,27 @@ class VinkRepository {
   /// [CancelToken] parameter, for the same reason as [cancelVink] above.
   Future<void> authorizeContribution(String vinkId) =>
       _client.post('/api/v1/vinks/$vinkId/contributions/authorize');
+
+  /// `GET /api/v1/payment-methods` — RM4C-B. Public, unauthenticated, static configuration
+  /// (a Stripe publishable key is designed to be embedded client-side; the method list is
+  /// server-driven availability, never guessed here).
+  Future<PaymentModeInfo> getPaymentMethods({CancelToken? cancelToken}) async {
+    final response = await _client.get(
+      '/api/v1/payment-methods',
+      cancelToken: cancelToken,
+    );
+    return PaymentModeInfo.fromJson(response);
+  }
+
+  /// `POST /api/v1/vinks/:vinkId/contributions/payment-session` — RM4C-C. Real hosted card
+  /// collection: no payment method is sent here (there is none yet); the client collects the
+  /// card directly with Stripe's own PaymentSheet using the returned client secret.
+  Future<PaymentSessionResult> createContributionPaymentSession(String vinkId) async {
+    final response = await _client.post(
+      '/api/v1/vinks/$vinkId/contributions/payment-session',
+    );
+    return PaymentSessionResult.fromJson(response);
+  }
 
   /// `GET /api/v1/invites` — Invites feature (D44). Newest-invited-first.
   Future<List<PendingInvite>> listMyInvites({CancelToken? cancelToken}) async {

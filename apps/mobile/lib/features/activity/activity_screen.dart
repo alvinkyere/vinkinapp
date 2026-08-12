@@ -97,8 +97,9 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
                         ),
                       ),
                     );
-                    if (selected != null && mounted)
+                    if (selected != null && mounted) {
                       setState(() => _filter = selected);
+                    }
                   },
                 ),
               ]

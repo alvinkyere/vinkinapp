@@ -7,6 +7,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   ApplicationError,
@@ -121,6 +122,48 @@ export function registerPurchaseRoutes(
           spendingLimitMinor: card.spendingLimit.amountMinor,
         },
       };
+    });
+  });
+
+  // Dev/demo-only: create real mock-provider cards and add them to the RM1/RM2 card pool,
+  // in the disabled "resting" state `reserveCardFromPoolCommand` expects (mirrors the exact
+  // sequence `card-pool.integration.test.ts`'s own `seedRealCard()` fixture uses). Exists
+  // because the pool has no other seeding path — `apps/api/src/seed.ts` only seeds users, and
+  // a raw `INSERT INTO cards` would reference a `provider_card_id` this process's in-memory
+  // mock provider has never issued, so `enableCardCommand` would throw NOT_FOUND on the very
+  // first FUNDED vink. Mock-provider-only: a real provider's cards come from its own real
+  // issuing flow, not this route.
+  app.post('/internal/simulator/card-pool/seed', async (request, reply) => {
+    if ((await requireOperator(request, reply, env)) === null) return;
+    if (!(provider instanceof MockFinancialProvider)) {
+      return reply
+        .code(422)
+        .send({ error: 'NOT_SUPPORTED', message: 'card-pool seeding is mock-provider-only' });
+    }
+    const body = z
+      .object({ count: z.number().int().min(1).max(20).default(1) })
+      .parse(request.body ?? {});
+    return handle(reply, 201, async () => {
+      const seeded: Array<{ id: string; displayLastFour: string }> = [];
+      for (let i = 0; i < body.count; i++) {
+        const { providerCardholderId } = await provider.createCardholder({
+          idempotencyKey: `cardholder:seed:${randomUUID()}`,
+          externalAccountId: 'vinkin-financial-account',
+          legalName: 'VinkIn Inc',
+        });
+        const issued = await provider.issueTemporaryCard({
+          idempotencyKey: `issue:seed:${randomUUID()}`,
+          providerCardholderId,
+          spendLimit: { amountMinor: 100_000, currency: 'USD' },
+          metadata: {},
+        });
+        await provider.disableCard(issued.providerCardId);
+        const id = randomUUID();
+        await sql`INSERT INTO cards (id, provider_card_id, display_last_four, status)
+          VALUES (${id}, ${issued.providerCardId}, '4242', 'AVAILABLE')`;
+        seeded.push({ id, displayLastFour: '4242' });
+      }
+      return { seeded };
     });
   });
 

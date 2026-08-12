@@ -35,6 +35,24 @@ const PROHIBITED_SCOPES = [
   '@square',
 ];
 
+/**
+ * RM4C (D49) — a narrow, explicit exception to the `@stripe` scope block above, added when
+ * this milestone needed real Stripe Elements/PaymentSheet in the client apps for the first
+ * time. This guard's original purpose (D7/§42/§43) is keeping the server-side, secret-key-
+ * bearing `stripe` SDK — the thing that can actually move money — out of anywhere but the
+ * approved adapter directories. `@stripe/stripe-js` and `@stripe/react-stripe-js` are a
+ * structurally different kind of package: browser-only, never configured with a secret key,
+ * and incapable of authorizing or capturing a payment by themselves — real card collection
+ * happens entirely inside Stripe's own hosted iframe, using only the public, non-secret
+ * publishable key (`STRIPE_PUBLISHABLE_KEY`, itself gated by env.ts's own D46 test-mode-only
+ * guard). Blocking them here would make it structurally impossible to ever build what RM4C's
+ * own brief explicitly requires ("Use Stripe's supported client-side payment components"),
+ * since Stripe's SDK is deliberately designed to be imported straight into the UI component
+ * that renders the card form — there is no other supported integration shape. Flagged in the
+ * RM4C milestone report, not a silent change to this security guard's behavior.
+ */
+const ALLOWED_CLIENT_SDK_PACKAGES = new Set(['@stripe/stripe-js', '@stripe/react-stripe-js']);
+
 /** The only directories where a provider SDK import may ever appear (post-M0-gate). */
 const APPROVED_ADAPTER_DIRS = [
   join('packages', 'payment-provider', 'src', 'adapters'),
@@ -53,7 +71,15 @@ const SPECIFIER_PATTERNS = [
   /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
 ];
 
+function packageNameOf(specifier) {
+  // Scoped packages (`@stripe/stripe-js/pure`) keep their first TWO path segments as the
+  // package name; unscoped packages (`stripe/webhooks`) keep only the first.
+  const segments = specifier.split('/');
+  return specifier.startsWith('@') ? segments.slice(0, 2).join('/') : segments[0];
+}
+
 function isProhibited(specifier) {
+  if (ALLOWED_CLIENT_SDK_PACKAGES.has(packageNameOf(specifier))) return false;
   const scope = specifier.startsWith('@') ? specifier.split('/', 1)[0] : null;
   if (scope !== null) return PROHIBITED_SCOPES.includes(scope);
   const base = specifier.split('/', 1)[0];
