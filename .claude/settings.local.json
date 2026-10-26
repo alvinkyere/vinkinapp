@@ -273,7 +273,13 @@
       "Bash(node scripts/compose-screenshots.mjs)",
       "Bash(kill -9 27065)",
       "Bash(kill -9 77754 56879)",
-      "Bash(grep -viE 'test|\\\\.md$')"
+      "Bash(grep -viE 'test|\\\\.md$')",
+      "Bash(lsof -iTCP -sTCP:LISTEN -P -n)",
+      "Bash(node -pe \"require\\('/private/tmp/claude-501/-Users-alvinkyere-code-vinkin/bef607ba-85e6-4265-944b-2e8f3a404f4f/scratchpad/op-login.json'\\).operatorToken\")",
+      "Bash(curl -s -X POST http://127.0.0.1:3000/internal/simulator/card-pool/seed -H 'authorization: Bearer __CMDSUB_OUTPUT__' -H 'content-type: application/json' -d '{\"count\": 3}')",
+      "Bash(psql *)",
+      "Bash(open -a Simulator)",
+      "Bash(flutter run *)"
     ],
     "additionalDirectories": [
       "/Users/alvinkyere870gmail.com/Downloads/Vinkin - v1/docs",
